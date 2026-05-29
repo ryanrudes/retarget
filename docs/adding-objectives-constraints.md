@@ -94,6 +94,18 @@ class EnergyObjective:
 
 Then include `ObjectiveSpec(name="energy", weight=0.1)` in a `RetargetingProblem`. The registry stores an instance of the decorated class and validates that it implements the objective protocol. Constraint terms return `ConstraintContribution` with optional joint-increment bounds, a trust radius, and linear constraints.
 
+For CLI run specs, list extension modules explicitly so they load before registry preflight:
+
+```toml
+imports = ["custom_terms.py", "my_lab.retarget_terms"]
+
+[[objectives]]
+name = "energy"
+weight = 0.1
+```
+
+Entries may be dotted module names or `.py` paths relative to the config file.
+
 For new solvers, register a factory that accepts `SolverSpec`:
 
 ```python

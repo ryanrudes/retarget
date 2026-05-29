@@ -43,6 +43,63 @@ constraints:
     assert problem.scene.ground_size == 3
 
 
+def test_run_config_resolves_relative_import_paths(tmp_path):
+    config_path = tmp_path / "run.toml"
+    config_path.write_text(
+        """
+motion = "motion.json"
+format = "minimal"
+robot = "synthetic_humanoid"
+output = "result.npz"
+imports = ["extensions/custom_terms.py", "retarget.motion"]
+""".strip()
+    )
+
+    config = RetargetingRunConfig.load(config_path)
+
+    assert config.imports == (str(tmp_path / "extensions" / "custom_terms.py"), "retarget.motion")
+
+
+def test_run_config_imports_dotted_extensions_before_registry_preflight(tmp_path, monkeypatch):
+    package_dir = tmp_path / "unit_plugin"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text(
+        """
+from dataclasses import dataclass
+
+import numpy as np
+
+from retarget.optimization import ObjectiveContribution, ObjectiveSpec, TermContext, objective_terms
+
+
+@objective_terms.register("unit_plugin_energy", replace=True)
+@dataclass(frozen=True)
+class UnitPluginEnergy:
+    name: str = "unit_plugin_energy"
+
+    def describe(self) -> str:
+        return "A unit-test extension objective."
+
+    def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        return (
+            ObjectiveContribution(
+                matrix=np.eye(context.dof, dtype=np.float64),
+                target=np.zeros(context.dof, dtype=np.float64),
+            ),
+        )
+""".strip()
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    config = RetargetingRunConfig(
+        motion=tmp_path / "missing_motion.json",
+        output=tmp_path / "result.npz",
+        imports=("unit_plugin",),
+        objectives=(ObjectiveSpec(name="unit_plugin_energy"),),
+    )
+
+    config.validate_registry_references()
+
+
 def test_run_config_loads_robot_from_file_provider(tmp_path):
     shutil.copyfile("tests/fixtures/minimal_motion.json", tmp_path / "motion.json")
     (tmp_path / "robot.toml").write_text(

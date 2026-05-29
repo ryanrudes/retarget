@@ -449,7 +449,7 @@ def _run_from_config(config: RetargetingRunConfig) -> RetargetingResult:
 def _problem_from_config(config: RetargetingRunConfig) -> RetargetingProblem:
     try:
         return config.build_problem()
-    except (KeyError, ValueError, FileNotFoundError) as exc:
+    except (ImportError, KeyError, ValueError, FileNotFoundError) as exc:
         raise typer.BadParameter(_exception_message(exc)) from exc
 
 

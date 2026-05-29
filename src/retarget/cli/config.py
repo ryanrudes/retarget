@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import importlib
+import importlib.util
 import json
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Self
@@ -123,6 +127,7 @@ class RetargetingRunConfig(BaseModel):
     robot_options: dict[str, Any] = Field(default_factory=dict)
     task_kind: TaskKind = TaskKind.ROBOT_ONLY
     output: Path
+    imports: tuple[str, ...] = ()
     scale_to_robot: bool = True
     output_fps: float | None = None
     joint_mapping: dict[str, str] | None = None
@@ -137,6 +142,15 @@ class RetargetingRunConfig(BaseModel):
     @classmethod
     def _coerce_path(cls, value: Any) -> Path:
         return Path(value)
+
+    @field_validator("imports", mode="before")
+    @classmethod
+    def _coerce_imports(cls, value: Any) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        return tuple(str(item) for item in value)
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
@@ -154,6 +168,7 @@ class RetargetingRunConfig(BaseModel):
             update={
                 "motion": _resolve_relative(self.motion, base_dir),
                 "output": _resolve_relative(self.output, base_dir),
+                "imports": _resolve_import_refs(self.imports, base_dir),
                 "robot_options": _resolve_robot_options(self.robot_options, base_dir),
                 "scene": self.scene.resolve_paths(base_dir),
             }
@@ -214,9 +229,16 @@ class RetargetingRunConfig(BaseModel):
             metadata=self.metadata,
         )
 
+    def import_extensions(self) -> None:
+        """Import explicitly configured extension modules."""
+
+        for reference in self.imports:
+            _import_extension(reference)
+
     def validate_registry_references(self) -> None:
         """Validate named extension references before loading files or assets."""
 
+        self.import_extensions()
         messages: list[str] = []
         _append_missing_registry_messages(messages, motion_formats, (self.format_name,))
         _append_missing_registry_messages(messages, robot_providers, (self.robot_provider,))
@@ -283,6 +305,52 @@ def _resolve_relative(path: Path | None, base_dir: Path) -> Path | None:
     if path is None or path.is_absolute():
         return path
     return (base_dir / path).resolve()
+
+
+def _resolve_import_refs(references: tuple[str, ...], base_dir: Path) -> tuple[str, ...]:
+    resolved: list[str] = []
+    for reference in references:
+        if _is_path_like_import(reference):
+            path = Path(reference)
+            resolved.append(str(path if path.is_absolute() else (base_dir / path).resolve()))
+        else:
+            resolved.append(reference)
+    return tuple(resolved)
+
+
+def _is_path_like_import(reference: str) -> bool:
+    return reference.endswith(".py") or "/" in reference or "\\" in reference
+
+
+def _import_extension(reference: str) -> None:
+    if not _is_path_like_import(reference):
+        importlib.import_module(reference)
+        return
+
+    path = Path(reference)
+    if path.suffix != ".py":
+        raise ValueError(f"Extension import path {reference!r} must point to a .py file")
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    module_name = _module_name_for_path(path)
+    if module_name in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load extension module from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+
+
+def _module_name_for_path(path: Path) -> str:
+    digest = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
+    return f"_retarget_plugin_{digest}"
 
 
 def _append_missing_registry_messages(messages: list[str], registry: Registry[Any], keys: tuple[str, ...]) -> None:

@@ -111,6 +111,66 @@ weight = 0.1
     assert "optimization_cost" in report_data["metrics"]
 
 
+def test_cli_run_imports_local_extension_from_config(tmp_path):
+    motion = tmp_path / "motion.json"
+    shutil.copyfile("tests/fixtures/minimal_motion.json", motion)
+    (tmp_path / "custom_terms.py").write_text(
+        """
+from dataclasses import dataclass
+
+import numpy as np
+
+from retarget.optimization import ObjectiveContribution, ObjectiveSpec, TermContext, objective_terms
+
+
+@objective_terms.register("cli_zero_energy", replace=True)
+@dataclass(frozen=True)
+class CliZeroEnergy:
+    name: str = "cli_zero_energy"
+
+    def describe(self) -> str:
+        return "A CLI-loaded objective."
+
+    def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        return (
+            ObjectiveContribution(
+                matrix=np.eye(context.dof, dtype=np.float64),
+                target=np.zeros(context.dof, dtype=np.float64),
+            ),
+        )
+""".strip()
+    )
+    config = tmp_path / "run.toml"
+    config.write_text(
+        """
+name = "imported_objective"
+imports = ["custom_terms.py"]
+motion = "motion.json"
+format = "minimal"
+robot = "synthetic_humanoid"
+task_kind = "robot_only"
+output = "imported.npz"
+
+[solver]
+max_iterations = 1
+
+[[objectives]]
+name = "cli_zero_energy"
+weight = 0.01
+""".strip()
+    )
+    result = tmp_path / "imported.npz"
+
+    run_cli("run", "--config", str(config))
+
+    assert result.exists()
+    result_data = np.load(result, allow_pickle=False)
+    result_metadata = json.loads(result_data["metadata_json"].reshape(()).item())
+    assert [objective["name"] for objective in result_metadata["provenance"]["objectives"]] == [
+        "cli_zero_energy"
+    ]
+
+
 def test_cli_run_reports_registry_preflight_errors_without_traceback(tmp_path):
     motion = tmp_path / "motion.json"
     shutil.copyfile("tests/fixtures/minimal_motion.json", motion)

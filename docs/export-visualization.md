@@ -2,6 +2,8 @@
 
 Exporters convert `RetargetingResult` objects into downstream experiment formats. The built-in `mujoco_npz` exporter writes MuJoCo-style qpos/qvel tracking arrays while preserving compatibility keys used by simple tracking scripts. Saved tracking NPZ files include `schema_version` and `metadata_json` keys so experiment metadata can be inspected without loading object arrays.
 
+Tracking metadata records `source_fps`, `output_fps`, source/exported frame counts, duration, whether the result was resampled, the qpos/qvel dimensions, and the qvel scheme. Qvel uses `first_frame_forward_difference_then_previous_interval`: frame 0 stores a forward difference to frame 1 when available, and later frames store the velocity from the previous qpos to the current qpos. Backend-aware exports use the same timing convention through `KinematicsBackend.qpos_to_qvel`.
+
 ```bash
 retarget export --result result.npz --output tracking.npz --format mujoco_npz --output-fps 50
 ```

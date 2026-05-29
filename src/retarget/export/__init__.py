@@ -1,6 +1,7 @@
 """Export utilities."""
 
 from retarget.export.mujoco import (
+    QVEL_SCHEME,
     MuJoCoTrackingData,
     MuJoCoTrackingExporter,
     build_mujoco_tracking_data,
@@ -11,6 +12,7 @@ from retarget.export.registry import exporters
 from retarget.export.spec import ExportResult, ExportSpec
 
 __all__ = [
+    "QVEL_SCHEME",
     "ExportResult",
     "ExportSpec",
     "MuJoCoTrackingData",

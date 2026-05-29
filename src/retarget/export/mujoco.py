@@ -15,6 +15,8 @@ from retarget.export.registry import exporters
 from retarget.export.spec import ExportResult, ExportSpec
 from retarget.results.spec import RetargetingResult
 
+QVEL_SCHEME = "first_frame_forward_difference_then_previous_interval"
+
 
 class MuJoCoTrackingData(BaseModel):
     """Qpos/qvel tracking arrays ready for downstream MuJoCo experiments."""
@@ -50,6 +52,12 @@ class MuJoCoTrackingData(BaseModel):
         """Number of tracking frames."""
 
         return int(self.qpos.shape[0])
+
+    @property
+    def duration_s(self) -> float:
+        """Time between the first and last tracking sample."""
+
+        return float(self.time_s[-1]) if self.frame_count else 0.0
 
     @model_validator(mode="after")
     def _validate_lengths(self) -> MuJoCoTrackingData:
@@ -133,6 +141,7 @@ def build_mujoco_tracking_data(
         qvel = _kinematics_qvel(qpos, fps, kinematics_backend)
         qvel_source = type(kinematics_backend).__name__
     time_s = np.arange(qpos.shape[0], dtype=np.float64) / fps
+    duration_s = float(time_s[-1]) if len(time_s) else 0.0
     return MuJoCoTrackingData(
         source_name=result.name,
         qpos=qpos,
@@ -142,6 +151,13 @@ def build_mujoco_tracking_data(
         metadata={
             "result_status": result.status.value,
             "qvel_source": qvel_source,
+            "qvel_scheme": QVEL_SCHEME,
+            "source_fps": result.fps,
+            "output_fps": float(fps),
+            "source_frame_count": result.frame_count,
+            "frame_count": int(qpos.shape[0]),
+            "duration_s": duration_s,
+            "resampled": not np.isclose(fps, result.fps),
             "qpos_dimension": qpos.shape[1],
             "qvel_dimension": qvel.shape[1],
             **(metadata or {}),
@@ -168,10 +184,10 @@ def export_tracking_npz(result: RetargetingResult, output_path: str | Path, *, o
 def _finite_difference_qvel(qpos: np.ndarray, fps: float) -> np.ndarray:
     if qpos.shape[0] <= 1:
         return np.zeros_like(qpos)
-    if qpos.shape[0] == 2:
-        velocity = np.diff(qpos, axis=0) * fps
-        return np.vstack([velocity, velocity[-1:]])
-    return np.asarray(np.gradient(qpos, 1.0 / fps, axis=0), dtype=np.float64)
+    qvel = np.zeros_like(qpos, dtype=np.float64)
+    qvel[0] = (qpos[1] - qpos[0]) * fps
+    qvel[1:] = np.diff(qpos, axis=0) * fps
+    return qvel
 
 
 def _kinematics_qvel(qpos: np.ndarray, fps: float, backend: KinematicsBackend) -> np.ndarray:

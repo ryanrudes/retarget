@@ -4,6 +4,7 @@ import numpy as np
 
 from retarget.core.enums import RunStatus
 from retarget.export import (
+    QVEL_SCHEME,
     ExportResult,
     ExportSpec,
     build_mujoco_tracking_data,
@@ -34,9 +35,33 @@ def test_mujoco_tracking_export_resamples_and_saves_npz(tmp_path):
     assert np.array_equal(data["joint_pos"], data["qpos"])
     assert np.array_equal(data["joint_vel"], data["qvel"])
     assert int(np.asarray(data["schema_version"]).reshape(())) == 1
-    metadata = json.loads(str(np.asarray(data["metadata_json"]).reshape(())))
+    no_pickle_data = np.load(path, allow_pickle=False)
+    metadata = json.loads(no_pickle_data["metadata_json"].reshape(()).item())
     assert metadata["result_status"] == "success"
+    assert metadata["qvel_scheme"] == QVEL_SCHEME
+    assert metadata["source_fps"] == 2.0
+    assert metadata["output_fps"] == 4.0
+    assert metadata["source_frame_count"] == 2
+    assert metadata["frame_count"] == 3
+    assert metadata["duration_s"] == 0.5
+    assert metadata["resampled"] is True
     assert metadata["qpos_dimension"] == 2
+
+
+def test_mujoco_tracking_finite_difference_uses_previous_interval_scheme():
+    result = RetargetingResult(
+        name="nonlinear",
+        status=RunStatus.SUCCESS,
+        qpos=np.array([[0.0], [1.0], [3.0]], dtype=np.float64),
+        fps=1.0,
+    )
+
+    tracking = build_mujoco_tracking_data(result)
+
+    assert np.array_equal(tracking.qvel, np.array([[1.0], [1.0], [2.0]], dtype=np.float64))
+    assert tracking.metadata["qvel_scheme"] == QVEL_SCHEME
+    assert tracking.metadata["duration_s"] == 2.0
+    assert tracking.duration_s == 2.0
 
 
 def test_mujoco_tracking_single_frame_velocity_is_zero():
@@ -73,6 +98,9 @@ def test_mujoco_tracking_uses_backend_qvel_shape(tmp_path):
     assert data["qpos"].shape == (2, 3)
     assert data["qvel"].shape == (2, 2)
     assert np.allclose(data["qvel"], np.array([[10.0, 20.0], [10.0, 20.0]]))
+    metadata = json.loads(data["metadata_json"].reshape(()).item())
+    assert metadata["qvel_scheme"] == QVEL_SCHEME
+    assert metadata["source_fps"] == 10.0
 
 
 def test_backend_qvel_single_frame_uses_backend_dimension():

@@ -345,6 +345,28 @@ def test_result_npz_includes_versioned_json_metadata(tmp_path):
     assert loaded.warnings == ("check foot contacts",)
 
 
+def test_result_npz_legacy_object_metadata_requires_explicit_pickle(tmp_path):
+    path = tmp_path / "legacy_result.npz"
+    np.savez(
+        path,
+        schema_version=np.asarray(1),
+        name="legacy",
+        status="success",
+        qpos=np.zeros((1, 1), dtype=np.float64),
+        fps=np.asarray(30.0),
+        metadata=np.asarray({"robot": "legacy_bot"}, dtype=object),
+        warnings=np.asarray(("legacy warning",), dtype=object),
+    )
+
+    with pytest.raises(ValueError, match="allow_pickle=True"):
+        RetargetingResult.load_npz(path)
+
+    loaded = RetargetingResult.load_npz(path, allow_pickle=True)
+
+    assert loaded.metadata == {"robot": "legacy_bot"}
+    assert loaded.warnings == ("legacy warning",)
+
+
 def test_self_collision_constraint_uses_backend_distances():
     motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
     robot = robots.get("synthetic_humanoid")

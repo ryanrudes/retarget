@@ -135,10 +135,15 @@ class RetargetingResult(BaseModel):
         return output
 
     @classmethod
-    def load_npz(cls, path: str | Path) -> RetargetingResult:
-        """Load a `.npz` result."""
+    def load_npz(cls, path: str | Path, *, allow_pickle: bool = False) -> RetargetingResult:
+        """Load a `.npz` result.
 
-        data = np.load(path, allow_pickle=True)
+        Pickle loading is disabled by default. Modern result files include
+        `metadata_json` and `warnings_json`, so object-array compatibility keys
+        do not need to be read during normal loading.
+        """
+
+        data = np.load(path, allow_pickle=allow_pickle)
         metadata = _load_metadata(data)
         warnings = _load_warnings(data)
         return cls(
@@ -259,7 +264,7 @@ def _load_metadata(data: Any) -> dict[str, Any]:
             raise ValueError("metadata_json must contain a JSON object")
         return loaded
     if "metadata" in data:
-        loaded = data["metadata"].item()
+        loaded = _legacy_object_array(data, "metadata").item()
         if not isinstance(loaded, dict):
             raise ValueError("metadata must contain a mapping")
         return loaded
@@ -273,8 +278,20 @@ def _load_warnings(data: Any) -> tuple[str, ...]:
             raise ValueError("warnings_json must contain a JSON list")
         return tuple(str(value) for value in loaded)
     if "warnings" in data:
-        return tuple(str(v) for v in data["warnings"])
+        return tuple(str(v) for v in _legacy_object_array(data, "warnings"))
     return ()
+
+
+def _legacy_object_array(data: Any, key: str) -> np.ndarray:
+    try:
+        return np.asarray(data[key])
+    except ValueError as exc:
+        if "allow_pickle=False" in str(exc):
+            raise ValueError(
+                f"{key!r} uses legacy pickled object-array storage; "
+                "pass allow_pickle=True to RetargetingResult.load_npz only for trusted files"
+            ) from exc
+        raise
 
 
 def _json_default(value: Any) -> Any:

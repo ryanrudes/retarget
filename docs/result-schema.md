@@ -14,7 +14,7 @@ Use `RetargetingResult.resampled(fps)` when comparing or exporting runs on a com
 
 Evaluation aligns a supplied `RetargetingProblem` to the result time grid before computing contact and scene metrics. This keeps CLI reports correct when `retarget run --config ...` used `output_fps` and `retarget evaluate --config ...` later reloads the original run spec.
 
-Result metadata includes a `provenance` object with the run name, task kind, input/output FPS, scale policy, motion summary, robot summary, scene summary, interaction mesh topology, requested solver config, actual solver backend, per-frame solver statuses, objective specs, constraint specs, result dimensions, and user-supplied problem metadata. Saved NPZ files also keep legacy `metadata` and `warnings` object-array keys for compatibility, but readers should prefer the JSON keys when building analysis scripts or sharing results.
+Result metadata includes a `provenance` object with the run name, task kind, input/output FPS, scale policy, motion summary, robot summary, scene summary, interaction mesh topology, requested solver config, actual solver backend, per-frame solver statuses, objective specs, constraint specs, result dimensions, and user-supplied problem metadata. Saved NPZ files also keep legacy `metadata` and `warnings` object-array keys for compatibility, but `RetargetingResult.load_npz()` reads with `allow_pickle=False` by default and prefers the JSON keys. Pass `allow_pickle=True` only when loading trusted legacy files that do not contain JSON metadata.
 
 `EvaluationReport` stores:
 

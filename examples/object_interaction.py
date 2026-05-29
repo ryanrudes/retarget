@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from retarget import ConstraintSpec, ObjectSpec, ObjectTrajectory, Retargeter, RetargetingProblem, SceneSpec, TaskKind
+from retarget import (
+    ObjectSpec,
+    ObjectTrajectory,
+    OptimizationProfile,
+    Retargeter,
+    RetargetingProblem,
+    SceneSpec,
+    TaskKind,
+)
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
@@ -35,13 +43,10 @@ problem = RetargetingProblem(
     motion=motion,
     motion_format=fmt,
     scene=SceneSpec.object_interaction(object_spec),
-    constraints=(
-        ConstraintSpec(name="joint_limits"),
-        ConstraintSpec(name="trust_region"),
-        ConstraintSpec(
-            name="non_penetration",
-            parameters={"floor_z": -2.0, "scene_clearance": 0.03, "links": ("left_toe", "right_toe")},
-        ),
-    ),
+    constraints=OptimizationProfile.object_interaction(
+        floor_z=-2.0,
+        scene_clearance=0.03,
+        links=("left_toe", "right_toe"),
+    ).constraints,
 )
 Retargeter().run(problem).save_npz("object_interaction.npz")

@@ -17,6 +17,24 @@ Built-in constraint names:
 - `non_penetration`: floor and object/terrain sample-point clearance.
 - `self_collision`
 
+For research sweeps, compose objective and constraint sets as reusable profiles:
+
+```python
+from retarget import OptimizationProfile
+
+profile = (
+    OptimizationProfile.defaults(name="low_smoothness")
+    .with_objective("smoothness", weight=0.05)
+    .with_objective("nominal_tracking", weight=2.0)
+    .without_constraint("foot_contact")
+    .with_constraint("non_penetration", parameters={"scene_clearance": 0.03})
+)
+
+problem = problem.with_optimization_profile(profile)
+```
+
+`OptimizationProfile.object_interaction()` and `OptimizationProfile.climbing()` start from the default retargeting profile and add scene non-penetration. Profiles validate against the registered objective, constraint, and solver names with `profile.validate_registry_references()`.
+
 Collision-heavy constraints are intentionally backend-dependent. The fixture backend supports simple ground-style non-penetration and point-distance self-collision checks; MuJoCo-style object and self-collision distances live behind a collision-aware kinematics backend rather than leaking simulator objects into the high-level API.
 
 Self-collision constraints use `KinematicsBackend.collision_candidates()` and then linearize pair separation with `point_jacobians()`:

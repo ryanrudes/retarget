@@ -4,7 +4,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from retarget.optimization import ObjectiveContribution, ObjectiveSpec, TermContext, objective_terms
+from retarget.optimization import (
+    ObjectiveContribution,
+    ObjectiveSpec,
+    OptimizationProfile,
+    TermContext,
+    objective_terms,
+)
 
 
 @objective_terms.register("energy")
@@ -26,3 +32,5 @@ class EnergyObjective:
 
 
 print(objective_terms.get("energy").describe())
+profile = OptimizationProfile.defaults().with_objective("energy", weight=0.1)
+print(profile.objective_names)

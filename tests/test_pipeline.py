@@ -11,6 +11,7 @@ from retarget import (
     MeshTopology,
     ObjectSpec,
     ObjectTrajectory,
+    OptimizationProfile,
     Retargeter,
     RetargetingProblem,
     RetargetingResult,
@@ -253,6 +254,27 @@ def test_problem_registry_preflight_reports_missing_extension_references():
     assert "laplacian" in message
     assert "joint_limits" in message
     assert "numpy_least_squares" in message
+
+
+def test_problem_can_apply_reusable_optimization_profile():
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+    base_problem = RetargetingProblem(
+        name="profiled",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("minimal"),
+        scene=SceneSpec.robot_only(),
+    )
+    profile = OptimizationProfile.defaults(name="low_smoothness").with_objective("smoothness", weight=0.01)
+
+    problem = base_problem.with_optimization_profile(profile)
+
+    assert problem.metadata["optimization_profile"] == "low_smoothness"
+    assert [objective.name for objective in problem.objectives] == ["laplacian", "smoothness"]
+    assert problem.objectives[-1].weight == 0.01
+    assert base_problem.objectives[-1].weight == 0.2
 
 
 def test_registered_custom_objective_and_constraint_affect_retargeting():

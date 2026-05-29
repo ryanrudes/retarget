@@ -21,7 +21,7 @@ from retarget.core.registry import Registry
 from retarget.mesh import InteractionMeshSpec, sample_mesh_points
 from retarget.motion import load_motion, motion_formats
 from retarget.optimization import validate_optimization_references
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, SolverSpec
+from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.pipeline import RetargetingProblem
 from retarget.robots import robot_providers, robots
 from retarget.scene import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
@@ -372,18 +372,11 @@ def _resolve_robot_options(options: dict[str, Any], base_dir: Path) -> dict[str,
 
 
 def _default_objectives() -> tuple[ObjectiveSpec, ...]:
-    return (
-        ObjectiveSpec(name="laplacian", weight=10.0),
-        ObjectiveSpec(name="smoothness", weight=0.2),
-    )
+    return OptimizationProfile.defaults().objectives
 
 
 def _default_constraints() -> tuple[ConstraintSpec, ...]:
-    return (
-        ConstraintSpec(name="joint_limits"),
-        ConstraintSpec(name="trust_region"),
-        ConstraintSpec(name="foot_contact", parameters={"velocity_threshold": 0.02, "tolerance": 1e-3}),
-    )
+    return OptimizationProfile.defaults().constraints
 
 
 def _object_spec(config: ObjectConfig | None, *, frame_count: int, fps: float) -> ObjectSpec | None:

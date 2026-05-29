@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from retarget import ConstraintSpec, Retargeter, RetargetingProblem, SceneSpec, TaskKind, TerrainSpec
+from retarget import OptimizationProfile, Retargeter, RetargetingProblem, SceneSpec, TaskKind, TerrainSpec
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
@@ -35,10 +35,6 @@ problem = RetargetingProblem(
             ),
         )
     ),
-    constraints=(
-        ConstraintSpec(name="joint_limits"),
-        ConstraintSpec(name="trust_region"),
-        ConstraintSpec(name="non_penetration", parameters={"floor_z": -2.0, "scene_clearance": 0.025}),
-    ),
+    constraints=OptimizationProfile.climbing(floor_z=-2.0, scene_clearance=0.025).constraints,
 )
 Retargeter().run(problem).save_npz("climbing.npz")

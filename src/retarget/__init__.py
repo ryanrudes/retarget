@@ -38,7 +38,7 @@ from retarget.optimization import (
     objective_terms,
     solver_factories,
 )
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, SolverSpec
+from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.pipeline.batch import BatchJob, BatchManifest, BatchRunner, BatchRunRecord
 from retarget.pipeline.engine import InteractionMeshRetargetingEngine
 from retarget.pipeline.problem import RetargetingProblem
@@ -87,6 +87,7 @@ __all__ = [
     "ObjectiveContribution",
     "ObjectiveSpec",
     "ObjectiveTerm",
+    "OptimizationProfile",
     "Pose",
     "PoseSequence",
     "QposLayout",

@@ -15,7 +15,7 @@ from retarget.optimization.solvers import (
     create_solver,
     resolve_solver_backend_name,
 )
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, SolverSpec
+from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.optimization.terms import (
     FootContactConstraint,
     FootLockConstraint,
@@ -43,6 +43,7 @@ __all__ = [
     "NumpyLeastSquaresSolver",
     "ObjectiveContribution",
     "ObjectiveSpec",
+    "OptimizationProfile",
     "QuadraticProblem",
     "SelfCollisionConstraint",
     "SmoothnessObjective",

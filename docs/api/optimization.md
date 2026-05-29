@@ -6,6 +6,8 @@ Objective and constraint specs, contributions, and solver configuration.
 
 ::: retarget.optimization.spec.ConstraintSpec
 
+::: retarget.optimization.spec.OptimizationProfile
+
 ::: retarget.optimization.spec.SolverSpec
 
 ::: retarget.optimization.problem.ObjectiveContribution

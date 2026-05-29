@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from retarget.core.enums import TaskKind
 from retarget.mesh import InteractionMeshSpec
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, SolverSpec
+from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.robots.spec import RobotSpec
 from retarget.scene.spec import SceneSpec
 
@@ -28,15 +28,8 @@ class RetargetingProblem(BaseModel):
     joint_mapping: dict[str, str] | None = None
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
     solver: SolverSpec = Field(default_factory=SolverSpec)
-    objectives: tuple[ObjectiveSpec, ...] = (
-        ObjectiveSpec(name="laplacian", weight=10.0),
-        ObjectiveSpec(name="smoothness", weight=0.2),
-    )
-    constraints: tuple[ConstraintSpec, ...] = (
-        ConstraintSpec(name="joint_limits"),
-        ConstraintSpec(name="trust_region"),
-        ConstraintSpec(name="foot_contact", parameters={"velocity_threshold": 0.02, "tolerance": 1e-3}),
-    )
+    objectives: tuple[ObjectiveSpec, ...] = OptimizationProfile.defaults().objectives
+    constraints: tuple[ConstraintSpec, ...] = OptimizationProfile.defaults().constraints
     scale_to_robot: bool = True
     output_fps: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -102,6 +95,26 @@ class RetargetingProblem(BaseModel):
             solver=self.solver,
             objectives=self.objectives,
             constraints=self.constraints,
+        )
+
+    def with_optimization_profile(self, profile: OptimizationProfile) -> RetargetingProblem:
+        """Return a copy using the objectives and constraints from `profile`."""
+
+        return RetargetingProblem(
+            name=self.name,
+            task_kind=self.task_kind,
+            robot=self.robot,
+            motion=self.motion,
+            scene=self.scene,
+            motion_format=self.motion_format,
+            joint_mapping=self.joint_mapping,
+            mesh=self.mesh,
+            solver=self.solver,
+            objectives=profile.objectives,
+            constraints=profile.constraints,
+            scale_to_robot=self.scale_to_robot,
+            output_fps=self.output_fps,
+            metadata={**self.metadata, "optimization_profile": profile.name},
         )
 
     @property

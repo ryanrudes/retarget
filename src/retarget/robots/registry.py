@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from inspect import isclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from retarget.assets import AssetStore
 from retarget.core.enums import AssetKind
@@ -19,8 +21,22 @@ def _robot_spec_from_decorator(value: object) -> RobotSpec:
     return candidate
 
 
+def _robot_provider_from_decorator(value: object) -> RobotProvider:
+    candidate = value
+    if isclass(value) or not isinstance(value, RobotProvider):
+        if not callable(value):
+            raise TypeError("robot provider registrations must implement RobotProvider or be zero-argument factories")
+        candidate = cast(Callable[[], object], value)()
+    if not isinstance(candidate, RobotProvider):
+        raise TypeError("robot provider registrations must implement RobotProvider")
+    return candidate
+
+
 robots: Registry[RobotSpec] = Registry("robot", decorator_transform=_robot_spec_from_decorator)
-robot_providers: Registry[RobotProvider] = Registry("robot provider")
+robot_providers: Registry[RobotProvider] = Registry(
+    "robot provider",
+    decorator_transform=_robot_provider_from_decorator,
+)
 
 
 class RegistryRobotProvider:

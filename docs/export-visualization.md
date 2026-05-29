@@ -40,6 +40,7 @@ Register a custom exporter:
 ```python
 from retarget.export import ExportResult, ExportSpec, exporters
 
+@exporters.register("my_export")
 class MyExporter:
     def export(self, result, spec: ExportSpec) -> ExportResult:
         spec.output_path.write_text(result.name)
@@ -49,8 +50,6 @@ class MyExporter:
             frame_count=result.frame_count,
             fps=result.fps,
         )
-
-exporters.register("my_export", MyExporter())
 ```
 
 Visualization uses the same extension pattern through `visualizers`. `retarget view --dry-run` prints a Rich summary without optional dependencies; `--live` uses the registered Viser visualizer when `retarget[viz]` is installed.

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from inspect import isclass
+from typing import cast
+
 import numpy as np
 
 from retarget.core.enums import MetricName, RunStatus
@@ -12,7 +16,19 @@ from retarget.motion.contact import infer_contact_by_velocity
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.results.spec import EvaluationReport, RetargetingResult
 
-metrics: Registry[Metric] = Registry("metric")
+
+def _metric_from_decorator(value: object) -> Metric:
+    candidate = value
+    if isclass(value) or not isinstance(value, Metric):
+        if not callable(value):
+            raise TypeError("metric registrations must implement Metric or be zero-argument factories")
+        candidate = cast(Callable[[], object], value)()
+    if not isinstance(candidate, Metric):
+        raise TypeError("metric registrations must implement Metric")
+    return candidate
+
+
+metrics: Registry[Metric] = Registry("metric", decorator_transform=_metric_from_decorator)
 
 METRIC_UNITS = {
     MetricName.OPTIMIZATION_COST.value: "cost",

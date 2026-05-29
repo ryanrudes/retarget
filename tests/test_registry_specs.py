@@ -2,11 +2,12 @@ import numpy as np
 import pytest
 
 from retarget.assets import AssetStore
-from retarget.core.enums import AssetKind
+from retarget.core.enums import AssetKind, RunStatus
 from retarget.core.registry import Registry
+from retarget.export import ExportResult, ExportSpec, exporters
 from retarget.kinematics import kinematics_backends
 from retarget.metrics import metrics
-from retarget.motion import MotionFormatSpec, motion_formats, motion_loaders
+from retarget.motion import MotionFormatSpec, MotionSequence, motion_formats, motion_loaders
 from retarget.optimization import (
     ConstraintContribution,
     ConstraintSpec,
@@ -21,6 +22,7 @@ from retarget.optimization import (
     objective_terms,
     solver_factories,
 )
+from retarget.results import RetargetingResult
 from retarget.robots import RobotSpec, robot_providers, robots
 from retarget.visualization import visualizers
 
@@ -134,6 +136,88 @@ def test_objective_and_constraint_registries_validate_protocols():
         objective_terms.register("unit_test_bad_objective", object(), replace=True)
     with pytest.raises(TypeError, match="ConstraintTerm"):
         constraint_terms.register("unit_test_bad_constraint", object(), replace=True)
+
+
+def test_protocol_registries_accept_decorated_classes(tmp_path):
+    @motion_loaders.register(".unitloader", replace=True)
+    class UnitMotionLoader:
+        def load(self, path, spec, *, name=None):
+            return MotionSequence(
+                name=name or path.stem,
+                joint_names=spec.joint_names,
+                joint_positions=np.zeros((1, len(spec.joint_names), 3), dtype=np.float64),
+                fps=spec.default_fps,
+                frame=spec.frame_convention,
+            )
+
+    @robot_providers.register("unit_test_provider", replace=True)
+    class UnitRobotProvider:
+        def load(self, name: str, **_kwargs: object) -> RobotSpec:
+            return RobotSpec(name=name, dof=1, height_m=1.0, joint_names=("joint",))
+
+    @metrics.register("unit_test_metric", replace=True)
+    class UnitMetric:
+        name = "unit_test_metric"
+
+        def evaluate(self, _result, _problem=None) -> float:
+            return 42.0
+
+    @exporters.register("unit_test_exporter", replace=True)
+    class UnitExporter:
+        def export(self, result: RetargetingResult, spec: ExportSpec) -> ExportResult:
+            spec.output_path.write_text(result.name)
+            return ExportResult(
+                format_name=spec.format_name,
+                path=spec.output_path,
+                frame_count=result.frame_count,
+                fps=result.fps,
+            )
+
+    @visualizers.register("unit_test_visualizer", replace=True)
+    class UnitVisualizer:
+        def __init__(self) -> None:
+            self.names: list[str] = []
+
+        def view(self, result: RetargetingResult) -> None:
+            self.names.append(result.name)
+
+    format_spec = motion_formats.get("minimal")
+    motion_path = tmp_path / "motion.unitloader"
+    motion_path.write_text("")
+    result = RetargetingResult(
+        name="decorated_result",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((1, 1), dtype=np.float64),
+    )
+
+    assert motion_loaders.get(".unitloader").load(motion_path, format_spec).name == "motion"
+    assert robot_providers.get("unit_test_provider").load("decorated_robot").name == "decorated_robot"
+    assert metrics.get("unit_test_metric").evaluate(result) == 42.0
+    assert exporters.get("unit_test_exporter").export(
+        result,
+        ExportSpec(format_name="unit_test_exporter", output_path=tmp_path / "export.txt"),
+    ).path.read_text() == "decorated_result"
+    visualizer = visualizers.get("unit_test_visualizer")
+    visualizer.view(result)
+    assert visualizer.names == ["decorated_result"]
+    assert not isinstance(motion_loaders.get(".unitloader"), type)
+    assert not isinstance(robot_providers.get("unit_test_provider"), type)
+    assert not isinstance(metrics.get("unit_test_metric"), type)
+    assert not isinstance(exporters.get("unit_test_exporter"), type)
+    assert not isinstance(visualizers.get("unit_test_visualizer"), type)
+
+
+def test_protocol_registries_validate_bad_extensions():
+    with pytest.raises(TypeError, match="MotionLoader"):
+        motion_loaders.register(".bad_loader", object(), replace=True)
+    with pytest.raises(TypeError, match="RobotProvider"):
+        robot_providers.register("bad_provider", object(), replace=True)
+    with pytest.raises(TypeError, match="Metric"):
+        metrics.register("bad_metric", object(), replace=True)
+    with pytest.raises(TypeError, match="Exporter"):
+        exporters.register("bad_exporter", object(), replace=True)
+    with pytest.raises(TypeError, match="Visualizer"):
+        visualizers.register("bad_visualizer", object(), replace=True)
 
 
 def test_robot_spec_file_provider_resolves_relative_asset_paths(tmp_path):

@@ -17,7 +17,27 @@ def my_format() -> MotionFormatSpec:
     )
 ```
 
-Loaders are separate from formats. Add a new suffix loader by implementing `MotionLoader` and registering it in `motion_loaders`.
+Loaders are separate from formats. Add a new suffix loader by implementing `MotionLoader` and registering it in `motion_loaders`:
+
+```python
+from pathlib import Path
+
+from retarget.motion import MotionFormatSpec, MotionSequence, motion_loaders
+
+@motion_loaders.register(".my_motion")
+class MyMotionLoader:
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        data = parse_my_motion_file(path)
+        return MotionSequence(
+            name=name or path.stem,
+            joint_names=spec.joint_names,
+            joint_positions=data.global_joint_positions,
+            fps=data.fps,
+            frame=spec.frame_convention,
+        )
+```
+
+The registry instantiates decorated classes and validates that they implement the loader protocol.
 
 Registered format `frame_convention` is honored by `load_motion`: loader output is converted to internal `z_up_right_handed` coordinates before retargeting. Custom loaders should return coordinates in the declared format frame, or set `MotionSequence.frame` explicitly when the file carries its own convention.
 

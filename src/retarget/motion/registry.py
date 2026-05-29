@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from inspect import isclass
+from typing import cast
+
 from retarget.core.protocols import MotionLoader
 from retarget.core.registry import Registry
 from retarget.motion.spec import MotionFormatSpec
@@ -14,11 +18,25 @@ def _motion_format_from_decorator(value: object) -> MotionFormatSpec:
     return candidate
 
 
+def _motion_loader_from_decorator(value: object) -> MotionLoader:
+    candidate = value
+    if isclass(value) or not isinstance(value, MotionLoader):
+        if not callable(value):
+            raise TypeError("motion loader registrations must implement MotionLoader or be zero-argument factories")
+        candidate = cast(Callable[[], object], value)()
+    if not isinstance(candidate, MotionLoader):
+        raise TypeError("motion loader registrations must implement MotionLoader")
+    return candidate
+
+
 motion_formats: Registry[MotionFormatSpec] = Registry(
     "motion format",
     decorator_transform=_motion_format_from_decorator,
 )
-motion_loaders: Registry[MotionLoader] = Registry("motion loader")
+motion_loaders: Registry[MotionLoader] = Registry(
+    "motion loader",
+    decorator_transform=_motion_loader_from_decorator,
+)
 
 
 MINIMAL_JOINTS = (

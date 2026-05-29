@@ -1,0 +1,39 @@
+name = "configured_fixture"
+motion = "../tests/fixtures/minimal_motion.json"
+format = "minimal"
+robot = "synthetic_humanoid"
+task_kind = "robot_only"
+output = "configured_fixture.npz"
+scale_to_robot = true
+
+[mesh]
+topology = "delaunay"
+k_neighbors = 4
+
+[solver]
+backend = "auto"
+max_iterations = 8
+trust_radius = 0.2
+tolerance = 1e-6
+
+[scene]
+ground_size = 7
+ground_range = [-0.75, 0.75]
+
+[[objectives]]
+name = "laplacian"
+weight = 10.0
+
+[[objectives]]
+name = "smoothness"
+weight = 0.2
+
+[[constraints]]
+name = "joint_limits"
+
+[[constraints]]
+name = "trust_region"
+
+[[constraints]]
+name = "foot_contact"
+parameters = { velocity_threshold = 0.02, tolerance = 0.001 }

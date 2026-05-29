@@ -1,0 +1,15 @@
+.venv/
+.cursor/hooks/state/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.py[cod]
+site/
+dist/
+build/
+*.egg-info/
+.retarget_assets/
+batch_results/
+*.npz
+*.metrics.json

@@ -1,0 +1,296 @@
+"""Built-in result metrics."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from retarget.core.enums import MetricName, RunStatus
+from retarget.core.protocols import Metric
+from retarget.core.registry import Registry
+from retarget.kinematics.backends import SimpleKinematicsBackend
+from retarget.motion.contact import infer_contact_by_velocity
+from retarget.pipeline.problem import RetargetingProblem
+from retarget.results.spec import EvaluationReport, RetargetingResult
+
+metrics: Registry[Metric] = Registry("metric")
+
+METRIC_UNITS = {
+    MetricName.OPTIMIZATION_COST.value: "cost",
+    MetricName.FOOT_SLIDING.value: "m/s",
+    MetricName.CONTACT_PRESERVATION.value: "fraction",
+    MetricName.PENETRATION.value: "m",
+}
+
+
+class OptimizationCostMetric:
+    """Mean optimization cost."""
+
+    name = MetricName.OPTIMIZATION_COST.value
+
+    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        if result.cost is None:
+            return 0.0
+        return float(np.mean(result.cost))
+
+
+class FootSlidingMetric:
+    """Mean stance-foot xy speed during inferred contact."""
+
+    name = MetricName.FOOT_SLIDING.value
+
+    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        if result.frame_count < 2:
+            return 0.0
+        if problem is not None and problem.robot.contact_links:
+            positions = _contact_link_positions(result, problem)
+            contacts = _robot_contact_mask(problem)
+            sliding: list[float] = []
+            frame_count = min(result.frame_count, positions.shape[0], contacts.shape[0])
+            for frame_idx in range(1, frame_count):
+                active_links = contacts[frame_idx] & contacts[frame_idx - 1]
+                if np.any(active_links):
+                    deltas = positions[frame_idx, active_links, :2] - positions[frame_idx - 1, active_links, :2]
+                    sliding.extend((np.linalg.norm(deltas, axis=1) * result.fps).tolist())
+            return float(np.mean(sliding)) if sliding else 0.0
+        xy_velocity = np.linalg.norm(np.diff(result.qpos[:, :2], axis=0), axis=1) * result.fps
+        return float(np.mean(xy_velocity))
+
+
+class ContactPreservationMetric:
+    """Fraction of contact labels preserved by the retargeted contact links."""
+
+    name = MetricName.CONTACT_PRESERVATION.value
+
+    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        if result.human_joints is None:
+            return 1.0
+        if problem is not None and problem.robot.contact_links:
+            human_contacts = _human_contact_mask(problem)
+            robot_contacts = _robot_contact_mask(problem, result=result)
+            if human_contacts.shape == robot_contacts.shape and human_contacts.size:
+                return float(np.mean(human_contacts == robot_contacts))
+        finite_human = np.all(np.isfinite(result.human_joints), axis=(1, 2))
+        finite_robot = np.all(np.isfinite(result.qpos), axis=1)
+        return float(np.mean(finite_human & finite_robot))
+
+
+class PenetrationMetric:
+    """Ground and scene clearance violation depth for configured contact links."""
+
+    name = MetricName.PENETRATION.value
+
+    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        if problem is not None and problem.robot.contact_links:
+            positions = _contact_link_positions(result, problem)
+            floor_z = _constraint_parameter(problem, "non_penetration", "floor_z", 0.0)
+            ground_penetration = float(max(0.0, floor_z - np.min(positions[:, :, 2])))
+            scene_penetration = _scene_penetration_depth(positions, problem)
+            return max(ground_penetration, scene_penetration)
+        return 0.0
+
+
+metrics.register(OptimizationCostMetric.name, OptimizationCostMetric())
+metrics.register(FootSlidingMetric.name, FootSlidingMetric())
+metrics.register(ContactPreservationMetric.name, ContactPreservationMetric())
+metrics.register(PenetrationMetric.name, PenetrationMetric())
+
+
+def evaluate_result(result: RetargetingResult, problem: RetargetingProblem | None = None) -> EvaluationReport:
+    """Evaluate all built-in metrics."""
+
+    metric_problem = _problem_aligned_to_result(result, problem)
+    values: dict[str, float] = {}
+    warnings = list(result.warnings)
+    status = result.status
+    for name, metric in metrics.items():
+        try:
+            value = float(metric.evaluate(result, metric_problem))
+        except Exception as exc:
+            status = _partial_status(status)
+            warnings.append(f"metric {name!r} failed: {type(exc).__name__}: {exc}")
+            continue
+        if not np.isfinite(value):
+            status = _partial_status(status)
+            warnings.append(f"metric {name!r} returned a non-finite value")
+            continue
+        values[name] = value
+
+    return EvaluationReport(
+        status=status,
+        source_name=result.name,
+        frame_count=result.frame_count,
+        qpos_dimension=int(result.qpos.shape[1]),
+        fps=result.fps,
+        task_kind=(
+            metric_problem.task_kind.value if metric_problem is not None else _metadata_string(result, "task_kind")
+        ),
+        robot_name=metric_problem.robot.name if metric_problem is not None else _metadata_string(result, "robot"),
+        motion_name=metric_problem.motion.name if metric_problem is not None else _metadata_string(result, "motion"),
+        metrics=values,
+        metric_units={name: METRIC_UNITS.get(name, "unitless") for name in values},
+        details=_evaluation_details(result, metric_problem, original_problem=problem),
+        warnings=tuple(warnings),
+    )
+
+
+def _contact_link_positions(result: RetargetingResult, problem: RetargetingProblem) -> np.ndarray:
+    backend = SimpleKinematicsBackend(problem.robot)
+    return np.stack(
+        [backend.link_positions(qpos, problem.robot.contact_links) for qpos in result.qpos],
+        axis=0,
+    )
+
+
+def _partial_status(status: RunStatus) -> RunStatus:
+    return RunStatus.PARTIAL if status == RunStatus.SUCCESS else status
+
+
+def _metadata_string(result: RetargetingResult, key: str) -> str | None:
+    value = result.metadata.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _problem_aligned_to_result(
+    result: RetargetingResult,
+    problem: RetargetingProblem | None,
+) -> RetargetingProblem | None:
+    if problem is None:
+        return None
+    if abs(problem.fps - result.fps) <= 1e-9 and problem.motion.frame_count == result.frame_count:
+        return problem
+    return problem.model_copy(update={"output_fps": result.fps}).with_output_fps_applied()
+
+
+def _evaluation_details(
+    result: RetargetingResult,
+    problem: RetargetingProblem | None,
+    *,
+    original_problem: RetargetingProblem | None = None,
+) -> dict[str, object]:
+    details: dict[str, object] = {
+        "result": {
+            "qpos_shape": list(result.qpos.shape),
+            "has_cost": result.cost is not None,
+            "has_human_joints": result.human_joints is not None,
+            "warning_count": len(result.warnings),
+        }
+    }
+    if problem is not None:
+        details["problem"] = {
+            "task_kind": problem.task_kind.value,
+            "robot": problem.robot.name,
+            "motion": problem.motion.name,
+            "motion_format": problem.motion_format.name if problem.motion_format is not None else None,
+            "motion_frame_count": problem.motion.frame_count,
+            "contact_links": list(problem.robot.contact_links),
+            "objectives": [objective.name for objective in problem.objectives],
+            "constraints": [constraint.name for constraint in problem.constraints if constraint.enabled],
+            "solver_backend": problem.solver.backend_name,
+            "aligned_to_result": _problem_was_aligned(original_problem, problem),
+        }
+    return details
+
+
+def _problem_was_aligned(
+    original_problem: RetargetingProblem | None,
+    metric_problem: RetargetingProblem,
+) -> bool:
+    if original_problem is None:
+        return False
+    return (
+        original_problem.motion.frame_count != metric_problem.motion.frame_count
+        or abs(original_problem.fps - metric_problem.fps) > 1e-9
+    )
+
+
+def _scene_penetration_depth(link_positions: np.ndarray, problem: RetargetingProblem) -> float:
+    scene_points = _scene_points(problem)
+    if scene_points is None or scene_points.size == 0:
+        return 0.0
+    clearance = _constraint_parameter(problem, "non_penetration", "scene_clearance", 0.0)
+    if clearance <= 0:
+        return 0.0
+    max_violation = 0.0
+    for frame_idx, frame_positions in enumerate(link_positions):
+        if not _scene_frame_available(problem, frame_idx):
+            break
+        positions = _positions_in_scene_frame(frame_positions, problem, frame_idx)
+        distances = np.linalg.norm(positions[:, None, :] - scene_points[None, :, :], axis=2)
+        max_violation = max(max_violation, float(max(0.0, clearance - np.min(distances))))
+    return max_violation
+
+
+def _scene_frame_available(problem: RetargetingProblem, frame_idx: int) -> bool:
+    if problem.scene.object is None or problem.scene.object.trajectory is None:
+        return True
+    return frame_idx < problem.scene.object.trajectory.poses.frame_count
+
+
+def _positions_in_scene_frame(positions: np.ndarray, problem: RetargetingProblem, frame_idx: int) -> np.ndarray:
+    if problem.scene.object is None or problem.scene.object.trajectory is None:
+        return positions
+    return problem.scene.object.trajectory.poses.poses[frame_idx].inverse_transform_points(positions)
+
+
+def _scene_points(problem: RetargetingProblem) -> np.ndarray | None:
+    if problem.scene.object is not None:
+        if problem.scene.object.sample_points is not None:
+            return np.asarray(problem.scene.object.sample_points, dtype=np.float64)
+        return np.asarray(
+            [
+                [x, y, z]
+                for x in (-0.2, 0.2)
+                for y in (-0.2, 0.2)
+                for z in (-0.2, 0.2)
+            ],
+            dtype=np.float64,
+        )
+    if problem.scene.terrain is not None and problem.scene.terrain.sample_points is not None:
+        return np.asarray(problem.scene.terrain.sample_points, dtype=np.float64)
+    return None
+
+
+def _human_contact_mask(problem: RetargetingProblem) -> np.ndarray:
+    contacts = infer_contact_by_velocity(problem.motion, problem.motion_format)
+    return _contact_dicts_to_mask(contacts, problem)
+
+
+def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult | None = None) -> np.ndarray:
+    if result is None:
+        return _human_contact_mask(problem)
+    positions = _contact_link_positions(result, problem)
+    if len(positions) == 1:
+        speeds = np.zeros((1, len(problem.robot.contact_links)), dtype=np.float64)
+    else:
+        speeds = np.linalg.norm(np.gradient(positions, 1.0 / result.fps, axis=0), axis=2)
+    threshold = _constraint_parameter(problem, "foot_contact", "velocity_threshold", 0.01)
+    return speeds <= threshold
+
+
+def _contact_dicts_to_mask(contact_dicts: tuple[dict[str, bool], ...], problem: RetargetingProblem) -> np.ndarray:
+    mask = np.zeros((len(contact_dicts), len(problem.robot.contact_links)), dtype=bool)
+    for frame_idx, contact_state in enumerate(contact_dicts):
+        for motion_joint, active in contact_state.items():
+            if not active:
+                continue
+            for link_idx, link_name in enumerate(problem.robot.contact_links):
+                if _same_side(motion_joint, link_name):
+                    mask[frame_idx, link_idx] = True
+    return mask
+
+
+def _same_side(motion_joint: str, link_name: str) -> bool:
+    motion_lower = motion_joint.lower()
+    link_lower = link_name.lower()
+    if "left" in motion_lower or motion_lower.startswith("l_"):
+        return "left" in link_lower or link_lower.startswith("l_")
+    if "right" in motion_lower or motion_lower.startswith("r_"):
+        return "right" in link_lower or link_lower.startswith("r_")
+    return True
+
+
+def _constraint_parameter(problem: RetargetingProblem, constraint_name: str, parameter: str, default: float) -> float:
+    for constraint in problem.constraints:
+        if constraint.name == constraint_name:
+            return float(constraint.parameters.get(parameter, default))
+    return default

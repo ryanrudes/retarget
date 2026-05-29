@@ -1,0 +1,176 @@
+site_name: retarget
+site_description: Typed, extensible motion retargeting research toolkit.
+
+extra:
+  generator: false
+
+extra_css:
+  - stylesheets/sop-theme.css
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/hide-empty-toc.js
+  - javascripts/toc-scrollspy.js
+  - javascripts/shiki-loader.js
+  - javascripts/live-code-loader.js
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/robot-outline
+    admonition:
+      note: material/note-text-outline
+      abstract: material/text-box-outline
+      info: material/information-outline
+      tip: material/lightbulb-on-outline
+      success: material/check-circle-outline
+      question: material/help-circle-outline
+      warning: material/alert-outline
+      danger: material/alert-circle-outline
+      failure: material/close-circle-outline
+      bug: material/bug-outline
+      example: material/flask-outline
+      quote: material/format-quote-close
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    code: JetBrains Mono
+  features:
+    # Navigation — fast, clear, spatial
+    - navigation.tabs
+    - navigation.sections
+    - navigation.path
+    - navigation.top
+    - navigation.tracking
+    - navigation.prune
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - toc.follow
+    # Content — richer reading & code UX
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    # Header & search
+    - header.autohide
+    - search.highlight
+    - search.suggest
+    - search.share
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Architecture: architecture.md
+  - Coordinate Conventions: coordinate-conventions.md
+  - Interaction Mesh: interaction-mesh.md
+  - Result Schema: result-schema.md
+  - Extending:
+      - Overview: extending.md
+      - Add a Robot: adding-a-robot.md
+      - Add a Kinematics Backend: adding-a-kinematics-backend.md
+      - Add a Motion Format: adding-a-motion-format.md
+      - Add an Objective or Constraint: adding-objectives-constraints.md
+  - Workflows:
+      - Overview: workflows.md
+      - Interactive playground: interactive-playground.md
+      - Assets: assets.md
+      - Batch and Evaluation: batch-evaluation.md
+      - Export and Visualization: export-visualization.md
+      - Troubleshooting: troubleshooting.md
+  - API:
+      - Overview: api/index.md
+      - Pipeline: api/pipeline.md
+      - Data models: api/models.md
+      - Protocols: api/protocols.md
+      - Optimization: api/optimization.md
+      - Registries: api/registries.md
+      - Batch: api/batch.md
+      - Full reference: api/reference.md
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            docstring_options:
+              ignore_init_summary: true
+            # Readable signatures & types
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            modernize_annotations: true
+            merge_init_into_class: true
+            line_length: 88
+            show_overloads: true
+            # Navigation & structure
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            group_by_category: true
+            show_category_heading: true
+            members_order: source
+            heading_level: 2
+            show_source: false
+            show_submodules: false
+            filters:
+              - "!^_"
+              - "!^__all__$"
+            summary:
+              attributes: true
+              functions: true
+              classes: true
+              modules: true
+            # Cross-refs to Python & NumPy in annotations
+            inventories:
+              - https://docs.python.org/3/objects.inv
+              - https://numpy.org/doc/stable/objects.inv
+              - https://docs.pydantic.dev/latest/objects.inv
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  # Shiki + VS Code "Shades of Purple" theme at runtime (docs/javascripts/shiki-highlight.mjs).
+  - pymdownx.highlight:
+      use_pygments: false
+      anchor_linenums: false
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+  - toc:
+      permalink: true

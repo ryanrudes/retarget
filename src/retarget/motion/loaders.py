@@ -1,0 +1,447 @@
+"""Motion file loaders."""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from retarget.core.enums import FrameConvention, QuaternionOrder
+from retarget.core.pose import PoseSequence
+from retarget.motion.registry import motion_formats, motion_loaders
+from retarget.motion.spec import MotionFormatSpec, MotionSequence
+
+
+class JsonMotionLoader:
+    """Load a small JSON fixture motion."""
+
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        data = json.loads(path.read_text())
+        joint_names = tuple(data.get("joint_names", spec.joint_names))
+        positions = np.asarray(data["joint_positions"], dtype=np.float64)
+        metadata = dict(data.get("metadata", {}))
+        if "height_m" in data:
+            metadata["height_m"] = data["height_m"]
+        fps = float(data.get("fps", spec.default_fps))
+        frame = _frame_from_mapping(data, spec.frame_convention)
+        return MotionSequence(
+            name=name or data.get("name") or path.stem,
+            joint_positions=positions,
+            joint_names=joint_names,
+            fps=fps,
+            frame=frame,
+            root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
+            contacts=_contacts_from_mapping(data),
+            metadata=metadata,
+        )
+
+
+class NpyMotionLoader:
+    """Load `(T, J, 3)` positions from `.npy`."""
+
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        return MotionSequence(
+            name=name or path.stem,
+            joint_positions=np.load(path),
+            joint_names=spec.joint_names,
+            fps=spec.default_fps,
+            frame=spec.frame_convention,
+        )
+
+
+class NpzMotionLoader:
+    """Load global joint positions from `.npz`."""
+
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        data = np.load(path, allow_pickle=True)
+        positions = _first_present(data, "global_joint_positions", "joint_positions", "joints")
+        joint_names_raw: Any = data.get("joint_names", spec.joint_names)
+        joint_names = tuple(str(v) for v in joint_names_raw)
+        metadata: dict[str, Any] = {}
+        if "height" in data:
+            metadata["height_m"] = float(np.asarray(data["height"]).reshape(()))
+        if "height_m" in data:
+            metadata["height_m"] = float(np.asarray(data["height_m"]).reshape(()))
+        fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
+        frame = _frame_from_mapping(data, spec.frame_convention)
+        return MotionSequence(
+            name=name or path.stem,
+            joint_positions=positions,
+            joint_names=joint_names,
+            fps=fps,
+            frame=frame,
+            root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
+            contacts=_contacts_from_npz(data, spec),
+            metadata=metadata,
+        )
+
+
+class CsvMotionLoader:
+    """Load wide CSV files with one row per frame and `{joint}_{axis}` columns."""
+
+    TIME_COLUMNS = ("time_s", "time", "timestamp")
+    FRAME_COLUMNS = ("frame", "frame_idx", "frame_index")
+    AXES = ("x", "y", "z")
+
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        rows = list(csv.DictReader(path.read_text().splitlines()))
+        if not rows:
+            raise ValueError(f"{path} does not contain any motion rows")
+        rows = _sort_csv_rows(rows)
+        normalized_rows = [{_normalize_column(key): value for key, value in row.items()} for row in rows]
+        positions = np.zeros((len(normalized_rows), len(spec.joint_names), 3), dtype=np.float64)
+        for frame_idx, row in enumerate(normalized_rows):
+            for joint_idx, joint_name in enumerate(spec.joint_names):
+                for axis_idx, axis in enumerate(self.AXES):
+                    positions[frame_idx, joint_idx, axis_idx] = _csv_float(
+                        row,
+                        _coordinate_column_candidates(joint_name, axis),
+                    )
+        metadata: dict[str, Any] = {}
+        height = _optional_csv_float(normalized_rows[0], ("height_m", "height"))
+        if height is not None:
+            metadata["height_m"] = height
+        fps = _csv_fps(normalized_rows, spec.default_fps)
+        return MotionSequence(
+            name=name or path.stem,
+            joint_positions=positions,
+            joint_names=spec.joint_names,
+            fps=fps,
+            frame=spec.frame_convention,
+            root_poses=_csv_root_poses(normalized_rows, spec, fps=fps),
+            contacts=_csv_contacts(normalized_rows, spec.contact_joints),
+            metadata=metadata,
+        )
+
+
+def _first_present(data: Any, *keys: str) -> np.ndarray:
+    for key in keys:
+        if key in data:
+            return np.asarray(data[key], dtype=np.float64)
+    raise KeyError(f"Expected one of {keys} in motion file")
+
+
+def _contacts_from_mapping(data: dict[str, Any]) -> Any:
+    return data.get("contacts", data.get("contact_states", ()))
+
+
+def _contacts_from_npz(data: Any, spec: MotionFormatSpec) -> Any:
+    key = next((candidate for candidate in ("contacts", "contact_states") if candidate in data), None)
+    if key is None:
+        return ()
+    raw = data[key]
+    values = np.asarray(raw)
+    if values.dtype == object:
+        return values.tolist()
+    if values.ndim == 1 and len(spec.contact_joints) == 1:
+        values = values.reshape((-1, 1))
+    if values.ndim != 2:
+        raise ValueError(f"{key} must have shape (frames, contacts)")
+    names = _string_tuple(data.get("contact_names", spec.contact_joints))
+    if len(names) != values.shape[1]:
+        raise ValueError("contact_names length must match contact matrix width")
+    return tuple(
+        {name: bool(values[frame_idx, contact_idx]) for contact_idx, name in enumerate(names)}
+        for frame_idx in range(values.shape[0])
+    )
+
+
+def _root_poses_from_mapping(
+    data: Any,
+    spec: MotionFormatSpec,
+    *,
+    fps: float,
+    frame: FrameConvention,
+) -> PoseSequence | None:
+    raw_poses = _optional_present(data, "root_poses")
+    if raw_poses is not None:
+        if isinstance(raw_poses, PoseSequence):
+            return raw_poses
+        if isinstance(raw_poses, np.ndarray) and raw_poses.dtype == object:
+            raw_poses = raw_poses.tolist()
+        if isinstance(raw_poses, dict):
+            positions = _optional_present(
+                raw_poses,
+                "positions",
+                "translations",
+                "root_positions",
+                "root_translations",
+            )
+            quaternions = _optional_present(raw_poses, "quaternions", "root_quaternions", "root_rotations")
+            order = _quaternion_order_from_mapping(raw_poses, spec.quaternion_order)
+            return _pose_sequence_from_arrays(positions, quaternions, fps=fps, frame=frame, quaternion_order=order)
+        if isinstance(raw_poses, list | tuple):
+            positions = []
+            quaternions = []
+            orders: list[QuaternionOrder] = []
+            for item in raw_poses:
+                if not isinstance(item, dict):
+                    raise ValueError("root_poses entries must be mappings")
+                position = _optional_present(item, "translation", "position", "root_position", "root_translation")
+                quaternion = _optional_present(item, "quaternion", "root_quaternion", "root_rotation")
+                if position is None or quaternion is None:
+                    raise ValueError("each root_poses entry must contain a translation/position and quaternion")
+                positions.append(position)
+                quaternions.append(quaternion)
+                orders.append(_quaternion_order_from_mapping(item, spec.quaternion_order))
+            if len(set(orders)) > 1:
+                raise ValueError("all root_poses entries must use the same quaternion order")
+            order = orders[0] if orders else spec.quaternion_order
+            return _pose_sequence_from_arrays(
+                positions,
+                quaternions,
+                fps=fps,
+                frame=frame,
+                quaternion_order=order,
+            )
+        raise ValueError("root_poses must be a mapping or a sequence of mappings")
+
+    positions = _optional_present(data, "root_positions", "root_translations", "root_position", "root_translation")
+    quaternions = _optional_present(data, "root_quaternions", "root_rotations", "root_quaternion", "root_rotation")
+    if positions is None and quaternions is None:
+        return None
+    order = _quaternion_order_from_mapping(data, spec.quaternion_order)
+    return _pose_sequence_from_arrays(positions, quaternions, fps=fps, frame=frame, quaternion_order=order)
+
+
+def _pose_sequence_from_arrays(
+    positions: Any,
+    quaternions: Any,
+    *,
+    fps: float,
+    frame: FrameConvention,
+    quaternion_order: QuaternionOrder,
+) -> PoseSequence:
+    if positions is None or quaternions is None:
+        raise ValueError("root poses require both positions/translations and quaternions")
+    pos = np.asarray(positions, dtype=np.float64)
+    quat = np.asarray(quaternions, dtype=np.float64)
+    if pos.ndim == 1:
+        pos = pos.reshape(1, 3)
+    if quat.ndim == 1:
+        quat = quat.reshape(1, 4)
+    return PoseSequence.from_arrays(
+        pos,
+        quat,
+        fps=fps,
+        quaternion_order=quaternion_order,
+        frame=frame,
+    )
+
+
+def _optional_present(data: Any, *keys: str) -> Any | None:
+    for key in keys:
+        if key in data:
+            return data[key]
+    return None
+
+
+def _quaternion_order_from_mapping(data: Any, default: QuaternionOrder) -> QuaternionOrder:
+    for key in ("root_quaternion_order", "quaternion_order"):
+        if key not in data:
+            continue
+        return QuaternionOrder(_scalar_string(data[key]))
+    return default
+
+
+def _string_tuple(values: Any) -> tuple[str, ...]:
+    array = np.asarray(values)
+    if array.shape == ():
+        scalar = array.reshape(()).item()
+        if isinstance(scalar, bytes):
+            scalar = scalar.decode()
+        return (str(scalar),)
+    out: list[str] = []
+    for value in array.tolist():
+        if isinstance(value, bytes):
+            value = value.decode()
+        out.append(str(value))
+    return tuple(out)
+
+
+def _frame_from_mapping(data: Any, default: FrameConvention) -> FrameConvention:
+    for key in ("frame_convention", "frame"):
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, FrameConvention):
+            return value
+        return FrameConvention(_scalar_string(value))
+    return default
+
+
+def _scalar_string(value: Any) -> str:
+    array = np.asarray(value)
+    if array.shape == ():
+        scalar = array.reshape(()).item()
+        if isinstance(scalar, bytes):
+            scalar = scalar.decode()
+        return str(scalar)
+    return str(value)
+
+
+def _sort_csv_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    frame_key = _first_csv_key(rows[0], CsvMotionLoader.FRAME_COLUMNS)
+    if frame_key is None:
+        return rows
+    return sorted(rows, key=lambda row: int(float(row[frame_key])))
+
+
+def _csv_fps(rows: list[dict[str, str]], default_fps: float) -> float:
+    fps = _optional_csv_float(rows[0], ("fps",))
+    if fps is not None:
+        return fps
+    time_key = _first_csv_key(rows[0], CsvMotionLoader.TIME_COLUMNS)
+    if time_key is None or len(rows) < 2:
+        return default_fps
+    times = np.asarray([float(row[time_key]) for row in rows], dtype=np.float64)
+    deltas = np.diff(times)
+    positive = deltas[deltas > 0]
+    if len(positive) == 0:
+        return default_fps
+    return float(1.0 / np.mean(positive))
+
+
+def _coordinate_column_candidates(joint_name: str, axis: str) -> tuple[str, ...]:
+    return (
+        _normalize_column(f"{joint_name}_{axis}"),
+        _normalize_column(f"{joint_name}.{axis}"),
+        _normalize_column(f"{joint_name}:{axis}"),
+        _normalize_column(f"{joint_name} {axis}"),
+    )
+
+
+def _csv_float(row: dict[str, str], keys: tuple[str, ...]) -> float:
+    value = _optional_csv_float(row, keys)
+    if value is None:
+        raise KeyError(f"Missing CSV column; expected one of {keys}")
+    return value
+
+
+def _optional_csv_float(row: dict[str, str], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        if key in row and row[key] not in ("", None):
+            return float(row[key])
+    return None
+
+
+def _csv_contacts(rows: list[dict[str, str]], contact_joints: tuple[str, ...]) -> tuple[dict[str, bool], ...]:
+    contact_keys = {
+        joint: _first_csv_key(rows[0], _contact_column_candidates(joint))
+        for joint in contact_joints
+    }
+    contact_keys = {joint: key for joint, key in contact_keys.items() if key is not None}
+    if not contact_keys:
+        return ()
+    return tuple(
+        {
+            joint: _csv_bool(row[key])
+            for joint, key in contact_keys.items()
+            if key in row and row[key] not in ("", None)
+        }
+        for row in rows
+    )
+
+
+def _csv_root_poses(rows: list[dict[str, str]], spec: MotionFormatSpec, *, fps: float) -> PoseSequence | None:
+    position_keys = [
+        _first_csv_key(rows[0], _root_position_column_candidates(axis))
+        for axis in CsvMotionLoader.AXES
+    ]
+    components = ("w", "x", "y", "z") if spec.quaternion_order == QuaternionOrder.WXYZ else ("x", "y", "z", "w")
+    quaternion_keys = [
+        _first_csv_key(rows[0], _root_quaternion_column_candidates(component))
+        for component in components
+    ]
+    has_position = any(key is not None for key in position_keys)
+    has_quaternion = any(key is not None for key in quaternion_keys)
+    if not has_position and not has_quaternion:
+        return None
+    if any(key is None for key in position_keys) or any(key is None for key in quaternion_keys):
+        raise ValueError("CSV root pose columns must include all root position axes and quaternion components")
+    positions = np.asarray(
+        [[float(row[key]) for key in position_keys if key is not None] for row in rows],
+        dtype=np.float64,
+    )
+    quaternions = np.asarray(
+        [[float(row[key]) for key in quaternion_keys if key is not None] for row in rows],
+        dtype=np.float64,
+    )
+    return PoseSequence.from_arrays(
+        positions,
+        quaternions,
+        fps=fps,
+        quaternion_order=spec.quaternion_order,
+        frame=spec.frame_convention,
+    )
+
+
+def _root_position_column_candidates(axis: str) -> tuple[str, ...]:
+    return (
+        _normalize_column(f"root_position_{axis}"),
+        _normalize_column(f"root_translation_{axis}"),
+        _normalize_column(f"root_pose_position_{axis}"),
+        _normalize_column(f"root_pose_translation_{axis}"),
+    )
+
+
+def _root_quaternion_column_candidates(component: str) -> tuple[str, ...]:
+    return (
+        _normalize_column(f"root_quaternion_{component}"),
+        _normalize_column(f"root_rotation_{component}"),
+        _normalize_column(f"root_q{component}"),
+        _normalize_column(f"root_pose_quaternion_{component}"),
+    )
+
+
+def _contact_column_candidates(joint_name: str) -> tuple[str, ...]:
+    return (
+        _normalize_column(f"{joint_name}_contact"),
+        _normalize_column(f"contact_{joint_name}"),
+        _normalize_column(f"{joint_name}_in_contact"),
+        _normalize_column(f"is_contact_{joint_name}"),
+    )
+
+
+def _csv_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "contact", "contacting"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "none", "off", ""}:
+        return False
+    return bool(float(value))
+
+
+def _first_csv_key(row: dict[str, str], keys: tuple[str, ...]) -> str | None:
+    normalized = {_normalize_column(key): key for key in row}
+    for key in keys:
+        found = normalized.get(_normalize_column(key))
+        if found is not None:
+            return found
+    return None
+
+
+def _normalize_column(value: str | None) -> str:
+    if value is None:
+        return ""
+    normalized = re.sub(r"[^0-9a-zA-Z]+", "_", value.strip().lower())
+    return normalized.strip("_")
+
+
+motion_loaders.register(".json", JsonMotionLoader())
+motion_loaders.register(".csv", CsvMotionLoader())
+motion_loaders.register(".npy", NpyMotionLoader())
+motion_loaders.register(".npz", NpzMotionLoader())
+
+
+def load_motion(path: str | Path, format_name: str, *, name: str | None = None) -> MotionSequence:
+    """Load a motion sequence using a registered format and suffix loader."""
+
+    motion_path = Path(path)
+    spec = motion_formats.get(format_name)
+    loader = motion_loaders.get(motion_path.suffix.lower())
+    return loader.load(motion_path, spec, name=name).to_frame(FrameConvention.Z_UP_RIGHT_HANDED)

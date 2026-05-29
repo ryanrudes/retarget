@@ -1,0 +1,36 @@
+schema_version = 1
+
+[metadata]
+description = "Template for local research assets that are not distributed with retarget."
+
+[[assets]]
+name = "g1"
+kind = "robot"
+source = "/absolute/path/to/g1_asset_directory"
+copy = false
+license = "Provide the upstream license identifier or license file path."
+notice = "Provide required upstream NOTICE or attribution text."
+
+[[assets]]
+name = "t1"
+kind = "robot"
+source = "/absolute/path/to/t1_asset_directory"
+copy = false
+license = "Provide the upstream license identifier or license file path."
+notice = "Provide required upstream NOTICE or attribution text."
+
+[[assets]]
+name = "interaction_object_set"
+kind = "object"
+source = "/absolute/path/to/object_meshes_or_dataset"
+copy = false
+license = "Provide the upstream license identifier or license file path."
+notice = "Provide required upstream NOTICE or attribution text."
+
+[[assets]]
+name = "climbing_hold_set"
+kind = "terrain"
+source = "/absolute/path/to/climbing_holds_or_terrain_meshes"
+copy = false
+license = "Provide the upstream license identifier or license file path."
+notice = "Provide required upstream NOTICE or attribution text."

@@ -23,6 +23,8 @@ class PlaybackFrame(BaseModel):
     root_quaternion: FloatArray
     qpos: FloatArray
     human_points: FloatArray | None = None
+    robot_points: FloatArray | None = None
+    robot_segments: FloatArray | None = None
     object_points: FloatArray | None = None
 
     @field_validator("root_position", mode="before")
@@ -51,6 +53,26 @@ class PlaybackFrame(BaseModel):
         arr = as_float_array(value, shape_tail=(3,), name="human_points")
         if arr.ndim != 2:
             raise ValueError("human_points must have shape (points, 3)")
+        return arr
+
+    @field_validator("robot_points", mode="before")
+    @classmethod
+    def _validate_robot_points(cls, value: Any) -> FloatArray | None:
+        if value is None:
+            return None
+        arr = as_float_array(value, shape_tail=(3,), name="robot_points")
+        if arr.ndim != 2:
+            raise ValueError("robot_points must have shape (points, 3)")
+        return arr
+
+    @field_validator("robot_segments", mode="before")
+    @classmethod
+    def _validate_robot_segments(cls, value: Any) -> FloatArray | None:
+        if value is None:
+            return None
+        arr = as_float_array(value, shape_tail=(3,), name="robot_segments")
+        if arr.ndim != 3 or arr.shape[1] != 2:
+            raise ValueError("robot_segments must have shape (segments, 2, 3)")
         return arr
 
     @field_validator("object_points", mode="before")
@@ -124,6 +146,54 @@ class PlaybackObject(BaseModel):
         return int(self.local_points.shape[0])
 
 
+class PlaybackRobot(BaseModel):
+    """Humanoid robot link positions transformed for result playback."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    name: str
+    link_names: tuple[str, ...]
+    link_positions: FloatArray
+    edges: tuple[tuple[int, int], ...] = ()
+
+    @field_validator("link_positions", mode="before")
+    @classmethod
+    def _validate_link_positions(cls, value: Any) -> FloatArray:
+        arr = as_float_array(value, shape_tail=(3,), name="link_positions")
+        if arr.ndim != 3:
+            raise ValueError("link_positions must have shape (frames, links, 3)")
+        return arr
+
+    @model_validator(mode="after")
+    def _validate_links(self) -> PlaybackRobot:
+        if self.link_positions.shape[1] != len(self.link_names):
+            raise ValueError("link_names length must match link_positions")
+        for first, second in self.edges:
+            if first < 0 or second < 0 or first >= len(self.link_names) or second >= len(self.link_names):
+                raise ValueError("robot edge indices must reference link_names")
+        return self
+
+    @property
+    def link_count(self) -> int:
+        """Number of rendered robot links."""
+
+        return len(self.link_names)
+
+    @property
+    def edge_count(self) -> int:
+        """Number of rendered robot line segments."""
+
+        return len(self.edges)
+
+    def segments(self, frame_index: int) -> FloatArray | None:
+        """Line segment endpoints for one frame."""
+
+        if not self.edges:
+            return None
+        points = self.link_positions[frame_index]
+        return np.asarray([[points[first], points[second]] for first, second in self.edges], dtype=np.float64)
+
+
 class PlaybackData(BaseModel):
     """Visualization-ready playback data derived from a retargeting result."""
 
@@ -136,6 +206,7 @@ class PlaybackData(BaseModel):
     root_positions: FloatArray
     root_quaternions: FloatArray
     human_points: FloatArray | None = None
+    robot: PlaybackRobot | None = None
     object: PlaybackObject | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -196,6 +267,8 @@ class PlaybackData(BaseModel):
             raise ValueError("root_quaternions shape must match qpos frames")
         if self.human_points is not None and self.human_points.shape[0] != frames:
             raise ValueError("human_points frame count must match qpos")
+        if self.robot is not None and self.robot.link_positions.shape[0] != frames:
+            raise ValueError("robot playback frame count must match qpos")
         if self.object is not None and self.object.world_points.shape[0] != frames:
             raise ValueError("object playback frame count must match qpos")
         return self
@@ -224,6 +297,8 @@ class PlaybackData(BaseModel):
             root_quaternion=self.root_quaternions[index],
             qpos=self.qpos[index],
             human_points=None if self.human_points is None else self.human_points[index],
+            robot_points=None if self.robot is None else self.robot.link_positions[index],
+            robot_segments=None if self.robot is None else self.robot.segments(index),
             object_points=None if self.object is None else self.object.world_points[index],
         )
 
@@ -235,6 +310,7 @@ def build_playback_data(result: RetargetingResult) -> PlaybackData:
     time_s = np.arange(frame_count, dtype=np.float64) / result.fps
     root_positions = _root_positions(result.qpos)
     root_quaternions = _root_quaternions(result.qpos, frame_count)
+    playback_robot = _robot_playback(result)
     playback_object = _object_playback(result)
     return PlaybackData(
         name=result.name,
@@ -244,6 +320,7 @@ def build_playback_data(result: RetargetingResult) -> PlaybackData:
         root_positions=root_positions,
         root_quaternions=root_quaternions,
         human_points=result.human_joints,
+        robot=playback_robot,
         object=playback_object,
         metadata={"status": result.status.value, **result.metadata},
     )
@@ -301,6 +378,59 @@ def _object_playback(result: RetargetingResult) -> PlaybackObject | None:
     )
 
 
+def _robot_playback(result: RetargetingResult) -> PlaybackRobot | None:
+    if result.robot_link_positions is None:
+        return None
+    metadata = _robot_playback_metadata(result.metadata)
+    link_count = result.robot_link_positions.shape[1]
+    link_names = _robot_link_names(metadata, link_count)
+    return PlaybackRobot(
+        name=str(metadata.get("name", "robot")),
+        link_names=link_names,
+        link_positions=result.robot_link_positions,
+        edges=_robot_edges(metadata.get("edges"), link_names),
+    )
+
+
+def _robot_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    playback = metadata.get("playback")
+    if not isinstance(playback, dict):
+        return {}
+    robot_metadata = playback.get("robot")
+    return robot_metadata if isinstance(robot_metadata, dict) else {}
+
+
+def _robot_link_names(metadata: dict[str, Any], link_count: int) -> tuple[str, ...]:
+    names = metadata.get("link_names")
+    if isinstance(names, list | tuple) and len(names) == link_count:
+        return tuple(str(name) for name in names)
+    return tuple(f"link_{idx}" for idx in range(link_count))
+
+
+def _robot_edges(value: Any, link_names: tuple[str, ...]) -> tuple[tuple[int, int], ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    indices = {name: idx for idx, name in enumerate(link_names)}
+    edges: list[tuple[int, int]] = []
+    for item in value:
+        if not isinstance(item, list | tuple) or len(item) != 2:
+            continue
+        first = _edge_index(item[0], indices)
+        second = _edge_index(item[1], indices)
+        if first is None or second is None or first == second:
+            continue
+        edge = (first, second)
+        if edge not in edges:
+            edges.append(edge)
+    return tuple(edges)
+
+
+def _edge_index(value: Any, indices: dict[str, int]) -> int | None:
+    if isinstance(value, int):
+        return value if 0 <= value < len(indices) else None
+    return indices.get(str(value))
+
+
 def _object_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
     playback = metadata.get("playback")
     if not isinstance(playback, dict):
@@ -343,4 +473,4 @@ def _transform_points(local_points: FloatArray, positions: FloatArray, quaternio
     )
 
 
-__all__ = ["PlaybackData", "PlaybackFrame", "PlaybackObject", "build_playback_data"]
+__all__ = ["PlaybackData", "PlaybackFrame", "PlaybackObject", "PlaybackRobot", "build_playback_data"]

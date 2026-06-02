@@ -28,8 +28,10 @@ class DryRunVisualizer:
         table.add_column("nq", justify="right")
         table.add_column("fps", justify="right")
         table.add_column("Duration", justify="right")
+        table.add_column("Robot")
         table.add_column("Object")
         table.add_column("Status")
+        robot_label = f"{playback.robot.name} ({playback.robot.link_count} links)" if playback.robot is not None else ""
         object_label = (
             f"{playback.object.name} ({playback.object.point_count} pts)" if playback.object is not None else ""
         )
@@ -38,6 +40,7 @@ class DryRunVisualizer:
             str(playback.qpos.shape[1]),
             f"{playback.fps:g}",
             f"{playback.duration_s:.3f}s",
+            robot_label,
             object_label,
             result.status.value,
         )
@@ -80,7 +83,7 @@ def _populate_viser_scene(server: Any, playback: PlaybackData) -> None:
         point_size=0.025,
     )
     frame = playback.frame(0)
-    _call_if_present(
+    root_handle = _call_if_present(
         scene,
         "add_frame",
         "/retarget/root",
@@ -89,9 +92,10 @@ def _populate_viser_scene(server: Any, playback: PlaybackData) -> None:
         axes_length=0.2,
         axes_radius=0.01,
     )
+    human_handle = None
     if frame.human_points is not None:
         human_color = np.tile(np.asarray([[240, 160, 40]], dtype=np.uint8), (frame.human_points.shape[0], 1))
-        _call_if_present(
+        human_handle = _call_if_present(
             scene,
             "add_point_cloud",
             "/retarget/human_points/frame_0000",
@@ -99,11 +103,35 @@ def _populate_viser_scene(server: Any, playback: PlaybackData) -> None:
             colors=human_color,
             point_size=0.02,
         )
+    robot_links_handle = None
+    robot_segments_handle = None
+    if playback.robot is not None and frame.robot_points is not None:
+        robot_color = np.tile(np.asarray([[80, 170, 255]], dtype=np.uint8), (frame.robot_points.shape[0], 1))
+        robot_links_handle = _call_if_present(
+            scene,
+            "add_point_cloud",
+            "/retarget/robot/links/frame_0000",
+            points=frame.robot_points,
+            colors=robot_color,
+            point_size=0.035,
+        )
+        if frame.robot_segments is not None:
+            segment_color = np.tile(np.asarray([[110, 210, 255]], dtype=np.uint8), (frame.robot_segments.shape[0], 1))
+            robot_segments_handle = _call_if_present(
+                scene,
+                "add_line_segments",
+                "/retarget/robot/segments/frame_0000",
+                points=frame.robot_segments,
+                colors=segment_color,
+                line_width=2.0,
+            )
+    object_samples_handle = None
+    object_frame_handle = None
     if playback.object is not None and frame.object_points is not None:
         object_name = _scene_name_component(playback.object.name)
         object_color = np.tile(np.asarray([[90, 220, 180]], dtype=np.uint8), (frame.object_points.shape[0], 1))
         path_color = np.tile(np.asarray([[180, 140, 255]], dtype=np.uint8), (playback.object.positions.shape[0], 1))
-        _call_if_present(
+        object_samples_handle = _call_if_present(
             scene,
             "add_point_cloud",
             f"/retarget/object/{object_name}/samples/frame_0000",
@@ -119,7 +147,7 @@ def _populate_viser_scene(server: Any, playback: PlaybackData) -> None:
             colors=path_color,
             point_size=0.018,
         )
-        _call_if_present(
+        object_frame_handle = _call_if_present(
             scene,
             "add_frame",
             f"/retarget/object/{object_name}",
@@ -140,6 +168,16 @@ def _populate_viser_scene(server: Any, playback: PlaybackData) -> None:
         )
         if slider is not None:
             slider.value = 0
+            _attach_slider_callback(
+                slider,
+                playback,
+                root_handle=root_handle,
+                human_handle=human_handle,
+                robot_links_handle=robot_links_handle,
+                robot_segments_handle=robot_segments_handle,
+                object_samples_handle=object_samples_handle,
+                object_frame_handle=object_frame_handle,
+            )
 
 
 def _call_if_present(target: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -147,6 +185,48 @@ def _call_if_present(target: Any, method_name: str, *args: Any, **kwargs: Any) -
     if method is None:
         return None
     return method(*args, **kwargs)
+
+
+def _attach_slider_callback(
+    slider: Any,
+    playback: PlaybackData,
+    *,
+    root_handle: Any,
+    human_handle: Any,
+    robot_links_handle: Any,
+    robot_segments_handle: Any,
+    object_samples_handle: Any,
+    object_frame_handle: Any,
+) -> None:
+    on_update = getattr(slider, "on_update", None)
+    if not callable(on_update):
+        return
+
+    def update_frame() -> None:
+        frame = playback.frame(int(slider.value))
+        _set_if_present(root_handle, "position", frame.root_position)
+        _set_if_present(root_handle, "wxyz", frame.root_quaternion)
+        if frame.human_points is not None:
+            _set_if_present(human_handle, "points", frame.human_points)
+        if frame.robot_points is not None:
+            _set_if_present(robot_links_handle, "points", frame.robot_points)
+        if frame.robot_segments is not None:
+            _set_if_present(robot_segments_handle, "points", frame.robot_segments)
+        if playback.object is not None:
+            _set_if_present(object_frame_handle, "position", playback.object.positions[frame.index])
+            _set_if_present(object_frame_handle, "wxyz", playback.object.quaternions[frame.index])
+        if frame.object_points is not None:
+            _set_if_present(object_samples_handle, "points", frame.object_points)
+
+    def _on_slider_update(_event: Any) -> None:
+        update_frame()
+
+    on_update(_on_slider_update)
+
+
+def _set_if_present(target: Any, attribute: str, value: Any) -> None:
+    if target is not None and hasattr(target, attribute):
+        setattr(target, attribute, value)
 
 
 def _scene_name_component(value: str) -> str:

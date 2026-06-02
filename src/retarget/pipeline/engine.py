@@ -36,6 +36,8 @@ class EngineOutput:
     solver_statuses: tuple[str, ...]
     mesh_spec: InteractionMeshSpec
     mesh_source: str
+    robot_link_names: tuple[str, ...] = ()
+    robot_link_positions: FloatArray | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -132,6 +134,14 @@ class InteractionMeshRetargetingEngine:
             iterations.append(used_iterations)
             solver_statuses.append(frame_status)
 
+        robot_link_names, robot_link_positions, playback_warnings = _robot_playback_links(
+            problem=problem,
+            backend=backend,
+            qpos=qpos,
+            robot_point_names=robot_point_names,
+        )
+        warnings.extend(playback_warnings)
+
         return EngineOutput(
             qpos=qpos,
             costs=costs,
@@ -140,6 +150,8 @@ class InteractionMeshRetargetingEngine:
             solver_statuses=tuple(solver_statuses),
             mesh_spec=mesh_builder.spec,
             mesh_source=mesh_source,
+            robot_link_names=robot_link_names,
+            robot_link_positions=robot_link_positions,
             warnings=tuple(warnings),
         )
 
@@ -232,6 +244,7 @@ def result_from_engine_output(
         fps=problem.fps,
         cost=output.costs,
         human_joints=_scale_motion_to_robot(problem).joint_positions,
+        robot_link_positions=output.robot_link_positions,
         warnings=output.warnings,
         metadata=_result_metadata(problem, output, runtime_s=runtime_s),
     )
@@ -318,7 +331,19 @@ def _mesh_metadata(output: EngineOutput) -> dict[str, Any]:
 
 def _playback_metadata(problem: RetargetingProblem) -> dict[str, Any]:
     object_info = _object_playback_metadata(problem)
-    return {"object": object_info} if object_info is not None else {}
+    playback: dict[str, Any] = {"robot": _robot_playback_metadata(problem)}
+    if object_info is not None:
+        playback["object"] = object_info
+    return playback
+
+
+def _robot_playback_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    names = _playback_link_names(problem, tuple(dict.fromkeys(problem.resolved_link_mapping().values())))
+    return {
+        "name": problem.robot.name,
+        "link_names": list(names),
+        "edges": [list(edge) for edge in _humanoid_link_edges(names)],
+    }
 
 
 def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | None:
@@ -338,6 +363,66 @@ def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | N
         object_slice = problem.robot.qpos_layout.object_slice(problem.robot.dof)
         metadata["qpos_slice"] = [object_slice.start, object_slice.stop]
     return metadata
+
+
+def _robot_playback_links(
+    *,
+    problem: RetargetingProblem,
+    backend: KinematicsBackend,
+    qpos: FloatArray,
+    robot_point_names: tuple[str, ...],
+) -> tuple[tuple[str, ...], FloatArray | None, tuple[str, ...]]:
+    link_names = _playback_link_names(problem, robot_point_names)
+    if not link_names:
+        return (), None, ()
+    try:
+        positions = np.asarray([backend.link_positions(frame, link_names) for frame in qpos], dtype=np.float64)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        return (), None, (f"Could not compute robot playback link positions: {exc}",)
+    return link_names, positions, ()
+
+
+def _playback_link_names(problem: RetargetingProblem, robot_point_names: tuple[str, ...]) -> tuple[str, ...]:
+    if problem.robot.link_names:
+        return tuple(problem.robot.link_names)
+    if problem.robot.contact_links:
+        return tuple(problem.robot.contact_links)
+    return tuple(dict.fromkeys(robot_point_names))
+
+
+def _humanoid_link_edges(link_names: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    names = set(link_names)
+
+    def first_present(*candidates: str) -> str | None:
+        return next((name for name in candidates if name in names), None)
+
+    pelvis = first_present("pelvis", "torso", "root")
+    torso = first_present("torso", "spine", "chest")
+    head = first_present("head")
+    left_foot = first_present("left_foot", "left_toe")
+    right_foot = first_present("right_foot", "right_toe")
+    left_hand = first_present("left_hand", "left_wrist")
+    right_hand = first_present("right_hand", "right_wrist")
+
+    candidate_edges = (
+        (pelvis, torso),
+        (torso or pelvis, head),
+        (pelvis, left_foot),
+        (pelvis, right_foot),
+        (torso or pelvis, left_hand),
+        (torso or pelvis, right_hand),
+    )
+    edges: list[tuple[str, str]] = []
+    for first, second in candidate_edges:
+        if first is None or second is None or first == second:
+            continue
+        edge = (first, second)
+        if edge not in edges:
+            edges.append(edge)
+    if not edges and len(link_names) > 1:
+        anchor = link_names[0]
+        edges.extend((anchor, name) for name in link_names[1:])
+    return tuple(edges)
 
 
 def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:

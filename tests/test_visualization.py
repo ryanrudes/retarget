@@ -64,6 +64,43 @@ def test_build_playback_data_uses_object_playback_metadata():
     assert np.allclose(playback.frame(1).object_points[:, 0], [0.40, 0.60])
 
 
+def test_build_playback_data_uses_robot_link_positions():
+    result = RetargetingResult(
+        name="robot_playback",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((2, 7), dtype=np.float64),
+        robot_link_positions=np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.1, 0.0, -0.8]],
+                [[0.1, 0.0, 0.0], [0.1, 0.0, 1.0], [0.2, 0.0, -0.8]],
+            ],
+            dtype=np.float64,
+        ),
+        fps=20.0,
+        metadata={
+            "playback": {
+                "robot": {
+                    "name": "humanoid",
+                    "link_names": ["pelvis", "head", "left_foot"],
+                    "edges": [["pelvis", "head"], ["pelvis", "left_foot"]],
+                }
+            }
+        },
+    )
+
+    playback = build_playback_data(result)
+    frame = playback.frame(1)
+
+    assert playback.robot is not None
+    assert playback.robot.name == "humanoid"
+    assert playback.robot.link_count == 3
+    assert playback.robot.edge_count == 2
+    assert frame.robot_points is not None
+    assert np.allclose(frame.robot_points[:, 0], [0.1, 0.1, 0.2])
+    assert frame.robot_segments is not None
+    assert frame.robot_segments.shape == (2, 2, 3)
+
+
 def test_dry_run_visualizer_prints_playback_summary():
     console = Console(record=True, force_terminal=False, width=100)
     result = RetargetingResult(
@@ -87,9 +124,21 @@ def test_populate_viser_scene_uses_scene_methods():
         status=RunStatus.SUCCESS,
         qpos=np.zeros((2, 7), dtype=np.float64),
         human_joints=np.zeros((2, 2, 3), dtype=np.float64),
+        robot_link_positions=np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.1, 0.0, -0.8]],
+                [[0.1, 0.0, 0.0], [0.1, 0.0, 1.0], [0.2, 0.0, -0.8]],
+            ],
+            dtype=np.float64,
+        ),
         fps=10.0,
         metadata={
             "playback": {
+                "robot": {
+                    "name": "humanoid",
+                    "link_names": ["pelvis", "head", "left_foot"],
+                    "edges": [["pelvis", "head"], ["pelvis", "left_foot"]],
+                },
                 "object": {
                     "name": "skateboard",
                     "sample_points": [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]],
@@ -106,6 +155,8 @@ def test_populate_viser_scene_uses_scene_methods():
     assert ("point_cloud", "/retarget/root_path") in server.scene.calls
     assert ("frame", "/retarget/root") in server.scene.calls
     assert ("point_cloud", "/retarget/human_points/frame_0000") in server.scene.calls
+    assert ("point_cloud", "/retarget/robot/links/frame_0000") in server.scene.calls
+    assert ("line_segments", "/retarget/robot/segments/frame_0000") in server.scene.calls
     assert ("point_cloud", "/retarget/object/skateboard/samples/frame_0000") in server.scene.calls
     assert ("point_cloud", "/retarget/object/skateboard/path") in server.scene.calls
     assert ("frame", "/retarget/object/skateboard") in server.scene.calls
@@ -128,6 +179,10 @@ class _FakeScene:
 
     def add_frame(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("frame", name))
+        return object()
+
+    def add_line_segments(self, name: str, **_kwargs: object) -> object:
+        self.calls.append(("line_segments", name))
         return object()
 
 

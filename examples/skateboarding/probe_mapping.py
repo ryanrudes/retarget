@@ -14,7 +14,7 @@ if __name__ == "__main__":
     problem = RetargetingProblem(
         name="mapping_probe",
         task_kind=TaskKind.OBJECT_INTERACTION,
-        robot=robots.get(Robot.SYNTHETIC_HUMANOID),
+        robot=robots.get(Robot.G1_LIKE),
         motion=motion,
         motion_format=motion_format(),
         scene=scene,

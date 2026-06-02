@@ -51,6 +51,8 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert result.qpos.shape == (motion.frame_count, robot.qpos_size())
     assert np.all(np.isfinite(result.qpos))
     assert result.cost is not None
+    assert result.robot_link_positions is not None
+    assert result.robot_link_positions.shape == (motion.frame_count, len(robot.link_names), 3)
     assert result.metadata["algorithm"] == "interaction_mesh_sqp"
     assert result.metadata["motion"] == motion.name
     assert result.metadata["motion_format"] == "minimal"
@@ -60,6 +62,8 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     out = result.save_npz(tmp_path / "result.npz")
     assert out.exists()
     loaded = RetargetingResult.load_npz(out)
+    assert loaded.robot_link_positions is not None
+    assert loaded.robot_link_positions.shape == result.robot_link_positions.shape
     provenance = loaded.metadata["provenance"]
     assert provenance["schema_version"] == 1
     assert provenance["motion"]["name"] == motion.name
@@ -69,6 +73,8 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert len(provenance["solver"]["frame_statuses"]) == motion.frame_count
     assert provenance["mesh"] == {"topology": "delaunay", "k_neighbors": 4, "source": "problem"}
     assert result.metadata["mesh"] == provenance["mesh"]
+    assert result.metadata["playback"]["robot"]["name"] == robot.name
+    assert result.metadata["playback"]["robot"]["link_names"] == list(robot.link_names)
     assert provenance["result"]["frame_count"] == motion.frame_count
     assert [objective["name"] for objective in provenance["objectives"]] == ["laplacian", "smoothness"]
     report = evaluate_result(result)

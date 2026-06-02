@@ -9,7 +9,7 @@
 name = "synthetic_skate_clip"
 motion = "data/skate_motion.npz"
 format = "minimal"
-robot = "synthetic_humanoid"
+robot = "g1_like"
 task_kind = "object_interaction"
 output = "skateboarding_retarget.npz"
 scale_to_robot = true

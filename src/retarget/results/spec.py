@@ -29,6 +29,7 @@ class RetargetingResult(BaseModel):
     fps: float = 30.0
     cost: FloatArray | None = None
     human_joints: FloatArray | None = None
+    robot_link_positions: FloatArray | None = None
     warnings: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -62,6 +63,16 @@ class RetargetingResult(BaseModel):
             raise ValueError("human_joints must have shape (frames, joints, 3)")
         return arr
 
+    @field_validator("robot_link_positions", mode="before")
+    @classmethod
+    def _validate_robot_link_positions(cls, value: Any) -> FloatArray | None:
+        if value is None:
+            return None
+        arr = as_float_array(value, shape_tail=(3,), name="robot_link_positions")
+        if arr.ndim != 3:
+            raise ValueError("robot_link_positions must have shape (frames, links, 3)")
+        return arr
+
     @model_validator(mode="after")
     def _validate_lengths(self) -> RetargetingResult:
         if self.schema_version <= 0:
@@ -74,6 +85,8 @@ class RetargetingResult(BaseModel):
             raise ValueError("cost length must be 1 or match qpos frames")
         if self.human_joints is not None and self.human_joints.shape[0] != self.qpos.shape[0]:
             raise ValueError("human_joints frame count must match qpos")
+        if self.robot_link_positions is not None and self.robot_link_positions.shape[0] != self.qpos.shape[0]:
+            raise ValueError("robot_link_positions frame count must match qpos")
         return self
 
     @property
@@ -99,6 +112,11 @@ class RetargetingResult(BaseModel):
         human_joints = (
             resample_linear(self.human_joints, self.fps, fps) if self.human_joints is not None else None
         )
+        robot_link_positions = (
+            resample_linear(self.robot_link_positions, self.fps, fps)
+            if self.robot_link_positions is not None
+            else None
+        )
         return RetargetingResult(
             schema_version=self.schema_version,
             name=name or self.name,
@@ -107,6 +125,7 @@ class RetargetingResult(BaseModel):
             fps=fps,
             cost=cost,
             human_joints=human_joints,
+            robot_link_positions=robot_link_positions,
             warnings=self.warnings,
             metadata=metadata,
         )
@@ -131,6 +150,8 @@ class RetargetingResult(BaseModel):
             payload["cost"] = self.cost
         if self.human_joints is not None:
             payload["human_joints"] = self.human_joints
+        if self.robot_link_positions is not None:
+            payload["robot_link_positions"] = self.robot_link_positions
         np.savez(output, **payload)
         return output
 
@@ -154,6 +175,7 @@ class RetargetingResult(BaseModel):
             fps=float(np.asarray(data["fps"]).reshape(())) if "fps" in data else 30.0,
             cost=data.get("cost", None),
             human_joints=data.get("human_joints", None),
+            robot_link_positions=data.get("robot_link_positions", None),
             metadata=metadata,
             warnings=warnings,
         )

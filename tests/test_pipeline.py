@@ -229,6 +229,35 @@ def test_problem_output_fps_resamples_dynamic_object_trajectory():
     assert prepared.scene.object.trajectory.poses.frame_count == 5
 
 
+def test_object_result_metadata_includes_visualizer_playback_object():
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+    object_spec = ObjectSpec(
+        name="board",
+        sample_points=np.asarray([[-0.2, 0.0, 0.0], [0.2, 0.0, 0.0]], dtype=np.float64),
+        trajectory=ObjectTrajectory.identity(motion.frame_count, fps=motion.fps, name="board"),
+    )
+    problem = RetargetingProblem(
+        name="object_playback_metadata",
+        task_kind=TaskKind.OBJECT_INTERACTION,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("minimal"),
+        scene=SceneSpec.object_interaction(object_spec),
+        solver=SolverSpec(max_iterations=1),
+    )
+
+    result = Retargeter().run(problem)
+
+    playback = result.metadata["playback"]["object"]
+    assert playback["name"] == "board"
+    assert playback["qpos_slice"] == [
+        robot.qpos_layout.object_slice(robot.dof).start,
+        robot.qpos_layout.object_slice(robot.dof).stop,
+    ]
+    assert playback["sample_points"] == [[-0.2, 0.0, 0.0], [0.2, 0.0, 0.0]]
+
+
 def test_problem_registry_preflight_reports_missing_extension_references():
     motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
     robot = robots.get("synthetic_humanoid")

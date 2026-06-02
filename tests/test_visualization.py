@@ -32,6 +32,38 @@ def test_build_playback_data_uses_result_root_pose_and_human_points():
     assert np.isclose(frame.time_s, 0.05)
 
 
+def test_build_playback_data_uses_object_playback_metadata():
+    result = RetargetingResult(
+        name="object_playback",
+        status=RunStatus.SUCCESS,
+        qpos=np.asarray(
+            [
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.50, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float64,
+        ),
+        fps=20.0,
+        metadata={
+            "playback": {
+                "object": {
+                    "name": "skateboard",
+                    "sample_points": [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]],
+                    "qpos_slice": [7, 14],
+                }
+            }
+        },
+    )
+
+    playback = build_playback_data(result)
+
+    assert playback.object is not None
+    assert playback.object.name == "skateboard"
+    assert playback.object.point_count == 2
+    assert np.allclose(playback.object.positions[:, 0], [0.25, 0.50])
+    assert np.allclose(playback.frame(1).object_points[:, 0], [0.40, 0.60])
+
+
 def test_dry_run_visualizer_prints_playback_summary():
     console = Console(record=True, force_terminal=False, width=100)
     result = RetargetingResult(
@@ -56,6 +88,15 @@ def test_populate_viser_scene_uses_scene_methods():
         qpos=np.zeros((2, 7), dtype=np.float64),
         human_joints=np.zeros((2, 2, 3), dtype=np.float64),
         fps=10.0,
+        metadata={
+            "playback": {
+                "object": {
+                    "name": "skateboard",
+                    "sample_points": [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]],
+                    "qpos_slice": [7, 14],
+                }
+            }
+        },
     )
     playback = build_playback_data(result)
     server = _FakeViserServer()
@@ -65,6 +106,9 @@ def test_populate_viser_scene_uses_scene_methods():
     assert ("point_cloud", "/retarget/root_path") in server.scene.calls
     assert ("frame", "/retarget/root") in server.scene.calls
     assert ("point_cloud", "/retarget/human_points/frame_0000") in server.scene.calls
+    assert ("point_cloud", "/retarget/object/skateboard/samples/frame_0000") in server.scene.calls
+    assert ("point_cloud", "/retarget/object/skateboard/path") in server.scene.calls
+    assert ("frame", "/retarget/object/skateboard") in server.scene.calls
     assert server.gui.slider_value == 0
 
 

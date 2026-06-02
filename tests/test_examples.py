@@ -13,6 +13,7 @@ EXAMPLES = (
     "custom_objective.py",
     "custom_robot.py",
     "object_interaction.py",
+    "skateboarding/run_retarget.py",
 )
 
 

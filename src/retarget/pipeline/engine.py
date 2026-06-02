@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import QuaternionOrder, RunStatus
+from retarget.core.enums import FrameConvention, QuaternionOrder, RunStatus
 from retarget.core.pose import Pose
 from retarget.core.protocols import KinematicsBackend
 from retarget.kinematics.backends import SimpleKinematicsBackend
@@ -267,6 +267,7 @@ def _result_metadata(problem: RetargetingProblem, output: EngineOutput, *, runti
         "resolved_solver": output.solver_backend,
         "solver_statuses": output.solver_statuses,
         "mesh": _mesh_metadata(output),
+        "playback": _playback_metadata(problem),
         "algorithm": "interaction_mesh_sqp",
         "joint_mapping": problem.resolved_joint_mapping(),
         "link_mapping": problem.resolved_link_mapping(),
@@ -313,6 +314,30 @@ def _mesh_metadata(output: EngineOutput) -> dict[str, Any]:
         **_jsonable(output.mesh_spec.model_dump(mode="json")),
         "source": output.mesh_source,
     }
+
+
+def _playback_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    object_info = _object_playback_metadata(problem)
+    return {"object": object_info} if object_info is not None else {}
+
+
+def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | None:
+    object_spec = problem.scene.object
+    if object_spec is None:
+        return None
+
+    sample_points = object_spec.sample_points if object_spec.sample_points is not None else _default_object_points()
+    metadata: dict[str, Any] = {
+        "name": object_spec.name,
+        "sample_points": _jsonable(sample_points),
+        "sample_points_space": "object" if problem.scene.has_dynamic_object() else "world",
+        "frame_convention": FrameConvention.Z_UP_RIGHT_HANDED.value,
+        "quaternion_order": QuaternionOrder.WXYZ.value,
+    }
+    if problem.scene.has_dynamic_object():
+        object_slice = problem.robot.qpos_layout.object_slice(problem.robot.dof)
+        metadata["qpos_slice"] = [object_slice.start, object_slice.stop]
+    return metadata
 
 
 def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:

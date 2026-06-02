@@ -7,7 +7,7 @@ from typing import Any, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from retarget.core.enums import SolverBackend
+from retarget.core.enums import Constraint, Objective, SolverBackend
 
 
 class SolverSpec(BaseModel):
@@ -111,13 +111,16 @@ class OptimizationProfile(BaseModel):
         return cls(
             name=name,
             objectives=(
-                ObjectiveSpec(name="laplacian", weight=10.0),
-                ObjectiveSpec(name="smoothness", weight=0.2),
+                ObjectiveSpec(name=Objective.LAPLACIAN, weight=10.0),
+                ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.2),
             ),
             constraints=(
-                ConstraintSpec(name="joint_limits"),
-                ConstraintSpec(name="trust_region"),
-                ConstraintSpec(name="foot_contact", parameters={"velocity_threshold": 0.02, "tolerance": 1e-3}),
+                ConstraintSpec(name=Constraint.JOINT_LIMITS),
+                ConstraintSpec(name=Constraint.TRUST_REGION),
+                ConstraintSpec(
+                    name=Constraint.FOOT_CONTACT,
+                    parameters={"velocity_threshold": 0.02, "tolerance": 1e-3},
+                ),
             ),
         )
 
@@ -132,7 +135,7 @@ class OptimizationProfile(BaseModel):
         """Return a default profile with scene non-penetration enabled."""
 
         return cls.defaults(name="object_interaction").with_constraint(
-            "non_penetration",
+            Constraint.NON_PENETRATION,
             parameters={"floor_z": floor_z, "scene_clearance": scene_clearance, "links": links},
         )
 
@@ -146,7 +149,7 @@ class OptimizationProfile(BaseModel):
         """Return a default profile for terrain/climbing experiments."""
 
         return cls.defaults(name="climbing").with_constraint(
-            "non_penetration",
+            Constraint.NON_PENETRATION,
             parameters={"floor_z": floor_z, "scene_clearance": scene_clearance},
         )
 

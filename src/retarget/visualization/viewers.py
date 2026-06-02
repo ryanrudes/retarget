@@ -9,6 +9,7 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 
+from retarget.core.enums import VisualizerName
 from retarget.results.spec import RetargetingResult
 from retarget.visualization.playback import PlaybackData, build_playback_data
 from retarget.visualization.registry import visualizers
@@ -117,9 +118,9 @@ def _call_if_present(target: Any, method_name: str, *args: Any, **kwargs: Any) -
 def view_result(result: RetargetingResult, *, dry_run: bool = True) -> None:
     """View or summarize a result."""
 
-    visualizer = visualizers.get("dry_run") if dry_run else visualizers.get("viser")
+    visualizer = visualizers.get(VisualizerName.DRY_RUN) if dry_run else visualizers.get(VisualizerName.VISER)
     visualizer.view(result)
 
 
-visualizers.register("dry_run", DryRunVisualizer())
-visualizers.register("viser", ViserVisualizer())
+visualizers.register(VisualizerName.DRY_RUN, DryRunVisualizer())
+visualizers.register(VisualizerName.VISER, ViserVisualizer())

@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from retarget.core.enums import FrameConvention, QuaternionOrder
+from retarget.core.enums import FrameConvention, MotionLoaderSuffix, QuaternionOrder
 from retarget.core.pose import PoseSequence
 from retarget.motion.registry import motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
@@ -432,10 +432,10 @@ def _normalize_column(value: str | None) -> str:
     return normalized.strip("_")
 
 
-motion_loaders.register(".json", JsonMotionLoader())
-motion_loaders.register(".csv", CsvMotionLoader())
-motion_loaders.register(".npy", NpyMotionLoader())
-motion_loaders.register(".npz", NpzMotionLoader())
+motion_loaders.register(MotionLoaderSuffix.JSON, JsonMotionLoader())
+motion_loaders.register(MotionLoaderSuffix.CSV, CsvMotionLoader())
+motion_loaders.register(MotionLoaderSuffix.NPY, NpyMotionLoader())
+motion_loaders.register(MotionLoaderSuffix.NPZ, NpzMotionLoader())
 
 
 def load_motion(path: str | Path, format_name: str, *, name: str | None = None) -> MotionSequence:

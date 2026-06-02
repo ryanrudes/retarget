@@ -2,7 +2,19 @@ import numpy as np
 import pytest
 
 from retarget.assets import AssetStore
-from retarget.core.enums import AssetKind, RunStatus
+from retarget.core.enums import (
+    AssetKind,
+    Constraint,
+    ExportFormat,
+    KinematicsBackendName,
+    MotionFormat,
+    MotionLoaderSuffix,
+    Objective,
+    Robot,
+    RobotProviderName,
+    RunStatus,
+    VisualizerName,
+)
 from retarget.core.registry import Registry
 from retarget.export import ExportResult, ExportSpec, exporters
 from retarget.kinematics import kinematics_backends
@@ -53,6 +65,17 @@ def test_registry_missing_preserves_first_seen_order():
         registry.require_all(("two",))
 
 
+def test_registry_accepts_str_enum_keys():
+    registry: Registry[int] = Registry("numbers")
+    registry.register(VisualizerName.DRY_RUN, 1)
+
+    assert registry.get(VisualizerName.DRY_RUN) == 1
+    assert registry.get("dry_run") == 1
+    assert registry.maybe_get(VisualizerName.VISER) is None
+    assert VisualizerName.DRY_RUN in registry
+    assert registry.missing((VisualizerName.DRY_RUN, VisualizerName.VISER, "custom")) == ("viser", "custom")
+
+
 def test_builtin_specs_available():
     assert motion_formats.get("minimal").root_joint == "Pelvis"
     assert ".csv" in motion_loaders.names()
@@ -65,6 +88,18 @@ def test_builtin_specs_available():
     assert "torso_yaw" in t1.joint_names
     assert g1.default_link_mapping["L_Toe"] == "left_foot"
     assert "placeholder" not in g1.metadata["description"]
+
+
+def test_builtin_registry_enums_resolve_to_builtin_items():
+    assert robots.get(Robot.SYNTHETIC_HUMANOID) is robots.get("synthetic_humanoid")
+    assert motion_formats.get(MotionFormat.MINIMAL) is motion_formats.get("minimal")
+    assert motion_loaders.get(MotionLoaderSuffix.JSON) is motion_loaders.get(".json")
+    assert objective_terms.get(Objective.LAPLACIAN) is objective_terms.get("laplacian")
+    assert constraint_terms.get(Constraint.JOINT_LIMITS) is constraint_terms.get("joint_limits")
+    assert exporters.get(ExportFormat.MUJOCO_NPZ) is exporters.get("mujoco_npz")
+    assert visualizers.get(VisualizerName.DRY_RUN) is visualizers.get("dry_run")
+    assert kinematics_backends.get(KinematicsBackendName.SIMPLE) is kinematics_backends.get("simple")
+    assert robot_providers.get(RobotProviderName.REGISTRY) is robot_providers.get("registry")
 
 
 def test_spec_registries_accept_decorated_factories():

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from retarget.core.enums import KinematicsBackendName
 from retarget.kinematics.registry import kinematics_backends
 from retarget.kinematics.types import GeometryDistance
 from retarget.robots.spec import RobotSpec
@@ -485,5 +486,5 @@ class MuJoCoKinematicsBackend:
         )
 
 
-kinematics_backends.register("simple", lambda robot: SimpleKinematicsBackend(robot))
-kinematics_backends.register("mujoco", lambda robot: MuJoCoKinematicsBackend(robot))
+kinematics_backends.register(KinematicsBackendName.SIMPLE, lambda robot: SimpleKinematicsBackend(robot))
+kinematics_backends.register(KinematicsBackendName.MUJOCO, lambda robot: MuJoCoKinematicsBackend(robot))

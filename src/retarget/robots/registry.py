@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from retarget.assets import AssetStore
-from retarget.core.enums import AssetKind
+from retarget.core.enums import AssetKind, Robot, RobotProviderName
 from retarget.core.protocols import RobotProvider
 from retarget.core.registry import Registry
 from retarget.robots.spec import RobotSpec
@@ -221,9 +221,9 @@ def _humanoid_limits(joint_names: tuple[str, ...]) -> dict[str, tuple[float, flo
     return limits
 
 robots.register(
-    "synthetic_humanoid",
+    Robot.SYNTHETIC_HUMANOID,
     RobotSpec(
-        name="synthetic_humanoid",
+        name=Robot.SYNTHETIC_HUMANOID.value,
         dof=len(SYNTHETIC_JOINTS),
         height_m=1.2,
         joint_names=SYNTHETIC_JOINTS,
@@ -260,9 +260,9 @@ robots.register(
 )
 
 robots.register(
-    "g1_like",
+    Robot.G1_LIKE,
     RobotSpec(
-        name="g1_like",
+        name=Robot.G1_LIKE.value,
         dof=len(G1_LIKE_JOINTS),
         height_m=1.32,
         joint_names=G1_LIKE_JOINTS,
@@ -282,9 +282,9 @@ robots.register(
 )
 
 robots.register(
-    "t1_like",
+    Robot.T1_LIKE,
     RobotSpec(
-        name="t1_like",
+        name=Robot.T1_LIKE.value,
         dof=len(T1_LIKE_JOINTS),
         height_m=1.2,
         joint_names=T1_LIKE_JOINTS,
@@ -315,6 +315,6 @@ robots.register(
     ),
 )
 
-robot_providers.register("registry", RegistryRobotProvider())
-robot_providers.register("file", FileRobotProvider())
-robot_providers.register("asset_store", AssetStoreRobotProvider())
+robot_providers.register(RobotProviderName.REGISTRY, RegistryRobotProvider())
+robot_providers.register(RobotProviderName.FILE, FileRobotProvider())
+robot_providers.register(RobotProviderName.ASSET_STORE, AssetStoreRobotProvider())

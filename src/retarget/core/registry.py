@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
+from enum import StrEnum
 from typing import Generic, TypeVar
 
 T = TypeVar("T")
+RegistryKey = str | StrEnum
 
 
 class Registry(Generic[T]):
@@ -16,10 +18,10 @@ class Registry(Generic[T]):
         self._decorator_transform = decorator_transform
         self._items: dict[str, T] = {}
 
-    def register(self, key: str, value: T | None = None, *, replace: bool = False) -> Callable[[T], T] | T:
+    def register(self, key: RegistryKey, value: T | None = None, *, replace: bool = False) -> Callable[[T], T] | T:
         """Register a value directly or as a decorator."""
 
-        normalized = key.strip()
+        normalized = _normalize_key(key)
         if not normalized:
             raise ValueError(f"{self.name} registry keys must not be empty")
 
@@ -35,19 +37,20 @@ class Registry(Generic[T]):
             return decorator
         return decorator(value)
 
-    def get(self, key: str) -> T:
+    def get(self, key: RegistryKey) -> T:
         """Return a registered value."""
 
+        normalized = _normalize_key(key)
         try:
-            return self._items[key]
+            return self._items[normalized]
         except KeyError as exc:
             available = ", ".join(self.names()) or "<none>"
-            raise KeyError(f"Unknown {self.name} key {key!r}. Available: {available}") from exc
+            raise KeyError(f"Unknown {self.name} key {normalized!r}. Available: {available}") from exc
 
-    def maybe_get(self, key: str) -> T | None:
+    def maybe_get(self, key: RegistryKey) -> T | None:
         """Return a registered value or `None`."""
 
-        return self._items.get(key)
+        return self._items.get(_normalize_key(key))
 
     def names(self) -> tuple[str, ...]:
         """Registered names in sorted order."""
@@ -65,7 +68,9 @@ class Registry(Generic[T]):
         return tuple((name, self._items[name]) for name in self.names())
 
     def __contains__(self, key: object) -> bool:
-        return key in self._items
+        if not isinstance(key, str | StrEnum):
+            return False
+        return _normalize_key(key) in self._items
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.names())
@@ -73,7 +78,7 @@ class Registry(Generic[T]):
     def __len__(self) -> int:
         return len(self._items)
 
-    def require_all(self, keys: Iterable[str]) -> None:
+    def require_all(self, keys: Iterable[RegistryKey]) -> None:
         """Validate that every key exists."""
 
         missing = self.missing(keys)
@@ -81,14 +86,19 @@ class Registry(Generic[T]):
             available = ", ".join(self.names()) or "<none>"
             raise KeyError(f"Missing {self.name} registrations: {', '.join(missing)}. Available: {available}")
 
-    def missing(self, keys: Iterable[str]) -> tuple[str, ...]:
+    def missing(self, keys: Iterable[RegistryKey]) -> tuple[str, ...]:
         """Return missing keys in first-seen order."""
 
         missing: list[str] = []
         seen: set[str] = set()
         for key in keys:
-            if key in self._items or key in seen:
+            normalized = _normalize_key(key)
+            if normalized in self._items or normalized in seen:
                 continue
-            missing.append(key)
-            seen.add(key)
+            missing.append(normalized)
+            seen.add(normalized)
         return tuple(missing)
+
+
+def _normalize_key(key: RegistryKey) -> str:
+    return key.value.strip() if isinstance(key, StrEnum) else key.strip()

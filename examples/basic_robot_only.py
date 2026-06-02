@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from retarget import Retargeter, RetargetingProblem, SceneSpec, TaskKind
+from retarget import MotionFormat, Retargeter, RetargetingProblem, Robot, SceneSpec, TaskKind
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
-joint_names = motion_formats.get("minimal").joint_names
+joint_names = motion_formats.get(MotionFormat.MINIMAL).joint_names
 positions = np.zeros((20, len(joint_names), 3), dtype=float)
 positions[:, joint_names.index("Pelvis"), 0] = np.linspace(0.0, 0.2, 20)
 positions[:, joint_names.index("L_Toe"), 2] = -0.8
@@ -24,9 +24,9 @@ motion = MotionSequence(
 problem = RetargetingProblem(
     name="basic",
     task_kind=TaskKind.ROBOT_ONLY,
-    robot=robots.get("synthetic_humanoid"),
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
     motion=motion,
-    motion_format=motion_formats.get("minimal"),
+    motion_format=motion_formats.get(MotionFormat.MINIMAL),
     scene=SceneSpec.robot_only(),
 )
 result = Retargeter().run(problem)

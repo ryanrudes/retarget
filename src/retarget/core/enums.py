@@ -35,6 +35,80 @@ class SolverBackend(StrEnum):
     CVXPY_CLARABEL = "cvxpy_clarabel"
 
 
+class Robot(StrEnum):
+    """Built-in robot registry keys."""
+
+    SYNTHETIC_HUMANOID = "synthetic_humanoid"
+    G1_LIKE = "g1_like"
+    T1_LIKE = "t1_like"
+
+
+class RobotProviderName(StrEnum):
+    """Built-in robot provider registry keys."""
+
+    REGISTRY = "registry"
+    FILE = "file"
+    ASSET_STORE = "asset_store"
+
+
+class MotionFormat(StrEnum):
+    """Built-in motion format registry keys."""
+
+    MINIMAL = "minimal"
+    SMPLH = "smplh"
+    LAFAN = "lafan"
+    MOCAP = "mocap"
+    SMPLX = "smplx"
+
+
+class MotionLoaderSuffix(StrEnum):
+    """Built-in motion loader suffix registry keys."""
+
+    JSON = ".json"
+    CSV = ".csv"
+    NPY = ".npy"
+    NPZ = ".npz"
+
+
+class Objective(StrEnum):
+    """Built-in objective term registry keys."""
+
+    LAPLACIAN = "laplacian"
+    SMOOTHNESS = "smoothness"
+    NOMINAL_TRACKING = "nominal_tracking"
+
+
+class Constraint(StrEnum):
+    """Built-in constraint term registry keys."""
+
+    JOINT_LIMITS = "joint_limits"
+    TRUST_REGION = "trust_region"
+    FOOT_CONTACT = "foot_contact"
+    FOOT_LOCK = "foot_lock"
+    NON_PENETRATION = "non_penetration"
+    SELF_COLLISION = "self_collision"
+
+
+class ExportFormat(StrEnum):
+    """Built-in exporter registry keys."""
+
+    MUJOCO_NPZ = "mujoco_npz"
+
+
+class VisualizerName(StrEnum):
+    """Built-in visualizer registry keys."""
+
+    DRY_RUN = "dry_run"
+    VISER = "viser"
+
+
+class KinematicsBackendName(StrEnum):
+    """Built-in kinematics backend registry keys."""
+
+    SIMPLE = "simple"
+    MUJOCO = "mujoco"
+
+
 class ContactMode(StrEnum):
     """How contact constraints are inferred or supplied."""
 

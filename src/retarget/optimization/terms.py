@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from scipy import sparse
 
 from retarget.core.array import FloatArray
+from retarget.core.enums import Constraint, Objective
 from retarget.mesh.interaction import laplacian_matrix
 from retarget.optimization.problem import (
     ConstraintContribution,
@@ -462,13 +463,13 @@ def _pairs(spec: ConstraintSpec) -> tuple[tuple[str, str], ...] | None:
     return tuple(pairs)
 
 
-objective_terms.register(LaplacianObjective.name, LaplacianObjective())
-objective_terms.register(SmoothnessObjective.name, SmoothnessObjective())
-objective_terms.register(NominalTrackingObjective.name, NominalTrackingObjective())
+objective_terms.register(Objective.LAPLACIAN, LaplacianObjective())
+objective_terms.register(Objective.SMOOTHNESS, SmoothnessObjective())
+objective_terms.register(Objective.NOMINAL_TRACKING, NominalTrackingObjective())
 
-constraint_terms.register(JointLimitConstraint.name, JointLimitConstraint())
-constraint_terms.register(TrustRegionConstraint.name, TrustRegionConstraint())
-constraint_terms.register(FootContactConstraint.name, FootContactConstraint())
-constraint_terms.register(FootLockConstraint.name, FootLockConstraint())
-constraint_terms.register(NonPenetrationConstraint.name, NonPenetrationConstraint())
-constraint_terms.register(SelfCollisionConstraint.name, SelfCollisionConstraint())
+constraint_terms.register(Constraint.JOINT_LIMITS, JointLimitConstraint())
+constraint_terms.register(Constraint.TRUST_REGION, TrustRegionConstraint())
+constraint_terms.register(Constraint.FOOT_CONTACT, FootContactConstraint())
+constraint_terms.register(Constraint.FOOT_LOCK, FootLockConstraint())
+constraint_terms.register(Constraint.NON_PENETRATION, NonPenetrationConstraint())
+constraint_terms.register(Constraint.SELF_COLLISION, SelfCollisionConstraint())

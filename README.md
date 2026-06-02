@@ -18,7 +18,7 @@ Python API:
 ```python
 import numpy as np
 
-from retarget import Retargeter, RetargetingProblem, SceneSpec, TaskKind
+from retarget import MotionFormat, Retargeter, RetargetingProblem, Robot, SceneSpec, TaskKind
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
@@ -33,9 +33,9 @@ motion = MotionSequence(
 problem = RetargetingProblem(
     name="tiny",
     task_kind=TaskKind.ROBOT_ONLY,
-    robot=robots.get("synthetic_humanoid"),
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
     motion=motion,
-    motion_format=motion_formats.get("minimal"),
+    motion_format=motion_formats.get(MotionFormat.MINIMAL),
     scene=SceneSpec.robot_only(),
 )
 result = Retargeter().run(problem)

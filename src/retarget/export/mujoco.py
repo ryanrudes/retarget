@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.array import FloatArray, as_float_array
+from retarget.core.enums import ExportFormat
 from retarget.core.protocols import KinematicsBackend
 from retarget.export.registry import exporters
 from retarget.export.spec import ExportResult, ExportSpec
@@ -228,4 +229,4 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-exporters.register(MuJoCoTrackingExporter.format_name, MuJoCoTrackingExporter())
+exporters.register(ExportFormat.MUJOCO_NPZ, MuJoCoTrackingExporter())

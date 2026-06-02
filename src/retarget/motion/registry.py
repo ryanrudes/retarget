@@ -6,6 +6,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import cast
 
+from retarget.core.enums import MotionFormat
 from retarget.core.protocols import MotionLoader
 from retarget.core.registry import Registry
 from retarget.motion.spec import MotionFormatSpec
@@ -147,9 +148,9 @@ SMPLX_CORE_JOINTS = (
 )
 
 motion_formats.register(
-    "minimal",
+    MotionFormat.MINIMAL,
     MotionFormatSpec(
-        name="minimal",
+        name=MotionFormat.MINIMAL.value,
         joint_names=MINIMAL_JOINTS,
         root_joint="Pelvis",
         contact_joints=("L_Toe", "R_Toe"),
@@ -158,9 +159,9 @@ motion_formats.register(
     ),
 )
 motion_formats.register(
-    "smplh",
+    MotionFormat.SMPLH,
     MotionFormatSpec(
-        name="smplh",
+        name=MotionFormat.SMPLH.value,
         joint_names=SMPLH_CORE_JOINTS,
         root_joint="Pelvis",
         contact_joints=("L_Toe", "R_Toe"),
@@ -168,9 +169,9 @@ motion_formats.register(
     ),
 )
 motion_formats.register(
-    "lafan",
+    MotionFormat.LAFAN,
     MotionFormatSpec(
-        name="lafan",
+        name=MotionFormat.LAFAN.value,
         joint_names=LAFAN_CORE_JOINTS,
         root_joint="Hips",
         contact_joints=("LeftToeBase", "RightToeBase"),
@@ -179,9 +180,9 @@ motion_formats.register(
     ),
 )
 motion_formats.register(
-    "mocap",
+    MotionFormat.MOCAP,
     MotionFormatSpec(
-        name="mocap",
+        name=MotionFormat.MOCAP.value,
         joint_names=MOCAP_CORE_JOINTS,
         root_joint="Hips",
         contact_joints=("LeftToeBase", "RightToeBase"),
@@ -190,9 +191,9 @@ motion_formats.register(
     ),
 )
 motion_formats.register(
-    "smplx",
+    MotionFormat.SMPLX,
     MotionFormatSpec(
-        name="smplx",
+        name=MotionFormat.SMPLX.value,
         joint_names=SMPLX_CORE_JOINTS,
         root_joint="Pelvis",
         contact_joints=("L_Foot", "R_Foot"),

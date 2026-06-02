@@ -4,6 +4,12 @@ Named plugin registries used by the CLI and `RetargetingProblem` resolution.
 
 Extension registries support direct instances, zero-argument factories, and decorated classes for protocol-backed components. Decorated classes are instantiated immediately and validated against their protocol.
 
+::: retarget.core.registry.Registry
+
+## Built-in registry instances
+
+Each name below is a shared `Registry` instance. Use `.get(name)`, `.register(...)`, and `.names()` in application code. Built-in keys have `StrEnum` aliases such as `Robot.SYNTHETIC_HUMANOID`, `MotionFormat.MINIMAL`, `Objective.LAPLACIAN`, and `Constraint.JOINT_LIMITS`; custom extension keys remain plain strings.
+
 ::: retarget.robots.robots
 
 ::: retarget.robots.robot_providers

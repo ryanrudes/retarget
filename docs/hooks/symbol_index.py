@@ -28,6 +28,21 @@ LOWERCASE_SHORT_NAMES = frozenset(
     }
 )
 
+# Top-level `Registry` exports have no stable qualname; map to mkdocstrings anchors.
+REGISTRY_EXPORT_ANCHORS: dict[str, str] = {
+    "constraint_terms": "retarget.optimization.constraint_terms",
+    "exporters": "retarget.export.exporters",
+    "kinematics_backends": "retarget.kinematics.kinematics_backends",
+    "metrics": "retarget.metrics.metrics",
+    "motion_formats": "retarget.motion.motion_formats",
+    "motion_loaders": "retarget.motion.motion_loaders",
+    "objective_terms": "retarget.optimization.objective_terms",
+    "robot_providers": "retarget.robots.robot_providers",
+    "robots": "retarget.robots.robots",
+    "solver_factories": "retarget.optimization.solver_factories",
+    "visualizers": "retarget.visualization.visualizers",
+}
+
 AMBIGUOUS_SHORT_NAMES = frozenset(
     {
         "config",
@@ -136,7 +151,11 @@ def _export_entries() -> list[tuple[str, bool]]:
     entries: list[tuple[str, bool]] = []
     for name in retarget.__all__:
         obj = getattr(retarget, name)
-        full = _qualname(obj) or f"retarget.{name}"
+        full = (
+            _qualname(obj)
+            or REGISTRY_EXPORT_ANCHORS.get(name)
+            or f"retarget.{name}"
+        )
         entries.append((full, True))
     for module in (retarget.motion,):
         for name in getattr(module, "__all__", ()):

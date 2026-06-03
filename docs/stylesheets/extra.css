@@ -113,6 +113,64 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   background: inherit;
 }
 
+/* Collapsible in-page TOC (docs/javascripts/toc-collapsible.mjs). */
+.md-nav--secondary .retarget-toc-collapsible > nav.md-nav {
+  display: none;
+}
+
+.md-nav--secondary .retarget-toc-collapsible.retarget-toc-expanded > nav.md-nav {
+  display: block;
+}
+
+.md-nav--secondary .retarget-toc-collapsible {
+  position: relative;
+}
+
+.md-nav--secondary .retarget-toc-toggle {
+  position: absolute;
+  left: 0;
+  top: 0.35rem;
+  z-index: 1;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0.15rem;
+  background: transparent;
+  color: #a599e9;
+  cursor: pointer;
+  line-height: 1;
+  font: inherit;
+}
+
+.md-nav--secondary .retarget-toc-toggle::before {
+  content: "";
+  display: block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin: 0.2rem auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.md-nav--secondary .retarget-toc-collapsible.retarget-toc-expanded > .retarget-toc-toggle::before {
+  transform: rotate(45deg);
+}
+
+.md-nav--secondary .retarget-toc-collapsible > .md-nav__link {
+  padding-left: 1.15rem !important;
+}
+
+.md-nav--secondary .retarget-toc-toggle:hover,
+.md-nav--secondary .retarget-toc-toggle:focus-visible {
+  color: #cec5ff;
+  outline: none;
+  background-color: #2d2b5580;
+}
+
 /* Hide TOC when the page has no h2+ headings (MkDocs toc extension). */
 .md-sidebar--secondary[data-md-type="toc"]:not(:has(.md-nav--secondary .md-nav__list > .md-nav__item)),
 .md-nav--primary > .md-nav__list > .md-nav__item--active > .md-nav--secondary:not(:has(.md-nav__list > .md-nav__item)) {

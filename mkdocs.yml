@@ -13,6 +13,7 @@ extra_css:
 
 extra_javascript:
   - javascripts/hide-empty-toc.js
+  - javascripts/toc-collapsible-loader.js
   - javascripts/toc-scrollspy.js
   - javascripts/shiki-loader.js
   - javascripts/live-code-loader.js

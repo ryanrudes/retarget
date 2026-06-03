@@ -53,6 +53,7 @@ DECK_SAMPLE_POINTS = np.asarray(
     dtype=np.float64,
 )
 
+HUMAN_HEIGHT_M = 1.8034 # 5'11"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -167,6 +168,7 @@ def prepare_clip(
         link_target_weights=link_target_weights,
         link_target_masks=link_target_masks,
         link_target_source=np.asarray("motion_sync:skate_foot_support+video_core_joints", dtype=object),
+        height_m=np.asarray(HUMAN_HEIGHT_M, dtype=np.float64),
         name=np.asarray(clip_name, dtype=object),
     )
     np.save(output_dir / "deck_samples.npy", DECK_SAMPLE_POINTS)

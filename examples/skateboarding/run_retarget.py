@@ -67,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Result path. Defaults to <work-dir>/<demo>/<demo>_retarget.npz.")
     parser.add_argument("--live", action="store_true", help="Open the URDF-backed live visualizer after solving.")
     parser.add_argument("--dry-run", action="store_true", help="Print the result summary after solving.")
+    parser.add_argument("--progress", action="store_true", help="Show a Rich per-frame progress bar while retargeting.")
     return parser.parse_args()
 
 
@@ -157,43 +158,43 @@ def _build_problem(
     use_hard_scene_constraints: bool,
 ) -> RetargetingProblem:
     motion = load_motion(output_dir / "skate_motion.npz", "smplx", name=args.demo)
-    board = np.load(output_dir / "board_trajectory.npz", allow_pickle=True)
-    deck_samples = np.asarray(np.load(output_dir / "deck_samples.npy"), dtype=np.float64)
-    object_trajectory = ObjectTrajectory(
-        name="skateboard",
-        poses=PoseSequence.from_arrays(
-            np.asarray(board["positions"], dtype=np.float64),
-            np.asarray(board["quaternions"], dtype=np.float64),
-            fps=float(np.asarray(board["fps"]).reshape(())),
-        ),
-    )
+    # board = np.load(output_dir / "board_trajectory.npz", allow_pickle=True)
+    # deck_samples = np.asarray(np.load(output_dir / "deck_samples.npy"), dtype=np.float64)
+    # object_trajectory = ObjectTrajectory(
+    #     name="skateboard",
+    #     poses=PoseSequence.from_arrays(
+    #         np.asarray(board["positions"], dtype=np.float64),
+    #         np.asarray(board["quaternions"], dtype=np.float64),
+    #         fps=float(np.asarray(board["fps"]).reshape(())),
+    #     ),
+    # )
     scene = SceneSpec(
-        task_kind=TaskKind.OBJECT_INTERACTION,
-        object=ObjectSpec(name="skateboard", sample_points=deck_samples, trajectory=object_trajectory),
+        task_kind=TaskKind.ROBOT_ONLY, # TaskKind.OBJECT_INTERACTION,
+        #object=ObjectSpec(name="skateboard", sample_points=deck_samples, trajectory=object_trajectory),
         ground_range=(-3.0, 3.0),
         ground_size=15,
     )
     constraints = [
-        ConstraintSpec(name=Constraint.JOINT_LIMITS),
-        ConstraintSpec(name=Constraint.TRUST_REGION),
+        #ConstraintSpec(name=Constraint.JOINT_LIMITS),
+        #ConstraintSpec(name=Constraint.TRUST_REGION),
     ]
-    if use_hard_scene_constraints:
-        constraints.extend(
-            [
-                ConstraintSpec(name=Constraint.FOOT_CONTACT, parameters={"tolerance": 2e-3}),
-                ConstraintSpec(
-                    name=Constraint.NON_PENETRATION,
-                    parameters={
-                        "links": list(robot.contact_links),
-                        "scene_clearance": 0.015,
-                        "activation_distance": 0.05,
-                    },
-                ),
-            ]
-        )
+    # if use_hard_scene_constraints:
+    #     constraints.extend(
+    #         [
+    #             ConstraintSpec(name=Constraint.FOOT_CONTACT, parameters={"tolerance": 2e-3}),
+    #             ConstraintSpec(
+    #                 name=Constraint.NON_PENETRATION,
+    #                 parameters={
+    #                     "links": list(robot.contact_links),
+    #                     "scene_clearance": 0.015,
+    #                     "activation_distance": 0.05,
+    #                 },
+    #             ),
+    #         ]
+    #     )
     return RetargetingProblem(
         name=args.demo,
-        task_kind=TaskKind.OBJECT_INTERACTION,
+        task_kind=TaskKind.ROBOT_ONLY, # TaskKind.OBJECT_INTERACTION,
         robot=robot,
         motion=motion,
         motion_format=motion_formats.get("smplx"),
@@ -201,12 +202,13 @@ def _build_problem(
         solver=SolverSpec(backend=SolverBackend.CVXPY_CLARABEL, max_iterations=6, trust_radius=0.12),
         objectives=(
             ObjectiveSpec(name=Objective.LINK_TRACKING, weight=1.0),
-            ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.12),
-            ObjectiveSpec(name=Objective.NOMINAL_TRACKING, weight=0.05),
+            # ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.12),
+            # ObjectiveSpec(name=Objective.NOMINAL_TRACKING, weight=0.05),
         ),
         constraints=tuple(constraints),
-        scale_to_robot=False,
+        scale_to_robot=True,
         output_fps=motion.fps,
+        show_progress=args.progress,
         metadata={"example": "skateboarding", "prepared_dir": str(output_dir)},
     )
 

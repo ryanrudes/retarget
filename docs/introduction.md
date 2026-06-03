@@ -4,6 +4,8 @@ This page walks through a **complete research-style project**—retargeting a hu
 
 If you have not installed the toolkit yet, run [Quickstart](quickstart.md) first (`uv sync`, `retarget doctor`, one fixture run). Then return here.
 
+Lab capture and time sync live in **[motion_sync](https://github.com/ryanrudes/motion_sync)** with contact algorithms in **[contact_detection](https://github.com/ryanrudes/event_detection)**. See the [Ecosystem](ecosystem/index.md) section for workspace layout, [custom schemas](ecosystem/custom-schemas.md), and the [full pipeline](ecosystem/pipeline.md).
+
 Runnable scripts for this walkthrough live in `examples/skateboarding/`.
 
 ## The scenario
@@ -121,13 +123,24 @@ Full loader rules: [Add a motion format](adding-a-motion-format.md).
 
 ### Python assembly
 
-When exporting from your own fusion script, build a `MotionSequence` and optional NPZ files the loaders understand. The repository ships a synthetic version in `examples/skateboarding/_synthetic.py` (`synthetic_skate_motion`) and an exporter in `examples/skateboarding/fuse_motion.py`:
+When exporting from your own fusion script, build a `MotionSequence` and optional NPZ files the loaders understand.
+
+| Path | Script | Data |
+|------|--------|------|
+| Synthetic fixture (no lab data) | `examples/skateboarding/fuse_motion.py` | Checked-in demo NPZ |
+| Real `synced.npz` from motion_sync | `examples/skateboarding/fuse_unified.py` | Your capture |
 
 ```bash
+# Fixture only
 uv run python examples/skateboarding/fuse_motion.py
+
+# Real clip (after motion-sync sync + detect)
+uv run python examples/skateboarding/fuse_unified.py \
+  --synced ../motion_sync/output/synced/<demo> \
+  --output examples/skateboarding/data/<demo>
 ```
 
-That writes `examples/skateboarding/data/skate_motion.npz` (joint positions + `contact_states`), `deck_samples.npy`, and `board_trajectory.npz`. For SMPL-X, use `motion_formats.get("smplx")` and contact keys `L_Foot` / `R_Foot` instead of the minimal toe names in the fixture.
+Exports use `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()` and `clip.core_joint_positions()`. For SMPL-X, use `motion_formats.get("smplx")` and contact keys `L_Foot` / `R_Foot`.
 
 Optional `root_poses` improve root initialization when your tracker provides global pelvis pose.
 

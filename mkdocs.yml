@@ -76,6 +76,11 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Introduction: introduction.md
+  - Ecosystem:
+      - Overview: ecosystem/index.md
+      - Workspace setup: ecosystem/workspace-setup.md
+      - End-to-end pipeline: ecosystem/pipeline.md
+      - Custom schemas: ecosystem/custom-schemas.md
   - Tutorials:
       - Overview: tutorials/index.md
       - Your first retarget: tutorials/your-first-retarget.md
@@ -104,6 +109,8 @@ nav:
       - Troubleshooting: troubleshooting.md
   - API:
       - Overview: api/index.md
+      - motion_sync: api/motion-sync.md
+      - contact_detection: api/contact-detection.md
       - Pipeline: api/pipeline.md
       - Data models: api/models.md
       - Protocols: api/protocols.md
@@ -118,6 +125,10 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
+          paths:
+            - src
+            - vendor/motion_sync
+            - vendor/event_detection/src
           options:
             docstring_style: google
             docstring_options:

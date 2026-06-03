@@ -5,6 +5,7 @@ Objectives and constraints are small classes implementing `describe()` plus `bui
 Built-in objective names:
 
 - `laplacian`: preserves interaction-mesh local geometry.
+- `link_tracking`: tracks named robot links to per-frame target positions stored in `MotionSequence.metadata["link_targets"]`.
 - `smoothness`: keeps adjacent frames close in actuated-joint space.
 - `nominal_tracking`: tracks configured nominal joints when supplied.
 

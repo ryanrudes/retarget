@@ -18,7 +18,7 @@ uv run retarget run --config examples/run_config.toml   # writes examples/config
 uv run retarget evaluate --result examples/configured_fixture.npz --config examples/run_config.toml
 ```
 
-For a full capture-to-robot path (Vicon, GVHMR, foot support, fuse, retarget), see [Research ecosystem](ecosystem/index.md) and `examples/skateboarding/`.
+For a full capture-to-robot path (Vicon, GVHMR, foot support, prepare, retarget), see [Research ecosystem](ecosystem/index.md) and `examples/skateboarding/`.
 
 Verify local changes with the same gates used by CI:
 
@@ -32,4 +32,4 @@ uv run mkdocs build --strict
 
 Sibling-repo layout and optional editable installs: [Workspace setup](ecosystem/workspace-setup.md).
 
-Pytest runs a fixed set of example scripts from a temporary working directory (`tests/test_examples.py`: `basic_robot_only.py`, `batch_and_evaluate.py`, `climbing_terrain.py`, `custom_motion_format.py`, `custom_objective.py`, `custom_robot.py`, `object_interaction.py`, `skateboarding/run_retarget.py`). Keep those scripts self-contained and free of repo-local output assumptions.
+Pytest runs a fixed set of dependency-free example scripts from a temporary working directory (`tests/test_examples.py`: `basic_robot_only.py`, `batch_and_evaluate.py`, `climbing_terrain.py`, `custom_motion_format.py`, `custom_objective.py`, `custom_robot.py`, `object_interaction.py`). Research scripts such as `examples/skateboarding/run_retarget.py` have help-message smoke tests and separate data/asset setup.

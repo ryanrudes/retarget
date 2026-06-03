@@ -29,9 +29,9 @@ flowchart TB
     detect -.->|classify_foot_support_states| algo[Algorithms]
   end
   subgraph fuse [Your export script]
-    clip --> fuse_script[fuse_unified.py]
-    fuse_script --> skate_npz[skate_motion.npz]
-    fuse_script --> board_npz[board_trajectory.npz]
+    clip --> prepare_script[prepare_clip.py]
+    prepare_script --> skate_npz[skate_motion.npz + link targets]
+    prepare_script --> board_npz[board_trajectory.npz]
   end
   subgraph rt [retarget]
     skate_npz --> motion[MotionSequence]
@@ -76,4 +76,4 @@ The design goal is **one clip, one timeline, many registered views**:
 | Video / SMPL-X joints | `VideoSchema` / `register_video` | `clip.joint(SmplxCoreJoints.L_FOOT)` |
 | Contacts | `ContactSchema` / `register_contacts` | `clip.contact(SKATE_FOOT_SUPPORT)` |
 
-`retarget` never reads `synced.npz` directly in the core library; **`examples/skateboarding/fuse_unified.py`** adapts a `SyncClip` into the motion/scene files your run config expects.
+`retarget` never reads `synced.npz` directly in the core library; **`examples/skateboarding/prepare_clip.py`** adapts a `SyncClip` into the motion, scene, and link-target files your run config expects.

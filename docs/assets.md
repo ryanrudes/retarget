@@ -2,6 +2,14 @@
 
 The package does not vendor robot, object, or terrain assets. Use an asset store to reference local files or explicitly install copied assets from a manifest.
 
+For the Unitree G1 model used by the skateboarding example, the repository includes a bootstrap script that downloads or reuses Holosoma, copies the G1 URDF/MJCF assets into the ignored asset store, generates a validated `robot.toml`, and registers the asset:
+
+```bash
+uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
+```
+
+Use `--holosoma-root /path/to/holosoma` to reuse an existing checkout instead of cloning. After bootstrap, run configs can load the model with `robot = "g1"` and `robot_provider = "asset_store"`.
+
 Import one local path:
 
 ```bash

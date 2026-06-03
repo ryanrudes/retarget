@@ -23,6 +23,6 @@ Upstream [motion_sync](https://github.com/ryanrudes/motion_sync) clips keep sens
 
 - **Vicon** rigid bodies and markers in a `synced.npz` clip are **Z-up** (meters).
 - **Video / SMPL-X** body joints on the same clip are typically **Y-up** (meters).
-- Fuse/export scripts (for example `examples/skateboarding/fuse_unified.py`) convert the packed human motion to Z-up before writing NPZ files that `retarget` loads.
+- Prepare/export scripts (for example `examples/skateboarding/prepare_clip.py`) convert the packed human motion to Z-up before writing NPZ files that `retarget` loads.
 
 See [Custom schemas](ecosystem/custom-schemas.md) for body/marker naming and [Introduction — Step 3](introduction.md#step-3-time-align-and-build-motionsequence) for the full align → convert → pack workflow. Register or adapt a motion format so `load_motion` applies the same Z-up boundary as the rest of the library ([Add a motion format](adding-a-motion-format.md)).

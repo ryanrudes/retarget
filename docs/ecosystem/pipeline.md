@@ -36,48 +36,44 @@ foot = clip.contact(SKATE_FOOT_SUPPORT)
 stance = foot.stance_matrix()  # (frames, 2) for retarget L_Foot / R_Foot
 ```
 
-## Phase B — Fuse into retarget inputs
+## Phase B — Prepare retarget inputs
 
-Foot-support must be on the clip before fuse (Phase A step 5). Re-run if you re-synced:
-
-```bash
-cd ~/GitHub/motion_sync
-uv run motion-sync detect foot-support output/synced/<demo> --plot
-```
+Foot-support should be on the clip before preparation (Phase A step 5). `prepare_clip.py` will refresh stale `SKATE_FOOT_SUPPORT` labels in memory; pass `--save-contact-layer` if you want to persist a freshly detected layer back to `synced.npz`.
 
 ```bash
 cd ~/GitHub/retarget
 uv sync
-uv pip install -e ../motion_sync
-uv pip install -e ../event_detection
+git submodule update --init
 
-uv run python examples/skateboarding/fuse_unified.py \
-  --synced ../motion_sync/output/synced/<demo> \
-  --output examples/skateboarding/data/<demo>
+uv run python examples/skateboarding/prepare_clip.py --demo <demo>
 ```
 
 Writes:
 
 | File | Contents |
 |------|----------|
-| `skate_motion.npz` | Z-up SMPL-X core joints, `contact_states`, `fps` |
+| `skate_motion.npz` | Z-up SMPL-X core joints, `contact_states`, `fps`, and named `link_tracking` targets |
 | `board_trajectory.npz` | Board positions + quaternions (wxyz) |
 | `deck_samples.npy` | Deck sample points in object frame |
 
-`fuse_unified.py` uses `clip.core_joint_positions()`, `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()`, and Vicon board poses from `clip.body(Bodies.SKATEBOARD)`.
+`prepare_clip.py` uses `clip.core_joint_positions()`, `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()`, Vicon shoe poses from `clip.body(Bodies.LEFT_SHOE / RIGHT_SHOE)`, and board poses from `clip.body(Bodies.SKATEBOARD)`.
 
 ## Phase C — retarget
 
-Run from `examples/skateboarding/` (paths in `run_config_pushoff5.toml` are relative to that directory). Example demo: `pushoff5_twoshoes` after Phase B.
+Install the G1 robot assets once, then run the programmatic MuJoCo-aware example. Example demo: `pushoff5_twoshoes` after Phase B.
 
 ```bash
-cd ~/GitHub/retarget/examples/skateboarding
-uv run retarget run --config run_config_pushoff5.toml
-uv run retarget evaluate --result pushoff5_retarget.npz --config run_config_pushoff5.toml
-uv run retarget view --result pushoff5_retarget.npz --dry-run
+cd ~/GitHub/retarget
+uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
+uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes
+uv run retarget evaluate \
+  --result examples/skateboarding/generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz \
+  --config examples/skateboarding/run_config.toml
+uv run retarget view \
+  --result examples/skateboarding/generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz \
+  --live \
+  --robot-spec .retarget_assets/robot/g1/robot.toml
 ```
-
-Synthetic-only fixture: `fuse_motion.py` + `run_config.toml` → `skateboarding_retarget.npz` in the same directory.
 
 Tune objectives and constraints in the TOML ([Run configs](../tutorials/run-configs.md), [Introduction](../introduction.md)).
 

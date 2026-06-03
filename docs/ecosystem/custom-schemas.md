@@ -165,9 +165,9 @@ Python enums must stay consistent with those strings.
 
 1. Load `SyncClip` with your session.
 2. Run detectors; save clip.
-3. Convert `core_joint_positions()` to Z-up if needed (see `fuse_unified.py`).
+3. Convert `core_joint_positions()` to Z-up if needed (see `prepare_clip.py`).
 4. Map `stance_matrix()` or per-foot states to `contact_states` with names matching `motion_formats.get("smplx").contact_joints`.
-5. Write `skate_motion.npz` / `board_trajectory.npz` (or your scene paths).
+5. Write `skate_motion.npz` / `board_trajectory.npz` plus any `link_target_*` arrays used as retargeter hints.
 6. Point `retarget run` config at those files.
 
 See [End-to-end pipeline](pipeline.md) and [Introduction](../introduction.md).

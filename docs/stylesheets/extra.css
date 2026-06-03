@@ -573,6 +573,16 @@ a code.doc-symbol-type_alias::after {
   content: "type";
 }
 
+code.doc-symbol-enum::after,
+a code.doc-symbol-enum::after {
+  content: "enum";
+}
+
+code.doc-symbol-member::after,
+a code.doc-symbol-member::after {
+  content: "member";
+}
+
 /* Live code — header status pill + floating icon actions on code blocks */
 /* Single dark palette only — hide any cached palette toggle chrome */
 .md-header__option[data-md-component="palette"],

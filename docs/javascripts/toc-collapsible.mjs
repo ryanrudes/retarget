@@ -1,6 +1,6 @@
 /**
  * Collapse nested in-page TOC sections (API classes, category groups) by default.
- * Top-level entries stay visible; expand via chevron or when scroll-spy highlights a child.
+ * Top-level entries stay visible; expand only via the chevron toggle (not on scroll).
  */
 
 const CATEGORY_ID =
@@ -84,42 +84,12 @@ export function setupAllCollapsibleTocs(root = document) {
   }
 }
 
-/**
- * @param {HTMLElement} nav
- */
-export function expandCollapsibleAncestors(nav) {
-  const active = nav.querySelector('[data-retarget-toc-active="true"]');
-  if (!active) {
-    return;
-  }
-
-  let item = active.closest(".md-nav__item");
-  while (item) {
-    if (item.classList.contains("retarget-toc-collapsible")) {
-      setExpanded(item, true);
-    }
-    const parentNav = item.parentElement?.closest("nav.md-nav");
-    item = parentNav?.closest(".md-nav__item") ?? null;
-  }
-}
-
-/**
- * @param {HTMLElement} root
- */
-export function expandAllActiveAncestors(root = document) {
-  for (const nav of root.querySelectorAll(TOC_NAV_SELECTOR)) {
-    expandCollapsibleAncestors(nav);
-  }
-}
-
 if (typeof document$ !== "undefined") {
   document$.subscribe(() => {
     setupAllCollapsibleTocs();
-    expandAllActiveAncestors();
   });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   setupAllCollapsibleTocs();
-  expandAllActiveAncestors();
 });

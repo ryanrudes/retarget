@@ -181,28 +181,6 @@
           link.setAttribute(ACTIVE_ATTR, "true");
         }
       }
-      expandCollapsibleTocAncestors(nav);
-    }
-  }
-
-  /** @param {HTMLElement} nav */
-  function expandCollapsibleTocAncestors(nav) {
-    const active = nav.querySelector(`[${ACTIVE_ATTR}="true"]`);
-    if (!active) {
-      return;
-    }
-
-    let item = active.closest(".md-nav__item");
-    while (item) {
-      if (item.classList.contains("retarget-toc-collapsible")) {
-        item.classList.add("retarget-toc-expanded");
-        item.classList.remove("retarget-toc-collapsed");
-        item
-          .querySelector(":scope > .retarget-toc-toggle")
-          ?.setAttribute("aria-expanded", "true");
-      }
-      const parentNav = item.parentElement?.closest("nav.md-nav");
-      item = parentNav?.closest(".md-nav__item") ?? null;
     }
   }
 

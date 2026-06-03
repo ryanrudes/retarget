@@ -79,10 +79,9 @@ def _spawn_jupyter() -> tuple[bool, str]:
 
 def _cors_headers(environ: dict[str, Any]) -> list[tuple[str, str]]:
     origin = environ.get("HTTP_ORIGIN")
-    if origin and ("localhost" in origin or "127.0.0.1" in origin):
-        allow_origin = origin
-    else:
-        allow_origin = "*"
+    allow_origin = (
+        origin if origin and ("localhost" in origin or "127.0.0.1" in origin) else "*"
+    )
     return [
         ("Access-Control-Allow-Origin", allow_origin),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
@@ -190,8 +189,6 @@ class _LauncherHandler(BaseHTTPRequestHandler):
             "REMOTE_ADDR": self.client_address[0],
             "HTTP_ORIGIN": self.headers.get("Origin", ""),
         }
-
-        chunks: list[bytes] = []
 
         def start_response(status: str, headers: list[tuple[str, str]]) -> None:
             self.send_response(int(status.split()[0]))

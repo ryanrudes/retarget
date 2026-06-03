@@ -58,10 +58,10 @@ def _load_clip(synced_path: Path):
     try:
         from motion_sync import SyncClip
         from motion_sync.schemas.skateboarding import (
-            Bodies,
             SKATE_FOOT_SUPPORT,
             SKATE_SESSION,
             SKATE_VIDEO,
+            Bodies,
             SmplxCoreJoints,
         )
     except ImportError as exc:

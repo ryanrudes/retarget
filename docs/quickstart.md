@@ -21,7 +21,7 @@ uv run retarget evaluate --result examples/configured_fixture.npz --config examp
 Verify local changes with the same gates used by CI:
 
 ```bash
-uv run ruff check src tests examples
+uv run ruff check src tests examples docs
 uv run mypy src
 uv run pytest
 uv run mkdocs build --strict

@@ -1,15 +1,26 @@
 ## Learned User Preferences
 
 - Docs syntax highlighting must match VS Code "Shades of Purple" quality; use Shiki with the official VS Code theme JSON, not Pygments or Highlight.js. Live-code edit mode must use the same Shiki highlighting as view mode (CodeMirror via `codeToTokens`).
-- Docs site chrome should follow the Shades of Purple palette instead of Material's gray defaults.
+- Docs site chrome should follow the Shades of Purple dark palette only (single `slate` scheme in `mkdocs.yml`; no light-mode toggle).
+- Disable document/sidebar rubber-band overscroll (`overscroll-behavior: none` on `html`, `body`, and `.md-sidebar__scrollwrap` in `sop-theme.css`).
 - Main page background should be darker than code block backgrounds so code panels read as elevated.
 - TOC sticky title background must match the sidebar color, not the page background.
 - Do not show contributors or copyright footer (`copyright` removed from `mkdocs.yml`; `.md-footer { display: none }` in `extra.css`).
+- Hovering recognized `retarget` API symbols in docs code blocks underlines them and shows mkdocstrings tooltips; click jumps to the API entry. Dotted tokens (`fmt.joint_names`, `motion_formats.get`, `result.save_npz`) resolve via the rightmost indexed segment (`docs/javascripts/api-navigation.mjs`).
+- Live-code status/control lives in the header immediately left of the search bar (compact); it must not overlay the right-hand TOC. Distinguish Jupyter “not running” from “not installed”; clicking when installed should start the server if needed.
+- API symbol-kind badges use Pythonic labels (`def`, `class`, `var`), not abbreviated forms like `meth` (styled in `docs/stylesheets/extra.css`). API page heading badges should use the same per-kind colors as the TOC/sidebar, not a single yellow style.
+- Docs should include end-to-end research walkthroughs (heterogeneous sensors → `MotionSequence` + scene → `RetargetingProblem`), not only per-subsystem tutorials.
 
 ## Learned Workspace Facts
 
 - Docs are built with MkDocs Material; preview with `uv sync --extra dev` then `uv run mkdocs serve`.
-- Site chrome theming lives in `docs/stylesheets/sop-theme.css`; code block layout overrides in `docs/stylesheets/extra.css`. Wide-layout sidebar backgrounds: paint `.md-sidebar__scrollwrap` and offset Material's `height: 0` plus `.md-main__inner` margin gap.
+- Site chrome theming lives in `docs/stylesheets/sop-theme.css`; code block layout overrides in `docs/stylesheets/extra.css`. Wide-layout sidebars: keep Material `height: 0` placeholders, paint `.md-sidebar__scrollwrap`, and `position: fixed` the scroll columns (`top: 4.8rem` = header + `navigation.tabs`, `height: calc(100vh - 4.8rem)`) so sidebars stay pinned for the full viewport and do not shift upward when the main document is scrolled to the bottom (do not set `height: auto` on `.md-sidebar`).
 - Syntax highlighting uses Shiki at runtime via `docs/javascripts/shiki-highlight.mjs` and `docs/themes/shades-of-purple-shiki.json`.
-- Live-code execution uses `docs/javascripts/live-code*.mjs` with local Jupyter via `./scripts/docs-jupyter.sh`.
+- Live-code execution uses `docs/javascripts/live-code*.mjs` with local Jupyter via `./scripts/docs-jupyter.sh`; `docs/hooks/jupyter_serve.py` starts a helper on `http://127.0.0.1:8889` during `mkdocs serve` (and mirrors routes on the docs origin when possible) so the header switch can spawn Jupyter.
+- Inline `` `Symbol` `` mentions in Markdown are auto-linked to API docs (mkdocstrings/autorefs tooltips) via `docs/hooks/linkify_api_refs.py` + `docs/hooks/symbol_index.py` using documented API anchor ids (`docs/.cache/api-anchor-ids.json`, written each build; run `mkdocs build` twice after a clean checkout for full coverage). Fenced code blocks use `docs/javascripts/api-navigation.mjs` with Material `md-tooltip2` symbol-badge tooltips (same as inline autorefs; `titles` in `api-symbols.json`). `docs/hooks/api_symbols.py` writes `site/javascripts/api-symbols.json` and a gitignored copy under `docs/javascripts/` (seeded on `on_pre_build` so `mkdocs serve` has titles in its temp dir). Restart `mkdocs serve` after changing those hooks or the JS.
+- mkdocstrings `::: Symbol` blocks are root objects; set `show_root_heading: true`, `show_root_full_path: false`, and `show_object_full_path: false` in `mkdocs.yml` or API class headings render only in the TOC, not in page body.
+- API member headings and sidebar TOC use decorator badges (`property`, `classmethod`, …) instead of `var`/`def` when mkdocstrings emits `doc-labels` (`docs/hooks/sync_toc_labels.py` + `docs/javascripts/sync-toc-labels.mjs`).
+- TOC scroll-spy is `docs/javascripts/toc-scrollspy.js` (replaces `navigation.tracking`). Keep `toc.follow` disabled. Highlight uses `data-retarget-toc-active` on TOC links (not `md-nav__link--active`) so Material cannot leave duplicate yellow bars.
 - Dark-mode Shades of Purple palette: page `#1E1E3F`, code blocks `#2D2B55`, sidebars `#222244`.
+- `docs/introduction.md` is in site nav after Quickstart and before Tutorials (skateboarding research use case); runnable companion code lives in `examples/skateboarding/` (`fuse_motion.py`, `run_retarget.py`, `run_config.toml`).
+- Preview retarget `.npz` results with `uv sync --extra viz` and `retarget view --result <path> --live` (Viser); `--dry-run` prints a summary without the viz extra.

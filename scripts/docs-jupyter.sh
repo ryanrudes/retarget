@@ -17,5 +17,6 @@ exec uv run jupyter lab \
   --ServerApp.token="$TOKEN" \
   --ServerApp.allow_origin_pat="$ALLOW_ORIGIN_PAT" \
   --ServerApp.allow_credentials=true \
+  --ServerApp.open_browser=false \
   --ServerApp.port="$PORT" \
   --ServerApp.root_dir="$ROOT"

@@ -1,4 +1,9 @@
 import hashlib
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -64,3 +69,96 @@ def test_research_asset_manifest_template_is_valid():
     }
     assert all(asset.license for asset in manifest.assets)
     assert all(asset.notice for asset in manifest.assets)
+
+
+def test_bootstrap_robot_assets_from_local_holosoma_fixture(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _load_bootstrap_module(repo_root)
+    holosoma_root = tmp_path / "holosoma"
+    g1_dir = holosoma_root / module.HOLOSOMA_G1_DIR
+    g1_dir.mkdir(parents=True)
+    (holosoma_root / "LICENSE").write_text("Apache-2.0")
+    (holosoma_root / "NOTICE").write_text("fixture notice")
+    (g1_dir / module.G1_MUJOCO_XML).write_text("<mujoco model='g1_29dof'/>")
+    (g1_dir / module.G1_URDF).write_text(_minimal_g1_urdf(module))
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{repo_root / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "bootstrap_robot_assets.py"),
+            "g1",
+            "--store",
+            str(tmp_path / "store"),
+            "--holosoma-root",
+            str(holosoma_root),
+        ],
+        check=True,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    record = AssetStore(tmp_path / "store").load().find("g1")
+    assert record is not None
+    assert record.kind == AssetKind.ROBOT
+    assert (record.path / "robot.toml").exists()
+    assert (record.path / "HOLOSOMA_LICENSE").exists()
+
+
+def _load_bootstrap_module(repo_root: Path):
+    spec = importlib.util.spec_from_file_location(
+        "bootstrap_robot_assets_test",
+        repo_root / "scripts" / "bootstrap_robot_assets.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _minimal_g1_urdf(module) -> str:
+    joint_names = (
+        "left_hip_pitch_joint",
+        "left_hip_roll_joint",
+        "left_hip_yaw_joint",
+        "left_knee_joint",
+        "left_ankle_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_hip_pitch_joint",
+        "right_hip_roll_joint",
+        "right_hip_yaw_joint",
+        "right_knee_joint",
+        "right_ankle_pitch_joint",
+        "right_ankle_roll_joint",
+        "waist_yaw_joint",
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "left_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_yaw_joint",
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+        "right_wrist_pitch_joint",
+        "right_wrist_yaw_joint",
+    )
+    links = "\n".join(f'  <link name="{name}"/>' for name in ("pelvis", *module.G1_LINK_NAMES))
+    joints = "\n".join(
+        f"""
+  <joint name="{name}" type="revolute">
+    <parent link="pelvis"/>
+    <child link="{module.G1_LINK_NAMES[index % len(module.G1_LINK_NAMES)]}"/>
+    <limit lower="-1.0" upper="1.0" effort="1" velocity="1"/>
+  </joint>""".rstrip()
+        for index, name in enumerate(joint_names)
+    )
+    return f"<robot name=\"g1_29dof\">\n{links}\n{joints}\n</robot>\n"

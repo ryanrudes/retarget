@@ -6,6 +6,23 @@ const scope = typeof __md_scope !== "undefined" ? __md_scope : new URL(".", loca
 const INDEX_URL = new URL("javascripts/api-symbols.json", scope).href;
 const HIGHLIGHT_NAME = "api-nav-target";
 
+/**
+ * api-symbols.json stores root-absolute paths (/api/...). On subpath deploys
+ * (e.g. GitHub Pages at /retarget/), prepend __md_scope's directory prefix.
+ *
+ * @param {string} href
+ */
+function resolveSiteHref(href) {
+  if (!href.startsWith("/")) {
+    return href;
+  }
+  const rootPath = new URL(scope).pathname;
+  if (rootPath !== "/" && !href.startsWith(rootPath)) {
+    return `${rootPath.replace(/\/$/, "")}${href}`;
+  }
+  return href;
+}
+
 /** @type {{ version?: number, byId: Record<string, string>, byShortName: Record<string, string>, titles?: Record<string, string>, titlesByShortName?: Record<string, string> } | null} */
 let index = null;
 
@@ -225,7 +242,7 @@ function resolveSymbolMatch(symbol, start, end, offset, data) {
 }
 
 function anchorIdFromHref(href) {
-  const url = new URL(href, scope);
+  const url = new URL(resolveSiteHref(href), scope);
   const hash = url.hash.slice(1);
   return hash ? decodeURIComponent(hash) : null;
 }
@@ -422,7 +439,7 @@ function applyHoverHighlight(range) {
 }
 
 function navigateTo(href) {
-  const url = new URL(href, scope);
+  const url = new URL(resolveSiteHref(href), scope);
   if (url.origin === location.origin && url.pathname === location.pathname && url.hash) {
     const target = document.getElementById(url.hash.slice(1));
     if (target) {

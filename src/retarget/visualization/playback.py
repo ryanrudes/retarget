@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -10,6 +11,9 @@ from scipy.spatial.transform import Rotation
 
 from retarget.core.array import FloatArray, as_float_array, normalize_quaternion
 from retarget.results.spec import RetargetingResult
+
+if TYPE_CHECKING:
+    from retarget.robots import RobotSpec
 
 
 class PlaybackFrame(BaseModel):
@@ -96,6 +100,7 @@ class PlaybackObject(BaseModel):
     world_points: FloatArray
     positions: FloatArray
     quaternions: FloatArray
+    mesh_path: Path | None = None
 
     @field_validator("local_points", mode="before")
     @classmethod
@@ -129,6 +134,11 @@ class PlaybackObject(BaseModel):
             raise ValueError("quaternions must have shape (frames, 4)")
         return _normalize_quaternion_rows(arr)
 
+    @field_validator("mesh_path", mode="before")
+    @classmethod
+    def _validate_mesh_path(cls, value: Any) -> Path | None:
+        return None if value in (None, "") else Path(str(value))
+
     @model_validator(mode="after")
     def _validate_lengths(self) -> PlaybackObject:
         if self.world_points.shape[1] != self.local_points.shape[0]:
@@ -155,6 +165,10 @@ class PlaybackRobot(BaseModel):
     link_names: tuple[str, ...]
     link_positions: FloatArray
     edges: tuple[tuple[int, int], ...] = ()
+    joint_names: tuple[str, ...] = ()
+    joint_start: int = 7
+    urdf_path: Path | None = None
+    mujoco_xml_path: Path | None = None
 
     @field_validator("link_positions", mode="before")
     @classmethod
@@ -164,6 +178,11 @@ class PlaybackRobot(BaseModel):
             raise ValueError("link_positions must have shape (frames, links, 3)")
         return arr
 
+    @field_validator("urdf_path", "mujoco_xml_path", mode="before")
+    @classmethod
+    def _validate_model_path(cls, value: Any) -> Path | None:
+        return None if value in (None, "") else Path(str(value))
+
     @model_validator(mode="after")
     def _validate_links(self) -> PlaybackRobot:
         if self.link_positions.shape[1] != len(self.link_names):
@@ -171,6 +190,8 @@ class PlaybackRobot(BaseModel):
         for first, second in self.edges:
             if first < 0 or second < 0 or first >= len(self.link_names) or second >= len(self.link_names):
                 raise ValueError("robot edge indices must reference link_names")
+        if self.joint_start < 0:
+            raise ValueError("joint_start must be non-negative")
         return self
 
     @property
@@ -192,6 +213,18 @@ class PlaybackRobot(BaseModel):
             return None
         points = self.link_positions[frame_index]
         return np.asarray([[points[first], points[second]] for first, second in self.edges], dtype=np.float64)
+
+    def joint_configuration(self, qpos: FloatArray) -> FloatArray:
+        """Return robot actuated joints from one qpos vector."""
+
+        if not self.joint_names:
+            return np.zeros(0, dtype=np.float64)
+        values = np.zeros(len(self.joint_names), dtype=np.float64)
+        start = self.joint_start
+        stop = min(start + len(self.joint_names), qpos.shape[0])
+        if stop > start:
+            values[: stop - start] = qpos[start:stop]
+        return values
 
 
 class PlaybackData(BaseModel):
@@ -303,14 +336,14 @@ class PlaybackData(BaseModel):
         )
 
 
-def build_playback_data(result: RetargetingResult) -> PlaybackData:
+def build_playback_data(result: RetargetingResult, *, robot_spec: RobotSpec | None = None) -> PlaybackData:
     """Convert a retargeting result into visualization-ready arrays."""
 
     frame_count = result.frame_count
     time_s = np.arange(frame_count, dtype=np.float64) / result.fps
     root_positions = _root_positions(result.qpos)
     root_quaternions = _root_quaternions(result.qpos, frame_count)
-    playback_robot = _robot_playback(result)
+    playback_robot = _robot_playback(result, robot_spec=robot_spec)
     playback_object = _object_playback(result)
     return PlaybackData(
         name=result.name,
@@ -375,13 +408,23 @@ def _object_playback(result: RetargetingResult) -> PlaybackObject | None:
         world_points=world_points,
         positions=positions,
         quaternions=quaternions,
+        mesh_path=_metadata_path(object_metadata.get("mesh_path")),
     )
 
 
-def _robot_playback(result: RetargetingResult) -> PlaybackRobot | None:
+def _robot_playback(result: RetargetingResult, *, robot_spec: RobotSpec | None = None) -> PlaybackRobot | None:
     if result.robot_link_positions is None:
         return None
     metadata = _robot_playback_metadata(result.metadata)
+    if robot_spec is not None:
+        metadata = {
+            **metadata,
+            "name": robot_spec.name,
+            "joint_names": list(robot_spec.joint_names),
+            "joint_start": robot_spec.qpos_layout.joint_start,
+            "urdf_path": str(robot_spec.urdf_path) if robot_spec.urdf_path is not None else None,
+            "mujoco_xml_path": str(robot_spec.mujoco_xml_path) if robot_spec.mujoco_xml_path is not None else None,
+        }
     link_count = result.robot_link_positions.shape[1]
     link_names = _robot_link_names(metadata, link_count)
     return PlaybackRobot(
@@ -389,6 +432,10 @@ def _robot_playback(result: RetargetingResult) -> PlaybackRobot | None:
         link_names=link_names,
         link_positions=result.robot_link_positions,
         edges=_robot_edges(metadata.get("edges"), link_names),
+        joint_names=_string_tuple(metadata.get("joint_names")),
+        joint_start=_integer_value(metadata.get("joint_start"), default=7),
+        urdf_path=_metadata_path(metadata.get("urdf_path")),
+        mujoco_xml_path=_metadata_path(metadata.get("mujoco_xml_path")),
     )
 
 
@@ -429,6 +476,25 @@ def _edge_index(value: Any, indices: dict[str, int]) -> int | None:
     if isinstance(value, int):
         return value if 0 <= value < len(indices) else None
     return indices.get(str(value))
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(item) for item in value)
+
+
+def _integer_value(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _metadata_path(value: Any) -> Path | None:
+    if value in (None, ""):
+        return None
+    return Path(str(value))
 
 
 def _object_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:

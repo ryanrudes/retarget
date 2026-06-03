@@ -3,6 +3,7 @@ from rich.console import Console
 
 from retarget.core.enums import RunStatus
 from retarget.results import RetargetingResult
+from retarget.robots import RobotSpec
 from retarget.visualization import DryRunVisualizer, build_playback_data
 from retarget.visualization.viewers import _populate_viser_scene
 
@@ -101,6 +102,35 @@ def test_build_playback_data_uses_robot_link_positions():
     assert frame.robot_segments.shape == (2, 2, 3)
 
 
+def test_build_playback_data_can_use_robot_spec_for_model_metadata(tmp_path):
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='fixture'/>")
+    robot = RobotSpec(
+        name="fixture_robot",
+        dof=2,
+        height_m=1.0,
+        joint_names=("joint_a", "joint_b"),
+        link_names=("base", "tool"),
+        urdf_path=urdf_path,
+    )
+    result = RetargetingResult(
+        name="robot_model_playback",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((1, 9), dtype=np.float64),
+        robot_link_positions=np.zeros((1, 2, 3), dtype=np.float64),
+        fps=20.0,
+    )
+
+    playback = build_playback_data(result, robot_spec=robot)
+
+    assert playback.robot is not None
+    assert playback.robot.name == "fixture_robot"
+    assert playback.robot.joint_names == ("joint_a", "joint_b")
+    assert playback.robot.joint_start == 7
+    assert playback.robot.urdf_path == urdf_path
+    assert np.allclose(playback.robot.joint_configuration(np.arange(9, dtype=np.float64)), [7.0, 8.0])
+
+
 def test_dry_run_visualizer_prints_playback_summary():
     console = Console(record=True, force_terminal=False, width=100)
     result = RetargetingResult(
@@ -118,7 +148,7 @@ def test_dry_run_visualizer_prints_playback_summary():
     assert "3" in text
 
 
-def test_populate_viser_scene_uses_scene_methods():
+def test_populate_viser_scene_uses_model_oriented_scene_methods_by_default():
     result = RetargetingResult(
         name="viser",
         status=RunStatus.SUCCESS,
@@ -152,15 +182,50 @@ def test_populate_viser_scene_uses_scene_methods():
 
     _populate_viser_scene(server, playback)
 
-    assert ("point_cloud", "/retarget/root_path") in server.scene.calls
-    assert ("frame", "/retarget/root") in server.scene.calls
-    assert ("point_cloud", "/retarget/human_points/frame_0000") in server.scene.calls
-    assert ("point_cloud", "/retarget/robot/links/frame_0000") in server.scene.calls
-    assert ("line_segments", "/retarget/robot/segments/frame_0000") in server.scene.calls
-    assert ("point_cloud", "/retarget/object/skateboard/samples/frame_0000") in server.scene.calls
-    assert ("point_cloud", "/retarget/object/skateboard/path") in server.scene.calls
+    assert ("grid", "/retarget/floor") in server.scene.calls
+    assert ("frame", "/retarget/robot") in server.scene.calls
+    assert ("icosphere", "/retarget/robot_primitive/pelvis") in server.scene.calls
+    assert ("box", "/retarget/robot_primitive/limb_00") in server.scene.calls
     assert ("frame", "/retarget/object/skateboard") in server.scene.calls
+    assert ("box", "/retarget/object/skateboard/body") in server.scene.calls
+    assert all(call[0] != "point_cloud" for call in server.scene.calls)
+    assert all(call[0] != "line_segments" for call in server.scene.calls)
     assert server.gui.slider_value == 0
+
+
+def test_populate_viser_scene_can_show_diagnostics():
+    result = RetargetingResult(
+        name="viser_diagnostics",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((2, 7), dtype=np.float64),
+        human_joints=np.zeros((2, 2, 3), dtype=np.float64),
+        robot_link_positions=np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                [[0.1, 0.0, 0.0], [0.1, 0.0, 1.0]],
+            ],
+            dtype=np.float64,
+        ),
+        fps=10.0,
+        metadata={
+            "playback": {
+                "robot": {
+                    "name": "humanoid",
+                    "link_names": ["pelvis", "head"],
+                    "edges": [["pelvis", "head"]],
+                }
+            }
+        },
+    )
+    playback = build_playback_data(result)
+    server = _FakeViserServer()
+
+    _populate_viser_scene(server, playback, show_diagnostics=True)
+
+    assert ("point_cloud", "/retarget/diagnostics/root_path") in server.scene.calls
+    assert ("point_cloud", "/retarget/diagnostics/human_points") in server.scene.calls
+    assert ("point_cloud", "/retarget/diagnostics/robot_links") in server.scene.calls
+    assert ("line_segments", "/retarget/diagnostics/robot_segments") in server.scene.calls
 
 
 class _FakeViserServer:
@@ -173,17 +238,40 @@ class _FakeScene:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
+    def add_grid(self, name: str, **_kwargs: object) -> object:
+        self.calls.append(("grid", name))
+        return _FakeHandle()
+
     def add_point_cloud(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("point_cloud", name))
-        return object()
+        return _FakeHandle()
 
     def add_frame(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("frame", name))
-        return object()
+        return _FakeHandle()
+
+    def add_icosphere(self, name: str, **_kwargs: object) -> object:
+        self.calls.append(("icosphere", name))
+        return _FakeHandle()
+
+    def add_box(self, name: str, **_kwargs: object) -> object:
+        self.calls.append(("box", name))
+        return _FakeHandle()
 
     def add_line_segments(self, name: str, **_kwargs: object) -> object:
+        colors = np.asarray(_kwargs["colors"])
+        points = np.asarray(_kwargs["points"])
+        assert points.ndim == 3
+        assert colors.shape in {points.shape, (3,)}
         self.calls.append(("line_segments", name))
-        return object()
+        return _FakeHandle()
+
+
+class _FakeHandle:
+    position: object = None
+    wxyz: object = None
+    points: object = None
+    dimensions: object = None
 
 
 class _FakeGui:

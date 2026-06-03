@@ -230,10 +230,30 @@ def view(
         bool,
         typer.Option("--dry-run/--live", help="Print a summary instead of launching an interactive visualizer."),
     ] = True,
+    robot_spec: Annotated[
+        Path | None,
+        typer.Option(
+            "--robot-spec",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Optional robot spec file used to render URDF-backed live playback.",
+        ),
+    ] = None,
+    show_diagnostics: Annotated[
+        bool,
+        typer.Option("--show-diagnostics", help="Overlay source points, root paths, and link diagnostics."),
+    ] = False,
 ) -> None:
     """View or summarize a retargeting result."""
 
-    view_result(RetargetingResult.load_npz(result), dry_run=dry_run)
+    robot = RobotSpec.load(robot_spec) if robot_spec is not None else None
+    view_result(
+        RetargetingResult.load_npz(result),
+        dry_run=dry_run,
+        robot_spec=robot,
+        show_diagnostics=show_diagnostics,
+    )
 
 
 @app.command()

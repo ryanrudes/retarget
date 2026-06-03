@@ -28,6 +28,12 @@ uv run retarget view --result skateboarding_retarget.npz --dry-run
 uv run retarget view --result skateboarding_retarget.npz --live
 ```
 
-The fixture uses the `minimal` motion format and the `g1_like` humanoid template so it runs without lab assets while still visualizing a humanoid body. For real SMPL-X + G1 work, set `format = "smplx"`, provide a file-backed or asset-store-backed G1 `RobotSpec`, and replace `data/skate_motion.npz` with your fused export.
+The fixture uses the `minimal` motion format and the `g1_like` humanoid template so it runs without lab assets. Live Viser playback renders real robot geometry when the result metadata or `--robot-spec` points to a URDF-backed `RobotSpec`; without those assets it falls back to a neutral primitive scaffold that is useful for checking timing and object coupling but is not a real G1 visualization.
+
+For real SMPL-X + G1 work, set `format = "smplx"`, provide a file-backed or asset-store-backed G1 `RobotSpec` with `urdf_path` for Viser playback, and replace `data/skate_motion.npz` with your fused export. When viewing an older result that lacks robot asset metadata, pass the model explicitly:
+
+```bash
+uv run retarget view --result skateboarding_retarget.npz --live --robot-spec /path/to/g1/robot.toml
+```
 
 The default profile is intentionally small and robust: Laplacian + smoothness objectives with joint-limit and trust-region constraints. Add foot-contact, non-penetration, or self-collision constraints in `run_config.toml` when you are ready to tune the synthetic clip or run against real assets.

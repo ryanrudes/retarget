@@ -343,6 +343,10 @@ def _robot_playback_metadata(problem: RetargetingProblem) -> dict[str, Any]:
         "name": problem.robot.name,
         "link_names": list(names),
         "edges": [list(edge) for edge in _humanoid_link_edges(names)],
+        "joint_names": list(problem.robot.joint_names),
+        "joint_start": problem.robot.qpos_layout.joint_start,
+        "urdf_path": str(problem.robot.urdf_path) if problem.robot.urdf_path is not None else None,
+        "mujoco_xml_path": str(problem.robot.mujoco_xml_path) if problem.robot.mujoco_xml_path is not None else None,
     }
 
 
@@ -354,6 +358,7 @@ def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | N
     sample_points = object_spec.sample_points if object_spec.sample_points is not None else _default_object_points()
     metadata: dict[str, Any] = {
         "name": object_spec.name,
+        "mesh_path": str(object_spec.mesh_path) if object_spec.mesh_path is not None else None,
         "sample_points": _jsonable(sample_points),
         "sample_points_space": "object" if problem.scene.has_dynamic_object() else "world",
         "frame_convention": FrameConvention.Z_UP_RIGHT_HANDED.value,

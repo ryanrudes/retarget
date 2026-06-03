@@ -122,33 +122,43 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   display: block;
 }
 
-/* Label left, chevron right on the same row; children full width below. */
+/* Label left, chevron right on one row; long labels ellipsis (no wrap). */
 .md-nav--secondary .retarget-toc-collapsible {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  column-gap: 0.2rem;
+  column-gap: 0.15rem;
+  max-width: 100%;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .md-nav__link {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   order: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
+  max-width: calc(100% - 1.1rem);
+  overflow: hidden;
+  display: block;
   padding-right: 0 !important;
   margin-top: 0;
   margin-bottom: 0;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .md-nav__link > .md-ellipsis {
-  display: inline-flex;
-  align-items: center;
-  min-height: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.md-nav--secondary .retarget-toc-collapsible > .md-nav__link > .md-ellipsis code {
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .retarget-toc-toggle {
-  flex: 0 0 auto;
+  flex: 0 0 0.85rem;
+  flex-shrink: 0;
   order: 2;
   margin: 0 0.05rem 0 0;
   padding: 0;

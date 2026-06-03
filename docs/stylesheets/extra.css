@@ -124,39 +124,48 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
 
 /* Label left, chevron right on the same row; children full width below. */
 .md-nav--secondary .retarget-toc-collapsible {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   column-gap: 0.2rem;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .md-nav__link {
-  grid-column: 1;
-  grid-row: 1;
+  flex: 1 1 auto;
+  order: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
   padding-right: 0 !important;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.md-nav--secondary .retarget-toc-collapsible > .md-nav__link > .md-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  min-height: 0;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .retarget-toc-toggle {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  align-self: center;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.65rem;
-  height: 0.65rem;
-  margin-right: 0.05rem;
-  margin: 0;
+  flex: 0 0 auto;
+  order: 2;
+  margin: 0 0.05rem 0 0;
   padding: 0;
   border: none;
   border-radius: 0.1rem;
   background: transparent;
   color: #a599e9;
   cursor: pointer;
-  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 0.85rem;
+  height: 1.125rem;
+  line-height: 1;
+  position: relative;
+  top: 0.06em;
 }
 
 .md-nav--secondary .retarget-toc-toggle::before {
@@ -166,17 +175,18 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   height: 0.26rem;
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
-  transform: rotate(-45deg);
+  transform: rotate(-45deg) translateY(0.5px);
   transition: transform 0.15s ease;
 }
 
 .md-nav--secondary .retarget-toc-collapsible.retarget-toc-expanded > .retarget-toc-toggle::before {
-  transform: rotate(45deg);
+  transform: rotate(45deg) translateY(0.5px);
 }
 
 .md-nav--secondary .retarget-toc-collapsible > nav.md-nav {
-  grid-column: 1 / -1;
-  grid-row: 2;
+  flex: 0 0 100%;
+  order: 3;
+  width: 100%;
 }
 
 .md-nav--secondary .retarget-toc-toggle:hover,

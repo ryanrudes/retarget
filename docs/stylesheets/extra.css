@@ -114,6 +114,47 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
 }
 
 /* Collapsible in-page TOC (docs/javascripts/toc-collapsible.mjs). */
+
+/* Own TOC rhythm here: Material link margins combine poorly with nested grids. */
+.md-nav--secondary {
+  --retarget-toc-row-gap: 0.24rem;
+  --retarget-toc-branch-gap: 0.22rem;
+  --retarget-toc-section-gap: 0.42rem;
+  --retarget-toc-link-min-height: 1.2rem;
+}
+
+.md-nav--secondary .md-nav,
+.md-nav--primary .md-nav--secondary .md-nav {
+  margin-bottom: 0 !important;
+}
+
+.md-nav--secondary .md-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--retarget-toc-row-gap);
+  padding-bottom: 0;
+}
+
+.md-nav--secondary .md-nav__item > .md-nav__link {
+  display: flex;
+  align-items: center;
+  margin-top: 0;
+  margin-bottom: 0;
+  min-height: var(--retarget-toc-link-min-height);
+}
+
+.md-nav--secondary .retarget-toc-collapsible.retarget-toc-expanded {
+  margin-bottom: var(--retarget-toc-branch-gap);
+}
+
+.md-nav--secondary
+  > .md-nav__list
+  > .md-nav__item:not(:first-child):not(.retarget-toc-collapsible):has(
+    + .retarget-toc-collapsible
+  ) {
+  margin-top: var(--retarget-toc-section-gap);
+}
+
 .md-nav--secondary .retarget-toc-collapsible > nav.md-nav {
   display: none;
 }
@@ -128,6 +169,7 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 0.15rem;
+  row-gap: var(--retarget-toc-branch-gap);
   max-width: 100%;
 }
 
@@ -136,10 +178,7 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   grid-row: 1;
   min-width: 0;
   overflow: hidden;
-  display: block;
   padding-right: 0 !important;
-  margin-top: 0;
-  margin-bottom: 0;
 }
 
 .md-nav--secondary .retarget-toc-collapsible > .md-nav__link > .md-ellipsis {
@@ -171,10 +210,8 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   align-items: center;
   justify-content: center;
   width: 0.85rem;
-  height: 1.125rem;
+  height: var(--retarget-toc-link-min-height);
   line-height: 1;
-  position: relative;
-  top: 0.06em;
 }
 
 .md-nav--secondary .retarget-toc-toggle::before {
@@ -356,6 +393,17 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   font-size: 1em;
   padding: 0 0.3em;
   font-weight: bold;
+  white-space: nowrap;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link code.doc-symbol-toc {
+  white-space: nowrap;
+}
+
+.md-nav__link .doc-label-toc,
+.md-nav__link .doc-label-toc > code,
+.md-nav__link code.doc-symbol-toc {
+  pointer-events: none;
 }
 
 /* TOC link text color (#a599e9 / active gold) inherits — badge colors need !important */

@@ -16,7 +16,18 @@ def sample_mesh_points(path: str | Path, *, count: int = 128) -> FloatArray:
     """Return deterministic surface samples for a mesh file.
 
     OBJ files are parsed without optional dependencies. Other mesh formats use
-    `trimesh` when it is installed.
+    ``trimesh`` when it is installed.
+
+    Args:
+        path (str | Path): Mesh file path (``.obj`` or any format supported by ``trimesh``).
+        count (int): Number of sample points to return.
+
+    Returns:
+        FloatArray: Sampled points with shape ``(count, 3)``.
+
+    Raises:
+        ValueError: If ``count`` is not positive or the mesh geometry is invalid.
+        ImportError: If a non-OBJ format is requested without ``trimesh`` installed.
     """
 
     if count <= 0:

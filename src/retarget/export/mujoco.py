@@ -16,11 +16,23 @@ from retarget.export.registry import exporters
 from retarget.export.spec import ExportResult, ExportSpec
 from retarget.results.spec import RetargetingResult
 
+# Qvel policy label stored in export metadata: frame 0 uses forward difference to frame 1;
+# frames 1..N-1 use the interval from the previous qpos sample.
 QVEL_SCHEME = "first_frame_forward_difference_then_previous_interval"
 
 
 class MuJoCoTrackingData(BaseModel):
-    """Qpos/qvel tracking arrays ready for downstream MuJoCo experiments."""
+    """Qpos/qvel tracking arrays ready for downstream MuJoCo experiments.
+
+    Attributes:
+        schema_version (int): NPZ schema version written by :meth:`save_npz` (default ``1``).
+        source_name (str): Retargeting result or clip name carried into metadata.
+        qpos (FloatArray): Generalized positions with shape ``(frames, nq)``.
+        qvel (FloatArray): Generalized velocities with shape ``(frames, nv)``, aligned with ``qpos``.
+        time_s (FloatArray): Sample times in seconds with shape ``(frames,)``.
+        fps (float): Playback frame rate used to build ``time_s`` and qvel.
+        metadata (dict[str, Any]): Export metadata (qvel source, resampling flags, dimensions, etc.).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -96,7 +108,7 @@ class MuJoCoTrackingData(BaseModel):
 class MuJoCoTrackingExporter:
     """Export `RetargetingResult` objects to MuJoCo-style tracking NPZ files."""
 
-    format_name = "mujoco_npz"
+    format_name: str = "mujoco_npz"
 
     def export(self, result: RetargetingResult, spec: ExportSpec) -> ExportResult:
         """Build tracking arrays and save them to disk."""
@@ -173,7 +185,20 @@ def export_tracking(result: RetargetingResult, spec: ExportSpec) -> ExportResult
 
 
 def export_tracking_npz(result: RetargetingResult, output_path: str | Path, *, output_fps: int | None = None) -> Path:
-    """Compatibility wrapper for MuJoCo tracking NPZ export."""
+    """Export a retargeting result to a MuJoCo-style tracking ``.npz`` file.
+
+    Convenience wrapper around :func:`export_tracking` with format ``"mujoco_npz"``.
+    The NPZ contains ``qpos``, ``qvel``, ``time_s``, ``fps``, and JSON metadata
+    compatible with downstream MuJoCo tracking experiments.
+
+    Args:
+        result (RetargetingResult): Solved retargeting output to export.
+        output_path (str | Path): Destination ``.npz`` path (parent directories are created).
+        output_fps (int | None): Optional resample rate before export; uses ``result.fps`` when omitted.
+
+    Returns:
+        Path: Resolved path of the written NPZ file.
+    """
 
     export = export_tracking(
         result,

@@ -20,6 +20,21 @@ class JsonMotionLoader:
     """Load a small JSON fixture motion."""
 
     def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        """Load a JSON fixture motion file.
+
+        Args:
+            path (Path): ``.json`` file containing ``joint_positions`` and optional metadata.
+            spec (MotionFormatSpec): Default joint names, fps, and frame convention.
+            name (str | None): Override sequence name; uses the file ``name`` field or stem when omitted.
+
+        Returns:
+            MotionSequence: Parsed motion sequence.
+
+        Raises:
+            KeyError: If required keys such as ``joint_positions`` are missing.
+            ValueError: If arrays fail shape or validation checks.
+        """
+
         data = json.loads(path.read_text())
         joint_names = tuple(data.get("joint_names", spec.joint_names))
         positions = np.asarray(data["joint_positions"], dtype=np.float64)
@@ -41,9 +56,23 @@ class JsonMotionLoader:
 
 
 class NpyMotionLoader:
-    """Load `(T, J, 3)` positions from `.npy`."""
+    """Load ``(T, J, 3)`` positions from ``.npy``."""
 
     def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        """Load raw joint positions from a NumPy ``.npy`` file.
+
+        Args:
+            path (Path): ``.npy`` array with shape ``(frames, joints, 3)``.
+            spec (MotionFormatSpec): Supplies ``joint_names``, ``default_fps``, and ``frame_convention``.
+            name (str | None): Override sequence name; defaults to the file stem.
+
+        Returns:
+            MotionSequence: Motion built from the array and format defaults.
+
+        Raises:
+            ValueError: If the loaded array fails ``MotionSequence`` validation.
+        """
+
         return MotionSequence(
             name=name or path.stem,
             joint_positions=np.load(path),
@@ -54,9 +83,24 @@ class NpyMotionLoader:
 
 
 class NpzMotionLoader:
-    """Load global joint positions from `.npz`."""
+    """Load global joint positions from ``.npz`` archives."""
 
     def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        """Load joint positions and optional sidecar fields from ``.npz``.
+
+        Args:
+            path (Path): Archive containing ``global_joint_positions``, ``joint_positions``, or ``joints``.
+            spec (MotionFormatSpec): Default joint names, fps, and frame convention.
+            name (str | None): Override sequence name; defaults to the file stem.
+
+        Returns:
+            MotionSequence: Parsed motion with optional root poses, contacts, and height metadata.
+
+        Raises:
+            KeyError: If no recognized position array key is present.
+            ValueError: If arrays or contact matrices fail validation.
+        """
+
         data = np.load(path, allow_pickle=True)
         positions = _first_present(data, "global_joint_positions", "joint_positions", "joints")
         joint_names_raw: Any = data.get("joint_names", spec.joint_names)
@@ -81,13 +125,38 @@ class NpzMotionLoader:
 
 
 class CsvMotionLoader:
-    """Load wide CSV files with one row per frame and `{joint}_{axis}` columns."""
+    """Load wide CSV files with one row per frame and ``{joint}_{axis}`` columns.
+
+    Attributes:
+        TIME_COLUMNS (tuple[str, ...]): Normalized column names tried for per-row timestamps.
+        FRAME_COLUMNS (tuple[str, ...]): Normalized column names tried for frame indices.
+        AXES (tuple[str, ...]): Coordinate suffixes appended to joint names (``x``, ``y``, ``z``).
+    """
 
     TIME_COLUMNS = ("time_s", "time", "timestamp")
     FRAME_COLUMNS = ("frame", "frame_idx", "frame_index")
     AXES = ("x", "y", "z")
 
     def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        """Load a wide CSV motion table.
+
+        Each row is one frame. Joint coordinates are read from ``{joint}_{axis}`` columns
+        (also ``.`` and ``:`` separators). Optional root-pose and contact columns are
+        detected when present.
+
+        Args:
+            path (Path): CSV file with a header row.
+            spec (MotionFormatSpec): Joint order, contact joints, quaternion order, and defaults.
+            name (str | None): Override sequence name; defaults to the file stem.
+
+        Returns:
+            MotionSequence: Parsed motion sequence.
+
+        Raises:
+            ValueError: If the file is empty or required coordinate columns are missing.
+            KeyError: If a joint coordinate column cannot be resolved.
+        """
+
         rows = list(csv.DictReader(path.read_text().splitlines()))
         if not rows:
             raise ValueError(f"{path} does not contain any motion rows")
@@ -439,7 +508,22 @@ motion_loaders.register(MotionLoaderSuffix.NPZ, NpzMotionLoader())
 
 
 def load_motion(path: str | Path, format_name: str, *, name: str | None = None) -> MotionSequence:
-    """Load a motion sequence using a registered format and suffix loader."""
+    """Load a motion sequence using a registered format and suffix loader.
+
+    The returned sequence is converted to :attr:`~retarget.core.enums.FrameConvention.Z_UP_RIGHT_HANDED`.
+
+    Args:
+        path (str | Path): Motion file path; the suffix selects the loader.
+        format_name (str): Registered motion format name (a :class:`~retarget.core.enums.MotionFormat` value).
+        name (str | None): Optional sequence name; defaults to the file stem.
+
+    Returns:
+        MotionSequence: Parsed motion in Z-up world coordinates.
+
+    Raises:
+        KeyError: If the format name or file suffix is not registered.
+        ValueError: If the file content fails validation.
+    """
 
     motion_path = Path(path)
     spec = motion_formats.get(format_name)

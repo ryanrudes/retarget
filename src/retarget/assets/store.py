@@ -19,7 +19,19 @@ from retarget.core.enums import AssetKind
 
 
 class AssetRecord(BaseModel):
-    """One tracked asset."""
+    """One tracked asset.
+
+    Attributes:
+        name (str): Unique asset name in the store manifest.
+        kind (AssetKind): Asset category (robot, object, terrain, motion, fixture).
+        path (Path): Resolved on-disk path to the asset file or directory.
+        source (str | None): Original import path or download URL, if recorded.
+        sha256 (str | None): Expected or verified SHA-256 hex digest for file assets.
+        license (str | None): SPDX identifier or short license note.
+        notice (str | None): Attribution or NOTICE text.
+        installed_at (datetime | None): UTC timestamp when the asset was registered or installed.
+        metadata (dict[str, Any]): Free-form manifest metadata.
+    """
 
     name: str
     kind: AssetKind
@@ -38,7 +50,20 @@ class AssetRecord(BaseModel):
 
 
 class AssetRequirement(BaseModel):
-    """One asset declared by a human-editable install manifest."""
+    """One asset declared by a human-editable install manifest.
+
+    Attributes:
+        name (str): Asset name to register in the store.
+        kind (AssetKind): Asset category (robot, object, terrain, motion, fixture).
+        source (str): Local path or HTTP(S) URL to fetch or reference.
+        copy_to_store (bool): When ``True`` (TOML key ``copy``), copy into the store instead of
+            referencing in place.
+        destination (Path | None): Optional store-relative or absolute install path.
+        sha256 (str | None): Expected SHA-256 hex digest for file assets.
+        license (str | None): SPDX identifier or short license note.
+        notice (str | None): Attribution or NOTICE text.
+        metadata (dict[str, Any]): Free-form requirement metadata.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -76,7 +101,13 @@ class AssetRequirement(BaseModel):
 
 
 class AssetInstallManifest(BaseModel):
-    """Human-editable manifest describing assets to install or reference."""
+    """Human-editable manifest describing assets to install or reference.
+
+    Attributes:
+        schema_version (int): Manifest format version (default ``1``).
+        assets (tuple[AssetRequirement, ...]): Assets to install or reference.
+        metadata (dict[str, Any]): Free-form manifest metadata.
+    """
 
     schema_version: int = 1
     assets: tuple[AssetRequirement, ...] = ()
@@ -98,7 +129,11 @@ class AssetInstallManifest(BaseModel):
 
 
 class AssetManifest(BaseModel):
-    """Collection of asset records."""
+    """Collection of asset records.
+
+    Attributes:
+        records (list[AssetRecord]): Installed or referenced assets tracked by the store.
+    """
 
     records: list[AssetRecord] = Field(default_factory=list)
 

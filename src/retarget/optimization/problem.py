@@ -86,6 +86,24 @@ class TermContext:
     subproblem. All point arrays and Jacobians are already represented in the
     local frame relevant to the current task, such as the object frame for
     dynamic object interaction.
+
+    Attributes:
+        problem (RetargetingProblem): Parent run specification.
+        backend (KinematicsBackend): Kinematics provider for positions and Jacobians.
+        q_current (FloatArray): Full ``qpos`` vector for the frame being optimized.
+        q_previous (FloatArray): ``qpos`` from the prior frame (warm start for smoothness).
+        frame_idx (int): Zero-based index into the motion sequence.
+        frame_contacts (Mapping[str, bool]): Inferred stance contacts keyed by motion joint.
+        robot_point_names (tuple[str, ...]): Link or joint names used for mesh matching.
+        robot_points (FloatArray): Robot match points in the task-local frame, shape ``(P, 3)``.
+        robot_jacobians (FloatArray): Position Jacobians w.r.t. actuated joints, shape ``(P, 3, dof)``.
+        environment_points (FloatArray): Scene or object sample points, shape ``(E, 3)``.
+        adjacency (tuple[tuple[int, ...], ...]): Mesh neighbor indices per vertex.
+        target_laplacian (FloatArray): Desired Laplacian coordinates for the interaction mesh.
+        reference_pose (Pose | None): Object pose for dynamic scenes; ``None`` in world frame.
+        joint_lower (FloatArray): Actuated joint lower limits for the current robot.
+        joint_upper (FloatArray): Actuated joint upper limits for the current robot.
+        current_joints (FloatArray): Actuated joint values extracted from ``q_current``.
     """
 
     problem: RetargetingProblem
@@ -116,7 +134,16 @@ class TermContext:
 class QuadraticProblem:
     """Least-squares problem with optional bounds, linear constraints, and trust radius.
 
-    The objective is `minimize ||A x - b||^2`.
+    The objective is ``minimize ||A x - b||^2``.
+
+    Attributes:
+        matrix (FloatArray): Least-squares design matrix ``A``, shape ``(m, n)``.
+        target (FloatArray): Right-hand side ``b``, shape ``(m,)``.
+        lower (FloatArray | None): Per-variable lower bounds on ``x``.
+        upper (FloatArray | None): Per-variable upper bounds on ``x``.
+        initial (FloatArray | None): Trust-region center for ``x`` when a radius is set.
+        trust_radius (float | None): Maximum Euclidean norm of ``x - initial``.
+        linear_constraints (tuple[LinearConstraint, ...]): Additional linear inequalities on ``x``.
     """
 
     matrix: FloatArray
@@ -153,7 +180,14 @@ class QuadraticProblem:
 
 @dataclass(frozen=True)
 class SolverResult:
-    """Solver output."""
+    """Solver output.
+
+    Attributes:
+        solution (FloatArray): Optimized decision vector for the subproblem.
+        cost (float): Squared residual ``||A x - b||^2`` at ``solution``.
+        status (str): Backend-specific status string (for example ``"optimal"``).
+        iterations (int): Reported inner iteration count; defaults to ``1`` when not tracked.
+    """
 
     solution: FloatArray
     cost: float

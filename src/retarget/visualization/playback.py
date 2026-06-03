@@ -17,7 +17,19 @@ if TYPE_CHECKING:
 
 
 class PlaybackFrame(BaseModel):
-    """One frame of result playback data."""
+    """One frame of result playback data.
+
+    Attributes:
+        index (int): Zero-based frame index in the parent :class:`PlaybackData`.
+        time_s (float): Playback time in seconds.
+        root_position (FloatArray): Root translation with shape ``(3,)``.
+        root_quaternion (FloatArray): Root orientation (wxyz) with shape ``(4,)``.
+        qpos (FloatArray): Full generalized coordinates for this frame.
+        human_points (FloatArray | None): Source human joint positions ``(points, 3)``, if present.
+        robot_points (FloatArray | None): Robot link positions ``(links, 3)``, if present.
+        robot_segments (FloatArray | None): Line segment endpoints ``(segments, 2, 3)``, if present.
+        object_points (FloatArray | None): Transformed object sample points ``(points, 3)``, if present.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -91,7 +103,16 @@ class PlaybackFrame(BaseModel):
 
 
 class PlaybackObject(BaseModel):
-    """Scene object samples transformed for result playback."""
+    """Scene object samples transformed for result playback.
+
+    Attributes:
+        name (str): Object identifier for scene paths and labels.
+        local_points (FloatArray): Object-frame sample points with shape ``(points, 3)``.
+        world_points (FloatArray): World-frame points with shape ``(frames, points, 3)``.
+        positions (FloatArray): Object origin positions with shape ``(frames, 3)``.
+        quaternions (FloatArray): Object orientations (wxyz) with shape ``(frames, 4)``.
+        mesh_path (Path | None): Optional mesh file for Viser mesh rendering.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -157,7 +178,18 @@ class PlaybackObject(BaseModel):
 
 
 class PlaybackRobot(BaseModel):
-    """Humanoid robot link positions transformed for result playback."""
+    """Humanoid robot link positions transformed for result playback.
+
+    Attributes:
+        name (str): Robot identifier for scene paths and labels.
+        link_names (tuple[str, ...]): Names for each rendered link.
+        link_positions (FloatArray): Link positions with shape ``(frames, links, 3)``.
+        edges (tuple[tuple[int, int], ...]): Undirected link index pairs drawn as segments.
+        joint_names (tuple[str, ...]): Actuated joint names for URDF configuration.
+        joint_start (int): Index in ``qpos`` where actuated joints begin.
+        urdf_path (Path | None): Optional URDF for mesh-backed rendering.
+        mujoco_xml_path (Path | None): Optional MuJoCo XML path carried in metadata.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -228,7 +260,20 @@ class PlaybackRobot(BaseModel):
 
 
 class PlaybackData(BaseModel):
-    """Visualization-ready playback data derived from a retargeting result."""
+    """Visualization-ready playback data derived from a retargeting result.
+
+    Attributes:
+        name (str): Result or clip name.
+        fps (float): Playback frame rate.
+        time_s (FloatArray): Sample times in seconds with shape ``(frames,)``.
+        qpos (FloatArray): Generalized positions with shape ``(frames, nq)``.
+        root_positions (FloatArray): Root translations with shape ``(frames, 3)``.
+        root_quaternions (FloatArray): Root orientations (wxyz) with shape ``(frames, 4)``.
+        human_points (FloatArray | None): Source human joints ``(frames, points, 3)``, if present.
+        robot (PlaybackRobot | None): Robot link playback, if link positions are available.
+        object (PlaybackObject | None): Scene object playback, if object metadata is present.
+        metadata (dict[str, Any]): Result metadata copied for diagnostics overlays.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

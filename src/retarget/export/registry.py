@@ -1,4 +1,10 @@
-"""Export registries."""
+"""Export registries.
+
+``exporters`` maps registered format names (for example ``"mujoco_npz"``) to
+:class:`~retarget.core.protocols.Exporter` implementations. Use
+:meth:`~retarget.core.registry.Registry.get` to resolve an exporter and
+:meth:`~retarget.core.registry.Registry.register` to add one.
+"""
 
 from __future__ import annotations
 

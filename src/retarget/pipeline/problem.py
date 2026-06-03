@@ -15,7 +15,24 @@ from retarget.scene.spec import SceneSpec
 
 
 class RetargetingProblem(BaseModel):
-    """Complete run specification for retargeting."""
+    """Complete run specification for retargeting.
+
+    Attributes:
+        name (str): Human-readable run identifier.
+        task_kind (TaskKind): High-level workflow (robot-only, object interaction, climbing).
+        robot (RobotSpec): Target robot model, limits, and default mappings.
+        motion (MotionSequence): Source human joint trajectory in world space.
+        scene (SceneSpec): Ground, terrain, and optional manipulated object.
+        motion_format (MotionFormatSpec | None): Format metadata for contact inference and scaling.
+        joint_mapping (dict[str, str] | None): Motion-joint to robot-joint map; ``None`` uses robot defaults.
+        mesh (InteractionMeshSpec): Interaction-mesh topology for Laplacian objectives.
+        solver (SolverSpec): Backend selection and SQP subproblem solver options.
+        objectives (tuple[ObjectiveSpec, ...]): Weighted least-squares terms applied each frame.
+        constraints (tuple[ConstraintSpec, ...]): Bounds and linear constraints merged per subproblem.
+        scale_to_robot (bool): Rescale motion to ``robot.height_m`` when format height is known.
+        output_fps (float | None): Resample motion and scene to this rate before retargeting; ``None`` keeps motion fps.
+        metadata (dict[str, Any]): Opaque key-value tags stored on results and manifests.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -119,7 +136,10 @@ class RetargetingProblem(BaseModel):
 
     @property
     def fps(self) -> float:
-        """Output fps."""
+        """Effective playback and result sampling rate in Hz.
+
+        Returns ``output_fps`` when set; otherwise the motion sequence's native ``fps``.
+        """
 
         return float(self.output_fps or self.motion.fps)
 

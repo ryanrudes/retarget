@@ -11,7 +11,15 @@ from retarget.core.enums import Constraint, Objective, SolverBackend
 
 
 class SolverSpec(BaseModel):
-    """Solver selection and common options."""
+    """Solver selection and common options.
+
+    Attributes:
+        backend (SolverBackend | str): Registry key or enum; ``auto`` picks CVXPY when installed.
+        max_iterations (int): Outer SQP iterations budget per frame (scaled for the first frame).
+        trust_radius (float): Default trust-region radius for subproblem steps (meters/radians in joint space).
+        tolerance (float): Stop an inner solve when the joint increment norm falls below this value.
+        verbose (bool): Enable verbose logging for backends that support it (for example CVXPY).
+    """
 
     backend: SolverBackend | str = SolverBackend.AUTO
     max_iterations: int = 10
@@ -41,7 +49,13 @@ class SolverSpec(BaseModel):
 
 
 class ObjectiveSpec(BaseModel):
-    """Declarative objective term configuration."""
+    """Declarative objective term configuration.
+
+    Attributes:
+        name (str): Registered objective term key (see ``Objective`` enum values).
+        weight (float): Non-negative scalar multiplier on the term's least-squares residual.
+        parameters (dict[str, Any]): Term-specific options passed to the registered builder.
+    """
 
     name: str
     weight: float = 1.0
@@ -66,7 +80,13 @@ class ObjectiveSpec(BaseModel):
 
 
 class ConstraintSpec(BaseModel):
-    """Declarative constraint term configuration."""
+    """Declarative constraint term configuration.
+
+    Attributes:
+        name (str): Registered constraint term key (see ``Constraint`` enum values).
+        enabled (bool): When ``False``, the term is skipped when assembling subproblems.
+        parameters (dict[str, Any]): Term-specific options (clearances, link lists, lock windows).
+    """
 
     name: str
     enabled: bool = True
@@ -89,7 +109,14 @@ class ConstraintSpec(BaseModel):
 
 
 class OptimizationProfile(BaseModel):
-    """Reusable objective/constraint composition for retargeting experiments."""
+    """Reusable objective/constraint composition for retargeting experiments.
+
+    Attributes:
+        name (str): Profile label stored in problem metadata when applied.
+        objectives (tuple[ObjectiveSpec, ...]): Ordered objective terms for a run.
+        constraints (tuple[ConstraintSpec, ...]): Ordered constraint terms for a run.
+        metadata (dict[str, Any]): Opaque tags describing the profile or experiment.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

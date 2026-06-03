@@ -15,6 +15,14 @@ class GeometryDistance:
     Negative distances indicate overlap when the backend can compute signed
     separation. Backends that only expose point distances should return
     non-negative values.
+
+    Attributes:
+        first (str): Name of the first body or collision geometry.
+        second (str): Name of the second body or collision geometry.
+        distance (float): Separation along ``normal_from_first_to_second`` (negative if overlapping).
+        point_on_first (NDArray[np.float64]): Closest point on ``first``, shape ``(3,)``.
+        point_on_second (NDArray[np.float64]): Closest point on ``second``, shape ``(3,)``.
+        normal_from_first_to_second (NDArray[np.float64]): Unit normal pointing from ``first`` to ``second``.
     """
 
     first: str

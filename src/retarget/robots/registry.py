@@ -1,4 +1,12 @@
-"""Built-in robot registry."""
+"""Built-in robot registry.
+
+``robots`` maps built-in robot keys (for example ``"synthetic_humanoid"``) to
+:class:`~retarget.robots.spec.RobotSpec` presets.
+
+``robot_providers`` maps provider names (``"registry"``, ``"file"``, ``"asset_store"``) to
+:class:`~retarget.core.protocols.RobotProvider` implementations that resolve specs from
+registry keys, files, or the asset store.
+"""
 
 from __future__ import annotations
 
@@ -43,6 +51,19 @@ class RegistryRobotProvider:
     """Resolve robot specs from the built-in robot registry."""
 
     def load(self, name: str, **kwargs: Any) -> RobotSpec:
+        """Load a preset robot spec registered in ``robots``.
+
+        Args:
+            name (str): Built-in robot registry key (for example ``"synthetic_humanoid"``).
+            **kwargs (Any): Ignored; raises if any extra options are passed.
+
+        Returns:
+            RobotSpec: Registered robot description.
+
+        Raises:
+            ValueError: If unsupported keyword options are supplied.
+            KeyError: If ``name`` is not registered in ``robots``.
+        """
         if kwargs:
             unknown = ", ".join(sorted(kwargs))
             raise ValueError(f"RegistryRobotProvider does not accept extra options: {unknown}")
@@ -53,6 +74,22 @@ class FileRobotProvider:
     """Load robot specs from explicit TOML/YAML/JSON files."""
 
     def load(self, name: str, **kwargs: Any) -> RobotSpec:
+        """Load a robot spec from a file path.
+
+        Args:
+            name (str): Registry alias or filesystem path to the spec file.
+            **kwargs (Any): Provider options; supports ``path`` to override ``name`` as the file
+                location.
+
+        Returns:
+            RobotSpec: Parsed spec with relative asset paths resolved against the spec directory.
+            When ``name`` differs from the file path and the spec's own ``name``, the returned
+            spec is copied with ``name`` set to the requested alias.
+
+        Raises:
+            ValueError: If unsupported keyword options are supplied.
+            FileNotFoundError: If the spec file does not exist.
+        """
         path_value = kwargs.pop("path", None)
         if kwargs:
             unknown = ", ".join(sorted(kwargs))
@@ -63,11 +100,31 @@ class FileRobotProvider:
 
 
 class AssetStoreRobotProvider:
-    """Load robot specs from robot assets tracked in an `AssetStore`."""
+    """Load robot specs from robot assets tracked in an `AssetStore`.
 
-    SPEC_FILENAMES = ("robot.toml", "robot.yaml", "robot.yml", "robot.json")
+    Attributes:
+        SPEC_FILENAMES (tuple[str, ...]): Default robot spec filenames searched inside a robot
+            asset directory when ``spec_filename`` is not provided.
+    """
+
+    SPEC_FILENAMES: tuple[str, ...] = ("robot.toml", "robot.yaml", "robot.yml", "robot.json")
 
     def load(self, name: str, **kwargs: Any) -> RobotSpec:
+        """Load a robot spec from a robot asset registered in an :class:`~retarget.assets.store.AssetStore`.
+
+        Args:
+            name (str): Asset manifest name with kind :attr:`~retarget.core.enums.AssetKind.ROBOT`.
+            **kwargs (Any): Provider options. ``store`` (default ``".retarget_assets"``) selects the
+                asset store root. ``spec_filename`` overrides :attr:`SPEC_FILENAMES` lookup.
+
+        Returns:
+            RobotSpec: Parsed spec with relative paths resolved against the spec file directory.
+
+        Raises:
+            ValueError: If the asset kind is not ``robot`` or unsupported options are passed.
+            KeyError: If ``name`` is not present in the store manifest.
+            FileNotFoundError: If no spec file is found under the asset path.
+        """
         store = AssetStore(kwargs.pop("store", ".retarget_assets"))
         spec_filename = str(kwargs.pop("spec_filename", ""))
         if kwargs:

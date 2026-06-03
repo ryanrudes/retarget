@@ -10,7 +10,17 @@ from retarget.core.array import FloatArray, as_float_array
 
 
 def resampling_times(frame_count: int, source_fps: float, target_fps: float) -> tuple[FloatArray, FloatArray]:
-    """Return source and target sample times for endpoint-preserving interpolation."""
+    """Return source and target sample times for endpoint-preserving interpolation.
+
+    Args:
+        frame_count (int): Number of frames in the source sequence.
+        source_fps (float): Source sampling rate in Hz.
+        target_fps (float): Target sampling rate in Hz.
+
+    Returns:
+        tuple[FloatArray, FloatArray]: ``(source_times, target_times)`` in seconds,
+            with the final target time clamped to the source duration.
+    """
 
     if frame_count <= 0:
         raise ValueError("frame_count must be positive")
@@ -31,7 +41,16 @@ def resampling_times(frame_count: int, source_fps: float, target_fps: float) -> 
 
 
 def resample_linear(values: Any, source_fps: float, target_fps: float) -> FloatArray:
-    """Linearly resample an array whose first axis is time."""
+    """Linearly resample an array whose first axis is time.
+
+    Args:
+        values (Any): Array-like data with time as axis 0.
+        source_fps (float): Source sampling rate in Hz.
+        target_fps (float): Target sampling rate in Hz.
+
+    Returns:
+        FloatArray: Resampled array with the same trailing dimensions as ``values``.
+    """
 
     arr = as_float_array(values, name="values")
     if arr.ndim == 0:

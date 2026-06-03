@@ -13,7 +13,7 @@ class Retargeter:
     """Run a `RetargetingProblem` and return a typed result."""
 
     def __init__(self, *, engine: InteractionMeshRetargetingEngine | None = None) -> None:
-        self.engine = engine or InteractionMeshRetargetingEngine()
+        self.engine: InteractionMeshRetargetingEngine = engine or InteractionMeshRetargetingEngine()
 
     def run(self, problem: RetargetingProblem) -> RetargetingResult:
         """Retarget a motion sequence."""

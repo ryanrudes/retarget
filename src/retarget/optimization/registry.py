@@ -11,6 +11,7 @@ from retarget.core.registry import Registry
 from retarget.optimization.spec import SolverSpec
 
 SolverFactory = Callable[[SolverSpec], Solver]
+"""Build a :class:`~retarget.core.protocols.Solver` from a :class:`~retarget.optimization.spec.SolverSpec`."""
 
 
 def _objective_term_from_decorator(value: object) -> ObjectiveTerm:
@@ -39,10 +40,15 @@ objective_terms: Registry[ObjectiveTerm] = Registry(
     "objective term",
     decorator_transform=_objective_term_from_decorator,
 )
+"""Registry of built-in and user-registered objective terms keyed by name."""
+
 constraint_terms: Registry[ConstraintTerm] = Registry(
     "constraint term",
     decorator_transform=_constraint_term_from_decorator,
 )
+"""Registry of built-in and user-registered constraint terms keyed by name."""
+
 solver_factories: Registry[SolverFactory] = Registry("solver factory")
+"""Registry of solver factories keyed by :class:`~retarget.core.enums.SolverBackend` name."""
 
 __all__ = ["SolverFactory", "constraint_terms", "objective_terms", "solver_factories"]

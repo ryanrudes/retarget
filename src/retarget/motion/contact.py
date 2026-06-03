@@ -18,6 +18,17 @@ def infer_contact_by_velocity(
     Explicit contacts stored on the motion sequence take precedence. Otherwise
     contact states are inferred from contact-joint speed; the first and last
     frames reuse their nearest available finite-difference velocity.
+
+    Args:
+        motion (MotionSequence): Input motion with optional explicit contacts.
+        motion_format (MotionFormatSpec | None): Format spec supplying ``contact_joints``; may be ``None``.
+        velocity_threshold (float): Speed below which a contact joint is treated as in contact (m/s).
+
+    Returns:
+        tuple[dict[str, bool], ...]: One mapping per frame from contact-joint name to active flag.
+
+    Raises:
+        ValueError: If ``velocity_threshold`` is not positive.
     """
 
     if motion.contacts:

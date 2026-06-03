@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.array import FloatArray, as_float_array
@@ -15,7 +16,19 @@ from retarget.core.timing import resample_linear, resampling_times
 
 
 class MotionFormatSpec(BaseModel):
-    """Describes a human motion data format."""
+    """Describes a human motion data format.
+
+    Attributes:
+        name (str): Registry key and display name for the format.
+        joint_names (tuple[str, ...]): Ordered joint labels expected in motion data.
+        root_joint (str): Kinematic root joint (must appear in ``joint_names``).
+        contact_joints (tuple[str, ...]): Joints used for foot/contact inference.
+        quaternion_order (QuaternionOrder): Expected root-rotation storage order.
+        frame_convention (FrameConvention): World-frame axis convention for positions.
+        default_fps (float): Fallback sampling rate when a file omits ``fps``.
+        default_height_m (float | None): Optional actor height metadata for scaling.
+        description (str): Human-readable format notes.
+    """
 
     name: str
     joint_names: tuple[str, ...]
@@ -50,7 +63,18 @@ class MotionFormatSpec(BaseModel):
 
 
 class MotionSequence(BaseModel):
-    """World-space human joint positions for a sequence."""
+    """World-space human joint positions for a sequence.
+
+    Attributes:
+        name (str): Sequence label used in logs and exports.
+        joint_positions (FloatArray): Positions with shape ``(frames, joints, 3)``.
+        joint_names (tuple[str, ...]): Names aligned with the joint axis of ``joint_positions``.
+        fps (float): Sampling rate in Hz.
+        frame (FrameConvention): World-frame convention for ``joint_positions``.
+        root_poses (PoseSequence | None): Optional per-frame root transform track.
+        contacts (tuple[dict[str, bool], ...]): Optional per-frame contact flags keyed by joint name.
+        metadata (dict[str, Any]): Opaque sidecar fields (height, source paths, resampling notes, …).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -141,8 +165,21 @@ class MotionSequence(BaseModel):
 
         return self.joint_positions[:, self.joint_index(name), :]
 
-    def with_positions(self, positions: Any, *, name: str | None = None) -> MotionSequence:
-        """Return a copy with new joint positions."""
+    def with_positions(
+        self,
+        positions: FloatArray | ArrayLike,
+        *,
+        name: str | None = None,
+    ) -> MotionSequence:
+        """Return a copy with new joint positions.
+
+        Args:
+            positions (FloatArray | ArrayLike): Replacement positions with shape ``(frames, joints, 3)``.
+            name (str | None): Optional new sequence name; keeps the current name when omitted.
+
+        Returns:
+            MotionSequence: Copy sharing metadata, contacts, and timing with updated positions.
+        """
 
         return MotionSequence(
             name=name or self.name,

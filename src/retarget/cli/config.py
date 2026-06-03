@@ -28,7 +28,26 @@ from retarget.scene import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
 
 
 class ObjectConfig(BaseModel):
-    """Serializable object-scene options for CLI run specs."""
+    """Serializable object-scene options for CLI run specs.
+
+    Attributes:
+        name (str): Object identifier (default ``"object"``).
+        mesh_path (Path | None): Mesh file used to sample interaction points.
+        urdf_path (Path | None): Optional URDF for object geometry.
+        sample_points (tuple[tuple[float, float, float], ...] | None): Inline object sample points.
+        sample_points_path (Path | None): File containing sample points (``.npy``, ``.npz``, etc.).
+        mesh_sample_count (int): Number of points to sample from ``mesh_path`` when inline/path
+            points are omitted (default ``128``).
+        sample_points_frame (FrameConvention): Frame convention of inline/path sample points.
+        identity_trajectory (bool): Use a fixed identity object pose for every frame.
+        trajectory_path (Path | None): File with object pose trajectory.
+        trajectory_positions (tuple[tuple[float, float, float], ...] | None): Inline positions.
+        trajectory_quaternions (tuple[tuple[float, float, float, float], ...] | None): Inline
+            orientations paired with positions.
+        trajectory_quaternion_order (QuaternionOrder): Storage order of inline quaternions.
+        trajectory_frame (FrameConvention): Frame convention of inline trajectory data.
+        metadata (dict[str, Any]): Free-form object metadata passed to :class:`~retarget.scene.ObjectSpec`.
+    """
 
     name: str = "object"
     mesh_path: Path | None = None
@@ -66,7 +85,17 @@ class ObjectConfig(BaseModel):
 
 
 class TerrainConfig(BaseModel):
-    """Serializable terrain-scene options for CLI run specs."""
+    """Serializable terrain-scene options for CLI run specs.
+
+    Attributes:
+        name (str): Terrain identifier (default ``"terrain"``).
+        mesh_path (Path | None): Terrain mesh file.
+        sample_points (tuple[tuple[float, float, float], ...] | None): Inline terrain sample points.
+        sample_points_path (Path | None): File containing terrain sample points.
+        mesh_sample_count (int): Points to sample from ``mesh_path`` when others are omitted.
+        sample_points_frame (FrameConvention): Frame convention of sample points.
+        metadata (dict[str, Any]): Free-form terrain metadata passed to :class:`~retarget.scene.TerrainSpec`.
+    """
 
     name: str = "terrain"
     mesh_path: Path | None = None
@@ -95,7 +124,15 @@ class TerrainConfig(BaseModel):
 
 
 class SceneConfig(BaseModel):
-    """Serializable scene options for CLI run specs."""
+    """Serializable scene options for CLI run specs.
+
+    Attributes:
+        object (ObjectConfig | None): Manipulated object configuration for interaction tasks.
+        terrain (TerrainConfig | None): Terrain mesh or samples for climbing tasks.
+        ground_range (tuple[float, float]): Horizontal ground sampling range for support meshes.
+        ground_size (int): Grid resolution for ground support sampling.
+        metadata (dict[str, Any]): Free-form scene metadata passed to :class:`~retarget.scene.SceneSpec`.
+    """
 
     object: ObjectConfig | None = None
     terrain: TerrainConfig | None = None
@@ -115,7 +152,28 @@ class SceneConfig(BaseModel):
 
 
 class RetargetingRunConfig(BaseModel):
-    """Human-editable run spec used by the CLI."""
+    """Human-editable run spec used by the CLI.
+
+    Attributes:
+        name (str | None): Optional run or result name; defaults to the motion clip name.
+        motion (Path): Source motion file path.
+        format_name (str): Registered motion format key (TOML alias ``format``; default ``"minimal"``).
+        robot (str): Robot name passed to the selected provider.
+        robot_provider (str): Registered provider key (default ``"registry"``).
+        robot_options (dict[str, Any]): Provider-specific options (``path``, ``store``, etc.).
+        task_kind (TaskKind): Retargeting workflow kind.
+        output (Path): Destination ``.npz`` result path.
+        imports (tuple[str, ...]): Extension modules or ``.py`` plugins to import before validation.
+        scale_to_robot (bool): Scale source motion to the target robot height.
+        output_fps (float | None): Optional result frame rate override.
+        joint_mapping (dict[str, str] | None): Source-to-robot joint name overrides.
+        mesh (InteractionMeshSpec): Interaction mesh construction settings.
+        solver (SolverSpec): Optimization solver configuration.
+        objectives (tuple[ObjectiveSpec, ...] | None): Objective terms; defaults when omitted.
+        constraints (tuple[ConstraintSpec, ...] | None): Constraint terms; defaults when omitted.
+        scene (SceneConfig): Scene object, terrain, and ground options.
+        metadata (dict[str, Any]): Free-form run metadata stored on the result.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 

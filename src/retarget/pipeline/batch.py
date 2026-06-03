@@ -13,10 +13,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from retarget.core.enums import RunStatus
 
 BatchWorker = Callable[["BatchJob"], Mapping[str, Any] | None]
+"""Callable invoked for each :class:`BatchJob`; return value is stored as run metadata on success."""
 
 
 class BatchJob(BaseModel):
-    """One retargeting job in a batch run."""
+    """One retargeting job in a batch run.
+
+    Attributes:
+        id (str): Stable job identifier used in manifests and resume logic.
+        motion (Path): Input motion artifact path for the worker.
+        output (Path): Expected output artifact path; existing files may be skipped.
+        name (str | None): Optional display name; defaults to ``id`` in callers.
+        metadata (dict[str, Any]): Opaque tags forwarded to the worker unchanged.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -28,7 +37,19 @@ class BatchJob(BaseModel):
 
 
 class BatchRunRecord(BaseModel):
-    """Recorded outcome for one batch job."""
+    """Recorded outcome for one batch job.
+
+    Attributes:
+        job_id (str): Identifier matching :attr:`BatchJob.id`.
+        motion (Path): Input path from the job definition.
+        output (Path): Output path from the job definition.
+        status (RunStatus): Terminal status (success, skipped, or failed).
+        started_at (datetime): UTC timestamp when execution began.
+        finished_at (datetime): UTC timestamp when execution completed.
+        message (str): Human-readable summary or error text.
+        error_type (str | None): Exception class name when ``status`` is failed.
+        metadata (dict[str, Any]): Worker-returned fields on success; resume hints when skipped.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -50,7 +71,21 @@ class BatchRunRecord(BaseModel):
 
 
 class BatchManifest(BaseModel):
-    """Manifest written by resumable batch runs."""
+    """Manifest written by resumable batch runs.
+
+    Attributes:
+        schema_version (int): Manifest format version for forward compatibility.
+        created_at (datetime): UTC time when the batch run first started.
+        updated_at (datetime): UTC time of the most recent manifest write.
+        input_dir (Path | None): Root directory scanned for input motions, if known.
+        output_dir (Path | None): Root directory for written outputs, if known.
+        pattern (str): Glob or filter pattern used to build the job list.
+        total (int): Number of jobs in the batch definition.
+        success_count (int): Jobs that completed with :attr:`~RunStatus.SUCCESS`.
+        skipped_count (int): Jobs skipped because outputs already existed.
+        failed_count (int): Jobs that raised during execution.
+        records (tuple[BatchRunRecord, ...]): Per-job outcomes in submission order.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -131,7 +166,30 @@ class BatchRunner:
         output_dir: Path | None = None,
         pattern: str = "",
     ) -> BatchManifest:
-        """Run jobs, skip existing successful outputs, and write a manifest incrementally."""
+        """Run jobs, skip existing outputs, and update a manifest incrementally.
+
+        Loads an existing manifest at ``manifest_path`` when present so reruns can
+        resume. Jobs whose ``output`` already exists are marked skipped unless
+        ``force`` is true. After each completed (or skipped) job the manifest is
+        rewritten so partial progress survives interruption.
+
+        Args:
+            jobs: Iterable of retargeting jobs to execute.
+            worker: Pickleable callable invoked per pending job; must accept a
+                :class:`BatchJob` and return optional metadata on success.
+            manifest_path: JSON manifest path updated after each job finishes.
+            max_workers: Process pool size; ``1`` runs jobs sequentially in-process.
+            force: When true, rerun jobs even if ``output`` already exists.
+            input_dir: Optional batch input root stored on the manifest.
+            output_dir: Optional batch output root stored on the manifest.
+            pattern: Optional glob or filter label stored on the manifest.
+
+        Returns:
+            Final manifest aggregating all job records and summary counts.
+
+        Raises:
+            ValueError: If ``max_workers`` is less than 1.
+        """
 
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")

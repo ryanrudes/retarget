@@ -31,6 +31,14 @@ class DryRunVisualizer:
         self.console = console or Console()
 
     def view(self, result: RetargetingResult) -> None:
+        """Print a Rich table summary of a retargeting result.
+
+        Builds :func:`~retarget.visualization.playback.build_playback_data` and prints frame count,
+        ``qpos`` width, fps, duration, robot/object labels, and run status without opening a viewer.
+
+        Args:
+            result (RetargetingResult): Solved retargeting output to summarize.
+        """
         playback = build_playback_data(result)
         table = Table(title=result.name)
         table.add_column("Frames", justify="right")
@@ -68,6 +76,15 @@ class ViserVisualizer:
         robot_spec: RobotSpec | None = None,
         show_diagnostics: bool = False,
     ) -> None:
+        """Configure Viser server options for live result playback.
+
+        Args:
+            host (str): Bind address for the Viser web server (default ``127.0.0.1``).
+            port (int): TCP port for the Viser web server (default ``8080``).
+            block (bool): When ``True``, keep the process alive until interrupted (default).
+            robot_spec (RobotSpec | None): Optional spec for URDF-backed rendering and joint mapping.
+            show_diagnostics (bool): Overlay human points, root paths, and link diagnostics.
+        """
         self.host = host
         self.port = port
         self.block = block
@@ -75,6 +92,18 @@ class ViserVisualizer:
         self.show_diagnostics = show_diagnostics
 
     def view(self, result: RetargetingResult) -> None:
+        """Open an interactive Viser scene for a retargeting result.
+
+        Requires the ``retarget[viz]`` extra (``viser``, and optionally ``trimesh`` / URDF extras).
+        Populates a floor grid, robot (URDF or primitive links), optional object mesh or box,
+        and an optional frame slider. Blocks until interrupted when :attr:`block` is ``True``.
+
+        Args:
+            result (RetargetingResult): Solved retargeting output to visualize.
+
+        Raises:
+            RuntimeError: If optional visualization dependencies or URDF loading fails.
+        """
         try:
             import viser
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -534,7 +563,18 @@ def view_result(
     robot_spec: RobotSpec | None = None,
     show_diagnostics: bool = False,
 ) -> None:
-    """View or summarize a result."""
+    """View or summarize a retargeting result via the visualizer registry.
+
+    When ``dry_run`` is ``True`` (default), uses the registered ``"dry_run"`` visualizer to print a
+    Rich table summary. When ``False``, constructs :class:`ViserVisualizer` with ``robot_spec`` and
+    ``show_diagnostics`` and opens live playback (requires ``retarget[viz]``).
+
+    Args:
+        result (RetargetingResult): Solved retargeting output to display.
+        dry_run (bool): Print a summary instead of launching Viser.
+        robot_spec (RobotSpec | None): Optional robot spec for URDF-backed live playback.
+        show_diagnostics (bool): Pass through to :class:`ViserVisualizer` for diagnostic overlays.
+    """
 
     if dry_run:
         visualizer = visualizers.get(VisualizerName.DRY_RUN)

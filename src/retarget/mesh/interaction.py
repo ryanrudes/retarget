@@ -30,7 +30,12 @@ class MeshTopology(StrEnum):
 
 
 class InteractionMeshSpec(BaseModel):
-    """Configuration for interaction mesh construction."""
+    """Configuration for interaction mesh construction.
+
+    Attributes:
+        topology (MeshTopology): Graph construction policy.
+        k_neighbors (int): Neighbor count when ``topology`` is ``K_NEAREST`` or Delaunay fallback.
+    """
 
     topology: MeshTopology = MeshTopology.DELAUNAY
     k_neighbors: int = 4
@@ -45,7 +50,12 @@ class InteractionMeshSpec(BaseModel):
 
 @dataclass(frozen=True)
 class InteractionMesh:
-    """A point set plus simplex connectivity."""
+    """A point set plus simplex connectivity.
+
+    Attributes:
+        vertices (FloatArray): Mesh sites with shape ``(V, 3)``.
+        simplices (NDArray[np.int_]): Edge or triangle vertex indices into ``vertices``.
+    """
 
     vertices: FloatArray
     simplices: NDArray[np.int_]
@@ -79,6 +89,17 @@ class InteractionMeshBuilder:
         k_neighbors: int | None = None,
         use_delaunay: bool | None = None,
     ) -> None:
+        """Configure mesh topology for subsequent :meth:`build` calls.
+
+        Args:
+            spec (InteractionMeshSpec | None): Full mesh configuration; mutually exclusive with keyword overrides.
+            topology (MeshTopology | str | None): Override topology when ``spec`` is omitted.
+            k_neighbors (int | None): Neighbor count for ``K_NEAREST`` topology.
+            use_delaunay (bool | None): Legacy flag; ``False`` selects chain topology when ``topology`` is omitted.
+
+        Raises:
+            ValueError: If ``spec`` is combined with explicit mesh keyword options.
+        """
         if spec is not None and (topology is not None or k_neighbors is not None or use_delaunay is not None):
             raise ValueError("Pass either spec or explicit mesh options, not both")
         if spec is not None:
@@ -93,7 +114,18 @@ class InteractionMeshBuilder:
         )
 
     def build(self, human_points: FloatArray, environment_points: FloatArray | None = None) -> InteractionMesh:
-        """Build an interaction mesh."""
+        """Build an interaction mesh from human and optional environment points.
+
+        Args:
+            human_points (FloatArray): Body or joint sample sites with shape ``(N, 3)``.
+            environment_points (FloatArray | None): Object or terrain sites stacked after human points.
+
+        Returns:
+            InteractionMesh: Combined vertex set and simplex connectivity.
+
+        Raises:
+            ValueError: If point arrays have invalid rank or shape.
+        """
 
         human = as_float_array(human_points, shape_tail=(3,), name="human_points")
         if human.ndim != 2:

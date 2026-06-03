@@ -62,6 +62,9 @@ function isNavigableCode(target) {
   if (!(target instanceof Element)) {
     return null;
   }
+  if (target.closest(".md-nav, .md-sidebar, .md-tabs, .md-header")) {
+    return null;
+  }
   if (target.closest("a[href]")) {
     return null;
   }

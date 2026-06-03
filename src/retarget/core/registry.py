@@ -11,15 +11,36 @@ RegistryKey = str | StrEnum
 
 
 class Registry(Generic[T]):
-    """Small decorator-friendly registry."""
+    """Small decorator-friendly registry.
+
+    Attributes:
+        name (str): Human-readable registry label used in error messages.
+    """
 
     def __init__(self, name: str, *, decorator_transform: Callable[[object], T] | None = None) -> None:
+        """Create an empty registry.
+
+        Args:
+            name (str): Registry label included in lookup errors.
+            decorator_transform (Callable[[object], T] | None): Optional wrapper applied
+                when registering via the decorator form.
+        """
         self.name = name
         self._decorator_transform = decorator_transform
         self._items: dict[str, T] = {}
 
     def register(self, key: RegistryKey, value: T | None = None, *, replace: bool = False) -> Callable[[T], T] | T:
-        """Register a value directly or as a decorator."""
+        """Register a value directly or as a decorator.
+
+        Args:
+            key (RegistryKey): Registry key (``str`` or ``StrEnum``).
+            value (T | None): Object to register; omit to use as ``@registry.register(...)``.
+            replace (bool): Allow overwriting an existing key.
+
+        Returns:
+            Callable[[T], T] | T: The decorator when ``value`` is omitted, otherwise the
+                registered value.
+        """
 
         normalized = _normalize_key(key)
         if not normalized:
@@ -38,7 +59,17 @@ class Registry(Generic[T]):
         return decorator(value)
 
     def get(self, key: RegistryKey) -> T:
-        """Return a registered value."""
+        """Return a registered value.
+
+        Args:
+            key (RegistryKey): Registry key to look up.
+
+        Returns:
+            T: Registered value for ``key``.
+
+        Raises:
+            KeyError: If ``key`` is not registered.
+        """
 
         normalized = _normalize_key(key)
         try:
@@ -48,7 +79,14 @@ class Registry(Generic[T]):
             raise KeyError(f"Unknown {self.name} key {normalized!r}. Available: {available}") from exc
 
     def maybe_get(self, key: RegistryKey) -> T | None:
-        """Return a registered value or `None`."""
+        """Return a registered value or ``None``.
+
+        Args:
+            key (RegistryKey): Registry key to look up.
+
+        Returns:
+            T | None: Registered value, or ``None`` when ``key`` is absent.
+        """
 
         return self._items.get(_normalize_key(key))
 
@@ -79,7 +117,14 @@ class Registry(Generic[T]):
         return len(self._items)
 
     def require_all(self, keys: Iterable[RegistryKey]) -> None:
-        """Validate that every key exists."""
+        """Validate that every key exists.
+
+        Args:
+            keys (Iterable[RegistryKey]): Keys that must be registered.
+
+        Raises:
+            KeyError: If any key in ``keys`` is missing.
+        """
 
         missing = self.missing(keys)
         if missing:
@@ -87,7 +132,15 @@ class Registry(Generic[T]):
             raise KeyError(f"Missing {self.name} registrations: {', '.join(missing)}. Available: {available}")
 
     def missing(self, keys: Iterable[RegistryKey]) -> tuple[str, ...]:
-        """Return missing keys in first-seen order."""
+        """Return missing keys in first-seen order.
+
+        Args:
+            keys (Iterable[RegistryKey]): Keys to check for registration.
+
+        Returns:
+            tuple[str, ...]: Normalized keys from ``keys`` that are not registered,
+                preserving first-seen order without duplicates.
+        """
 
         missing: list[str] = []
         seen: set[str] = set()

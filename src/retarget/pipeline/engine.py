@@ -27,7 +27,20 @@ from retarget.robots.spec import RobotSpec
 
 @dataclass(frozen=True)
 class EngineOutput:
-    """Raw output from the interaction-mesh engine."""
+    """Raw output from the interaction-mesh engine.
+
+    Attributes:
+        qpos (FloatArray): Retargeted generalized coordinates, shape ``(frames, nq)``.
+        costs (FloatArray): Per-frame subproblem cost after the last inner iteration.
+        iterations (tuple[int, ...]): Inner solver iterations used per frame.
+        solver_backend (str): Resolved registry key for the subproblem solver.
+        solver_statuses (tuple[str, ...]): Backend status string per frame.
+        mesh_spec (InteractionMeshSpec): Mesh topology used when building interaction graphs.
+        mesh_source (str): ``"engine"`` when a custom builder was injected; otherwise ``"problem"``.
+        robot_link_names (tuple[str, ...]): Link names for optional playback positions.
+        robot_link_positions (FloatArray | None): World positions ``(frames, links, 3)`` when computed.
+        warnings (tuple[str, ...]): Non-fatal issues encountered during the run.
+    """
 
     qpos: FloatArray
     costs: FloatArray
@@ -55,8 +68,8 @@ class InteractionMeshRetargetingEngine:
         kinematics: KinematicsBackend | None = None,
         mesh_builder: InteractionMeshBuilder | None = None,
     ) -> None:
-        self.kinematics = kinematics
-        self.mesh_builder = mesh_builder
+        self.kinematics: KinematicsBackend | None = kinematics
+        self.mesh_builder: InteractionMeshBuilder | None = mesh_builder
 
     def run(self, problem: RetargetingProblem) -> EngineOutput:
         """Run interaction-mesh retargeting for all frames."""

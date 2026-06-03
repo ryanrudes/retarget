@@ -22,6 +22,19 @@ class NumpyLeastSquaresSolver:
     """Deterministic bounded least-squares fallback with trust-region projection."""
 
     def solve(self, problem: QuadraticProblem) -> SolverResult:
+        """Solve a quadratic subproblem with NumPy lstsq or SciPy SLSQP.
+
+        Uses unconstrained least squares when no linear constraints are present;
+        otherwise delegates to SLSQP with box bounds, linear constraints, and an
+        optional trust-region inequality. Clips the solution to bounds and projects
+        onto the trust region when configured.
+
+        Args:
+            problem: Least-squares subproblem assembled for one SQP iteration.
+
+        Returns:
+            Solution vector, residual cost, and status ``"optimal"``.
+        """
         if problem.linear_constraints:
             return _solve_with_slsqp(problem)
         solution, *_ = np.linalg.lstsq(problem.matrix, problem.target, rcond=None)
@@ -45,6 +58,20 @@ class CvxpyClarabelSolver:
         self.verbose = verbose
 
     def solve(self, problem: QuadraticProblem) -> SolverResult:
+        """Solve a quadratic subproblem with CVXPY and the Clarabel conic solver.
+
+        Requires the ``retarget[optimize]`` extra. Builds a sum-of-squares objective
+        with box bounds, second-order-cone trust regions, and linear inequalities.
+
+        Args:
+            problem: Least-squares subproblem assembled for one SQP iteration.
+
+        Returns:
+            Solution vector, optimal cost, and CVXPY status string.
+
+        Raises:
+            RuntimeError: If optional dependencies are missing or the solve does not converge.
+        """
         try:
             import clarabel  # noqa: F401
             import cvxpy as cp

@@ -14,7 +14,12 @@ from retarget.core.pose import PoseSequence
 
 
 class ObjectTrajectory(BaseModel):
-    """Dynamic object poses over time."""
+    """Dynamic object poses over time.
+
+    Attributes:
+        poses (PoseSequence): Per-frame object rigid transform track.
+        name (str): Object label used in scene exports and logs.
+    """
 
     poses: PoseSequence
     name: str = "object"
@@ -32,7 +37,16 @@ class ObjectTrajectory(BaseModel):
 
 
 class ObjectSpec(BaseModel):
-    """Object asset and sampling information."""
+    """Object asset and sampling information.
+
+    Attributes:
+        name (str): Object identifier referenced by the scene and optimizer.
+        mesh_path (Path | None): Optional triangle mesh file for visualization or sampling.
+        urdf_path (Path | None): Optional URDF describing articulated object geometry.
+        sample_points (FloatArray | None): Precomputed surface points with shape ``(N, 3)``.
+        trajectory (ObjectTrajectory | None): Time-varying object pose track.
+        metadata (dict[str, Any]): Opaque sidecar fields (mass, scale, asset ids, …).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -60,7 +74,14 @@ class ObjectSpec(BaseModel):
 
 
 class TerrainSpec(BaseModel):
-    """Static terrain information."""
+    """Static terrain information.
+
+    Attributes:
+        name (str): Terrain label used in scene exports and logs.
+        mesh_path (Path | None): Optional terrain mesh file.
+        sample_points (FloatArray | None): Precomputed terrain surface points with shape ``(N, 3)``.
+        metadata (dict[str, Any]): Opaque sidecar fields (friction, resolution, …).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -76,7 +97,16 @@ class TerrainSpec(BaseModel):
 
 
 class SceneSpec(BaseModel):
-    """Scene configuration for a retargeting run."""
+    """Scene configuration for a retargeting run.
+
+    Attributes:
+        task_kind (TaskKind): High-level workflow (robot-only, object interaction, climbing).
+        object (ObjectSpec | None): Manipulated or climbable object definition.
+        terrain (TerrainSpec | None): Static ground or climbable terrain definition.
+        ground_range (tuple[float, float]): XY extent of the procedural ground grid (meters).
+        ground_size (int): Number of samples per axis for :meth:`ground_points`.
+        metadata (dict[str, Any]): Opaque sidecar fields passed through to the solver.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -101,19 +131,38 @@ class SceneSpec(BaseModel):
 
     @classmethod
     def robot_only(cls) -> SceneSpec:
-        """Create a robot-only ground scene."""
+        """Create a robot-only ground scene.
+
+        Returns:
+            SceneSpec: ``ROBOT_ONLY`` task with default flat terrain.
+        """
 
         return cls(task_kind=TaskKind.ROBOT_ONLY, terrain=TerrainSpec())
 
     @classmethod
     def object_interaction(cls, object_spec: ObjectSpec) -> SceneSpec:
-        """Create an object interaction scene."""
+        """Create an object interaction scene.
+
+        Args:
+            object_spec (ObjectSpec): Manipulated object definition.
+
+        Returns:
+            SceneSpec: ``OBJECT_INTERACTION`` task referencing ``object_spec``.
+        """
 
         return cls(task_kind=TaskKind.OBJECT_INTERACTION, object=object_spec)
 
     @classmethod
     def climbing(cls, terrain: TerrainSpec | None = None, object_spec: ObjectSpec | None = None) -> SceneSpec:
-        """Create a climbing/terrain scene."""
+        """Create a climbing or terrain-interaction scene.
+
+        Args:
+            terrain (TerrainSpec | None): Climbable terrain mesh or samples.
+            object_spec (ObjectSpec | None): Optional climbable object instead of terrain.
+
+        Returns:
+            SceneSpec: ``CLIMBING`` task; inserts a default terrain spec when both arguments are omitted.
+        """
 
         if terrain is None and object_spec is None:
             terrain = TerrainSpec(name="terrain")

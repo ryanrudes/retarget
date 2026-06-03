@@ -1,4 +1,13 @@
-"""Built-in motion registries."""
+"""Built-in motion registries.
+
+``motion_formats`` maps :class:`~retarget.core.enums.MotionFormat` keys to
+:class:`~retarget.motion.spec.MotionFormatSpec` definitions for built-in skeleton
+layouts.
+
+``motion_loaders`` maps file suffixes (:class:`~retarget.core.enums.MotionLoaderSuffix`)
+to :class:`~retarget.core.protocols.MotionLoader` implementations that parse on-disk
+motion files.
+"""
 
 from __future__ import annotations
 
@@ -34,10 +43,13 @@ motion_formats: Registry[MotionFormatSpec] = Registry(
     "motion format",
     decorator_transform=_motion_format_from_decorator,
 )
+"""Registry of built-in :class:`~retarget.motion.spec.MotionFormatSpec` entries."""
+
 motion_loaders: Registry[MotionLoader] = Registry(
     "motion loader",
     decorator_transform=_motion_loader_from_decorator,
 )
+"""Registry of file-suffix :class:`~retarget.core.protocols.MotionLoader` implementations."""
 
 
 MINIMAL_JOINTS = (

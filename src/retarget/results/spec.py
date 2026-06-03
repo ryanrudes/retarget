@@ -18,7 +18,20 @@ from retarget.core.timing import resample_linear
 
 
 class RetargetingResult(BaseModel):
-    """Serialized retargeting output."""
+    """Serialized retargeting output.
+
+    Attributes:
+        schema_version (int): On-disk format version for forward-compatible loading.
+        name (str): Run or clip label.
+        status (RunStatus): Outcome of the retargeting job.
+        qpos (FloatArray): Robot generalized coordinates with shape ``(frames, nq)``.
+        fps (float): Sampling rate of ``qpos`` in Hz.
+        cost (FloatArray | None): Per-frame or scalar objective cost.
+        human_joints (FloatArray | None): Reference human joints with shape ``(frames, joints, 3)``.
+        robot_link_positions (FloatArray | None): FK link positions with shape ``(frames, links, 3)``.
+        warnings (tuple[str, ...]): Non-fatal messages emitted during the run.
+        metadata (dict[str, Any]): Opaque sidecar fields (config hashes, timings, …).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -182,7 +195,22 @@ class RetargetingResult(BaseModel):
 
 
 class EvaluationReport(BaseModel):
-    """Evaluation metrics for a result."""
+    """Evaluation metrics for a result.
+
+    Attributes:
+        status (RunStatus): Overall evaluation outcome.
+        source_name (str | None): Human-readable name of the evaluated result or clip.
+        frame_count (int | None): Number of frames in the evaluated motion.
+        qpos_dimension (int | None): Robot ``qpos`` width.
+        fps (float | None): Sampling rate of the evaluated result.
+        task_kind (str | None): Scene task kind string when available.
+        robot_name (str | None): Robot preset or asset name.
+        motion_name (str | None): Source human motion name.
+        metrics (dict[str, float]): Scalar metric values keyed by name.
+        metric_units (dict[str, str]): Unit strings aligned with ``metrics`` keys.
+        details (dict[str, Any]): Structured diagnostic payloads (curves, thresholds, …).
+        warnings (tuple[str, ...]): Non-fatal evaluation messages.
+    """
 
     status: RunStatus = RunStatus.SUCCESS
     source_name: str | None = None
@@ -217,7 +245,19 @@ class EvaluationReport(BaseModel):
 
 
 class EvaluationRecord(BaseModel):
-    """Recorded outcome for evaluating one retargeting result."""
+    """Recorded outcome for evaluating one retargeting result.
+
+    Attributes:
+        result_path (Path): Path to the evaluated ``.npz`` retargeting output.
+        status (RunStatus): Per-result evaluation outcome.
+        report_path (Path | None): Optional JSON report written for this result.
+        job_id (str | None): Batch or scheduler job identifier.
+        source_name (str | None): Human-readable clip or run name.
+        frame_count (int | None): Frame count observed during evaluation.
+        message (str): Error or skip explanation when ``status`` is not success.
+        metrics (dict[str, float]): Scalar metrics copied from the report.
+        warnings (tuple[str, ...]): Warnings surfaced during evaluation.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -233,7 +273,19 @@ class EvaluationRecord(BaseModel):
 
 
 class EvaluationManifest(BaseModel):
-    """Manifest written by batch evaluation runs."""
+    """Manifest written by batch evaluation runs.
+
+    Attributes:
+        schema_version (int): On-disk manifest format version.
+        created_at (datetime): UTC timestamp when the manifest was first created.
+        updated_at (datetime): UTC timestamp of the most recent update.
+        total (int): Number of records in ``records``.
+        success_count (int): Records with :attr:`~retarget.core.enums.RunStatus.SUCCESS`.
+        partial_count (int): Records with :attr:`~retarget.core.enums.RunStatus.PARTIAL`.
+        skipped_count (int): Records with :attr:`~retarget.core.enums.RunStatus.SKIPPED`.
+        failed_count (int): Records with :attr:`~retarget.core.enums.RunStatus.FAILED`.
+        records (tuple[EvaluationRecord, ...]): Per-result evaluation entries.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

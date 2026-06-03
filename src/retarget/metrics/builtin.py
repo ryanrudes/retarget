@@ -29,6 +29,7 @@ def _metric_from_decorator(value: object) -> Metric:
 
 
 metrics: Registry[Metric] = Registry("metric", decorator_transform=_metric_from_decorator)
+"""Registry of built-in and user-registered result metrics keyed by :class:`~retarget.core.enums.MetricName`."""
 
 METRIC_UNITS = {
     MetricName.OPTIMIZATION_COST.value: "cost",
@@ -44,6 +45,16 @@ class OptimizationCostMetric:
     name = MetricName.OPTIMIZATION_COST.value
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        """Return the mean per-frame optimization cost.
+
+        Args:
+            result: Retargeted trajectory to score.
+            problem: Unused; present for the :class:`~retarget.core.protocols.Metric` protocol.
+
+        Returns:
+            Mean of ``result.cost``, or ``0.0`` when cost is absent.
+        """
+
         if result.cost is None:
             return 0.0
         return float(np.mean(result.cost))
@@ -55,6 +66,17 @@ class FootSlidingMetric:
     name = MetricName.FOOT_SLIDING.value
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        """Return mean stance-foot horizontal speed while in contact.
+
+        Args:
+            result: Retargeted trajectory to score.
+            problem: When provided with ``contact_links``, uses link positions and
+                inferred contacts; otherwise falls back to root ``qpos`` xy velocity.
+
+        Returns:
+            Mean sliding speed in m/s.
+        """
+
         if result.frame_count < 2:
             return 0.0
         if problem is not None and problem.robot.contact_links:
@@ -78,6 +100,16 @@ class ContactPreservationMetric:
     name = MetricName.CONTACT_PRESERVATION.value
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        """Return the fraction of frames with matching human/robot contact labels.
+
+        Args:
+            result: Retargeted trajectory to score.
+            problem: When provided, compares human motion contacts to robot link contacts.
+
+        Returns:
+            Fraction in ``[0, 1]``; ``1.0`` when human joints are unavailable.
+        """
+
         if result.human_joints is None:
             return 1.0
         if problem is not None and problem.robot.contact_links:
@@ -96,6 +128,16 @@ class PenetrationMetric:
     name = MetricName.PENETRATION.value
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        """Return maximum ground or scene penetration depth for contact links.
+
+        Args:
+            result: Retargeted trajectory to score.
+            problem: Required for scene-aware clearance; uses ``non_penetration`` parameters.
+
+        Returns:
+            Maximum violation depth in meters, or ``0.0`` without a problem.
+        """
+
         if problem is not None and problem.robot.contact_links:
             positions = _contact_link_positions(result, problem)
             floor_z = _constraint_parameter(problem, "non_penetration", "floor_z", 0.0)

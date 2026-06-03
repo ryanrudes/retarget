@@ -27,6 +27,20 @@ function isCategoryTocLink(href) {
 }
 
 /**
+ * API class/enum root headings (mkdocstrings `show_symbol_type_toc` badges).
+ * Needed when enum members sit directly under the enum (no Attributes subsection).
+ *
+ * @param {HTMLAnchorElement | null | undefined} link
+ */
+function isApiObjectTocLink(link) {
+  return Boolean(
+    link?.querySelector(
+      "code.doc-symbol-toc.doc-symbol-enum, code.doc-symbol-toc.doc-symbol-class, code.doc-symbol-toc.doc-symbol-dataclass",
+    ),
+  );
+}
+
+/**
  * @param {HTMLElement} item
  */
 function setExpanded(item, expanded) {
@@ -34,6 +48,10 @@ function setExpanded(item, expanded) {
   item.classList.toggle("retarget-toc-collapsed", !expanded);
   const toggle = item.querySelector(":scope > .retarget-toc-toggle");
   toggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  toggle?.setAttribute(
+    "aria-label",
+    expanded ? "Collapse section" : "Expand section",
+  );
   document.dispatchEvent(new CustomEvent("retarget-toc-collapse-change"));
 }
 
@@ -54,7 +72,11 @@ export function setupCollapsibleToc(nav) {
 
     const link = item.querySelector(":scope > a.md-nav__link");
     const href = link?.getAttribute("href") ?? "";
-    if (!isTopLevelTocItem(item, nav) && !isCategoryTocLink(href)) {
+    if (
+      !isTopLevelTocItem(item, nav) &&
+      !isCategoryTocLink(href) &&
+      !isApiObjectTocLink(link)
+    ) {
       continue;
     }
 

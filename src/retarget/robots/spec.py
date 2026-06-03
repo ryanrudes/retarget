@@ -11,7 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class JointLimit(BaseModel):
-    """Named joint position bounds."""
+    """Named joint position bounds.
+
+    Attributes:
+        name (str): Joint name matching :attr:`RobotSpec.joint_names`.
+        lower (float): Lower position bound in radians or meters.
+        upper (float): Upper position bound in radians or meters.
+    """
 
     name: str
     lower: float
@@ -25,7 +31,14 @@ class JointLimit(BaseModel):
 
 
 class QposLayout(BaseModel):
-    """Convention for serialized qpos vectors."""
+    """Convention for serialized qpos vectors.
+
+    Attributes:
+        root_position (tuple[int, int]): Half-open slice ``(start, stop)`` for root translation.
+        root_quaternion (tuple[int, int]): Half-open slice for root orientation (wxyz).
+        joint_start (int): Index where actuated robot joints begin in ``qpos``.
+        object_pose_size (int): Number of scalars reserved for object pose (position + quaternion).
+    """
 
     root_position: tuple[int, int] = (0, 3)
     root_quaternion: tuple[int, int] = (3, 7)
@@ -50,7 +63,24 @@ class QposLayout(BaseModel):
 
 
 class RobotSpec(BaseModel):
-    """Validated robot description used by retargeting."""
+    """Validated robot description used by retargeting.
+
+    Attributes:
+        name (str): Robot identifier used in problems and results.
+        dof (int): Number of actuated degrees of freedom.
+        height_m (float): Nominal standing height in meters (for scaling heuristics).
+        joint_names (tuple[str, ...]): Actuated joint names in qpos order.
+        link_names (tuple[str, ...]): Named links for kinematics and contact (default empty).
+        contact_links (tuple[str, ...]): Links used for foot or support contact (default empty).
+        nominal_tracking_joints (tuple[str, ...]): Joints tracked by nominal-pose objectives.
+        joint_limits (dict[str, tuple[float, float]]): Per-joint ``(lower, upper)`` bounds.
+        default_joint_mapping (dict[str, str]): Source-joint to robot-joint name map.
+        default_link_mapping (dict[str, str]): Source-link to robot link/joint name map.
+        urdf_path (Path | None): Optional URDF used for visualization or kinematics.
+        mujoco_xml_path (Path | None): Optional MuJoCo XML model path.
+        qpos_layout (QposLayout): Layout of root, joints, and optional object pose in ``qpos``.
+        metadata (dict[str, Any]): Free-form robot metadata (asset hints, descriptions, etc.).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -20,6 +20,11 @@ _NAV_LINK_RE = re.compile(
     r'(<a\s+href="#([^"]+)"\s+class="md-nav__link">)(.*?)(</a>)',
     re.DOTALL,
 )
+_COMPACT_TOC_LABELS = {
+    "class-attribute": "var",
+    "instance-attribute": "var",
+    "module-attribute": "var",
+}
 
 
 def _first_decorator_label(heading_inner: str) -> tuple[str, str] | None:
@@ -30,6 +35,7 @@ def _first_decorator_label(heading_inner: str) -> tuple[str, str] | None:
 
 
 def _toc_label_badge(label_class: str, label_text: str) -> str:
+    label_text = _COMPACT_TOC_LABELS.get(label_class, label_text)
     return (
         f'<small class="doc doc-label doc-label-toc doc-label-{label_class}">'
         f"<code>{label_text}</code></small>&nbsp;"

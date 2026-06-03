@@ -24,12 +24,14 @@ from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec
 
 @dataclass(frozen=True)
 class LaplacianObjective:
-    """Preserve interaction mesh Laplacian coordinates."""
+    """Least-squares term matching interaction-mesh Laplacian coordinates."""
 
     weight: float = 10.0
     name: str = "laplacian"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Preserve local spatial relationships between body and environment points."
 
     def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
@@ -53,12 +55,14 @@ class LaplacianObjective:
 
 @dataclass(frozen=True)
 class SmoothnessObjective:
-    """Penalize frame-to-frame joint changes."""
+    """Penalize actuated-joint changes between consecutive frames."""
 
     weight: float = 0.2
     name: str = "smoothness"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Reduce discontinuities between adjacent retargeted frames."
 
     def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
@@ -75,12 +79,14 @@ class SmoothnessObjective:
 
 @dataclass(frozen=True)
 class NominalTrackingObjective:
-    """Track a nominal trajectory or pose."""
+    """Pull selected joints toward the robot's nominal posture."""
 
     weight: float = 5.0
     name: str = "nominal_tracking"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Keep selected joints close to a nominal solution."
 
     def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
@@ -104,11 +110,13 @@ class NominalTrackingObjective:
 
 @dataclass(frozen=True)
 class JointLimitConstraint:
-    """Enforce robot joint limits."""
+    """Box limits on actuated joint increments from current ``qpos``."""
 
     name: str = "joint_limits"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Clamp or constrain actuated joints within configured limits."
 
     def build(self, context: TermContext, _spec: ConstraintSpec) -> ConstraintContribution:
@@ -122,12 +130,14 @@ class JointLimitConstraint:
 
 @dataclass(frozen=True)
 class TrustRegionConstraint:
-    """Limit per-iteration optimizer updates."""
+    """Cap the Euclidean norm of each SQP joint update."""
 
     radius: float = 0.2
     name: str = "trust_region"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Bound each optimizer update to keep linearization valid."
 
     def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
@@ -138,12 +148,14 @@ class TrustRegionConstraint:
 
 @dataclass(frozen=True)
 class FootContactConstraint:
-    """Keep feet still during inferred contact windows."""
+    """Lock stance feet in xy when velocity-based contact is active."""
 
     tolerance: float = 1e-3
     name: str = "foot_contact"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Preserve stance-foot xy position during detected contact."
 
     def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
@@ -155,12 +167,14 @@ class FootContactConstraint:
 
 @dataclass(frozen=True)
 class FootLockConstraint:
-    """Pin configured foot links during explicit frame windows."""
+    """Pin contact links to a floor height during configured frame windows."""
 
     tolerance: float = 5e-3
     name: str = "foot_lock"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Pin feet to a configured floor height during explicit frame windows."
 
     def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
@@ -171,12 +185,14 @@ class FootLockConstraint:
 
 @dataclass(frozen=True)
 class NonPenetrationConstraint:
-    """Avoid robot-object or robot-ground penetration."""
+    """Separate contact links from ground and sampled scene geometry."""
 
     tolerance: float = 1e-3
     name: str = "non_penetration"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Maintain separation between robot collision geometry and scene geometry."
 
     def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
@@ -191,12 +207,14 @@ class NonPenetrationConstraint:
 
 @dataclass(frozen=True)
 class SelfCollisionConstraint:
-    """Avoid configured self-collision body pairs."""
+    """Maintain minimum separation between configured body pairs."""
 
     tolerance: float = 0.02
     name: str = "self_collision"
 
     def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
         return "Maintain distance between configured robot body pairs."
 
     def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:

@@ -29,14 +29,35 @@ if TYPE_CHECKING:
 class MotionLoader(Protocol):
     """Load a motion file into a `MotionSequence`."""
 
-    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence: ...
+    def load(self, path: Path, spec: MotionFormatSpec, *, name: str | None = None) -> MotionSequence:
+        """Load motion from disk.
+
+        Args:
+            path (Path): Source file path.
+            spec (MotionFormatSpec): Format descriptor for parsing.
+            name (str | None): Optional clip name override.
+
+        Returns:
+            MotionSequence: Parsed motion sequence.
+        """
+        ...
 
 
 @runtime_checkable
 class RobotProvider(Protocol):
     """Resolve robot specs from names or external asset locations."""
 
-    def load(self, name: str, **kwargs: Any) -> RobotSpec: ...
+    def load(self, name: str, **kwargs: Any) -> RobotSpec:
+        """Resolve a robot specification.
+
+        Args:
+            name (str): Registry key or asset identifier.
+            **kwargs (Any): Provider-specific options (paths, manifests, etc.).
+
+        Returns:
+            RobotSpec: Loaded robot model description.
+        """
+        ...
 
 
 @runtime_checkable
@@ -44,11 +65,25 @@ class ObjectiveTerm(Protocol):
     """Optimization objective term."""
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Registry key for this objective term."""
+        ...
 
-    def describe(self) -> str: ...
+    def describe(self) -> str:
+        """Return a short human-readable summary of the term."""
+        ...
 
-    def build(self, context: TermContext, spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]: ...
+    def build(self, context: TermContext, spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        """Build objective contributions for one optimization step.
+
+        Args:
+            context (TermContext): Shared kinematics and trajectory state.
+            spec (ObjectiveSpec): Term configuration from the problem spec.
+
+        Returns:
+            tuple[ObjectiveContribution, ...]: One or more stacked objective blocks.
+        """
+        ...
 
 
 @runtime_checkable
@@ -56,18 +91,41 @@ class ConstraintTerm(Protocol):
     """Optimization constraint term."""
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Registry key for this constraint term."""
+        ...
 
-    def describe(self) -> str: ...
+    def describe(self) -> str:
+        """Return a short human-readable summary of the term."""
+        ...
 
-    def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution: ...
+    def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
+        """Build a constraint contribution for one optimization step.
+
+        Args:
+            context (TermContext): Shared kinematics and trajectory state.
+            spec (ConstraintSpec): Term configuration from the problem spec.
+
+        Returns:
+            ConstraintContribution: Linearized inequality or equality block.
+        """
+        ...
 
 
 @runtime_checkable
 class Solver(Protocol):
     """Solve a quadratic retargeting subproblem."""
 
-    def solve(self, problem: QuadraticProblem) -> SolverResult: ...
+    def solve(self, problem: QuadraticProblem) -> SolverResult:
+        """Solve a quadratic subproblem.
+
+        Args:
+            problem (QuadraticProblem): Assembled least-squares or conic problem.
+
+        Returns:
+            SolverResult: Primal solution and solver diagnostics.
+        """
+        ...
 
 
 @runtime_checkable
@@ -78,37 +136,111 @@ class KinematicsBackend(Protocol):
         self,
         qpos: NDArray[np.float64],
         link_names: tuple[str, ...],
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.float64]:
+        """Compute link poses for the given configuration.
 
-    def link_positions(self, qpos: NDArray[np.float64], link_names: tuple[str, ...]) -> NDArray[np.float64]: ...
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            link_names (tuple[str, ...]): Links to evaluate.
+
+        Returns:
+            NDArray[np.float64]: Flattened pose array for the requested links.
+        """
+        ...
+
+    def link_positions(
+        self,
+        qpos: NDArray[np.float64],
+        link_names: tuple[str, ...],
+    ) -> NDArray[np.float64]:
+        """Return world-frame link origins.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            link_names (tuple[str, ...]): Links to evaluate.
+
+        Returns:
+            NDArray[np.float64]: Positions with shape ``(len(link_names), 3)``.
+        """
+        ...
 
     def body_jacobians(
         self,
         qpos: NDArray[np.float64],
         body_names: tuple[str, ...],
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]: ...
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return position, rotation, and full spatial Jacobians for bodies.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            body_names (tuple[str, ...]): Bodies to differentiate.
+
+        Returns:
+            tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+                Position Jacobians, rotation Jacobians, and stacked spatial Jacobians.
+        """
+        ...
 
     def point_jacobians(
         self,
         qpos: NDArray[np.float64],
         point_names: tuple[str, ...],
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return Jacobians for named kinematic points.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            point_names (tuple[str, ...]): Named points on the model.
+
+        Returns:
+            tuple[NDArray[np.float64], NDArray[np.float64]]:
+                Position Jacobians and optional auxiliary Jacobians.
+        """
+        ...
 
     def qpos_to_qvel(
         self,
         qpos: NDArray[np.float64],
         previous_qpos: NDArray[np.float64],
         dt: float,
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.float64]:
+        """Finite-difference generalized velocity from two poses.
+
+        Args:
+            qpos (NDArray[np.float64]): Current configuration.
+            previous_qpos (NDArray[np.float64]): Previous configuration.
+            dt (float): Time step in seconds.
+
+        Returns:
+            NDArray[np.float64]: Generalized velocity matching ``qpos`` layout.
+        """
+        ...
 
     def integrate_qvel(
         self,
         qpos: NDArray[np.float64],
         qvel: NDArray[np.float64],
         dt: float,
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.float64]:
+        """Integrate generalized velocity for one time step.
 
-    def joint_limits(self) -> dict[str, tuple[float, float]]: ...
+        Args:
+            qpos (NDArray[np.float64]): Starting configuration.
+            qvel (NDArray[np.float64]): Generalized velocity.
+            dt (float): Time step in seconds.
+
+        Returns:
+            NDArray[np.float64]: Integrated configuration.
+        """
+        ...
+
+    def joint_limits(self) -> dict[str, tuple[float, float]]:
+        """Return per-joint position limits.
+
+        Returns:
+            dict[str, tuple[float, float]]: Mapping from joint name to ``(low, high)``.
+        """
+        ...
 
     def geom_distances(
         self,
@@ -116,7 +248,18 @@ class KinematicsBackend(Protocol):
         geom_pairs: tuple[tuple[str, str], ...] | None = None,
         *,
         max_distance: float = np.inf,
-    ) -> tuple[GeometryDistance, ...]: ...
+    ) -> tuple[GeometryDistance, ...]:
+        """Measure distances between geometry pairs.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to evaluate, or all pairs.
+            max_distance (float): Ignore pairs farther than this threshold.
+
+        Returns:
+            tuple[GeometryDistance, ...]: Signed distances and contact normals per pair.
+        """
+        ...
 
     def collision_candidates(
         self,
@@ -124,21 +267,48 @@ class KinematicsBackend(Protocol):
         *,
         margin: float = 0.0,
         geom_pairs: tuple[tuple[str, str], ...] | None = None,
-    ) -> tuple[GeometryDistance, ...]: ...
+    ) -> tuple[GeometryDistance, ...]:
+        """Return geometry pairs within a collision margin.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            margin (float): Distance threshold for candidate inclusion.
+            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to scan, or all pairs.
+
+        Returns:
+            tuple[GeometryDistance, ...]: Near-contact pairs suitable for constraints.
+        """
+        ...
 
 
 @runtime_checkable
 class Visualizer(Protocol):
     """Render or summarize a retargeting result."""
 
-    def view(self, result: RetargetingResult) -> None: ...
+    def view(self, result: RetargetingResult) -> None:
+        """Open an interactive view or print a summary.
+
+        Args:
+            result (RetargetingResult): Retargeting output to display.
+        """
+        ...
 
 
 @runtime_checkable
 class Exporter(Protocol):
     """Export a retargeting result to an external workflow format."""
 
-    def export(self, result: RetargetingResult, spec: ExportSpec) -> ExportResult: ...
+    def export(self, result: RetargetingResult, spec: ExportSpec) -> ExportResult:
+        """Write retargeting output to an external format.
+
+        Args:
+            result (RetargetingResult): Solved trajectory and metadata.
+            spec (ExportSpec): Target format and destination options.
+
+        Returns:
+            ExportResult: Paths and status for written artifacts.
+        """
+        ...
 
 
 @runtime_checkable
@@ -146,6 +316,18 @@ class Metric(Protocol):
     """Evaluate one metric."""
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Registry key for this metric."""
+        ...
 
-    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float: ...
+    def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
+        """Compute the metric for a retargeting run.
+
+        Args:
+            result (RetargetingResult): Solved trajectory and diagnostics.
+            problem (RetargetingProblem | None): Original problem, when needed for context.
+
+        Returns:
+            float: Scalar metric value (lower is typically better).
+        """
+        ...

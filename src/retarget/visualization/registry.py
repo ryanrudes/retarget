@@ -1,4 +1,10 @@
-"""Visualization extension registries."""
+"""Visualization extension registries.
+
+``visualizers`` maps visualizer names (for example ``"dry_run"``, ``"viser"``) to
+:class:`~retarget.core.protocols.Visualizer` implementations. Use
+:meth:`~retarget.core.registry.Registry.get` to resolve a visualizer and
+:meth:`~retarget.core.registry.Registry.register` to add one.
+"""
 
 from __future__ import annotations
 

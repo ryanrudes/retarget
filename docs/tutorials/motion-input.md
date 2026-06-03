@@ -1,5 +1,8 @@
 # Motion input
 
+!!! info "Prerequisites"
+    Familiarity with [Your first retarget](your-first-retarget.md) helps—you have already loaded a fixture motion and run the CLI.
+
 Retargeting starts from a **`MotionSequence`**: named joints, positions shaped `(frames, joints, 3)`, frame rate, and optional root poses or metadata. This tutorial covers how files become that sequence and how to stay aligned with a **motion format** definition.
 
 ## Motion formats are contracts
@@ -104,5 +107,5 @@ Walk through `examples/custom_motion_format.py` and [Add a motion format](../add
 
 ## Next steps
 
-- [Your first retarget](your-first-retarget.md) — run and evaluate end to end
 - [Scenes and task kinds](scene-tasks.md) — when the motion interacts with objects or terrain
+- [Run configs](run-configs.md) — version motion paths and format names in TOML

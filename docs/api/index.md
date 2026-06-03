@@ -7,6 +7,9 @@ Generated from docstrings in the installed package. Use the sidebar sections bel
     [`RetargetingProblem`][retarget.pipeline.problem.RetargetingProblem], and
     [`RetargetingResult`][retarget.results.spec.RetargetingResult] — see [Pipeline](pipeline.md).
 
+!!! tip "Code-block symbol hovers"
+    Fenced-code hovers resolve `retarget`, `motion_sync`, and `contact_detection` symbols when `api-symbols.json` is built (`mkdocs build`, or restart `mkdocs serve` after hook changes). Qualified names (for example `RetargetingResult.load_npz`) are always the safest choice when a short token is ambiguous.
+
 | Section | Contents |
 |---------|----------|
 | [motion_sync](motion-sync.md) | `SyncClip`, sessions, mocap/video/contact schemas (sibling repo) |
@@ -16,6 +19,10 @@ Generated from docstrings in the installed package. Use the sidebar sections bel
 | [Protocols](protocols.md) | Extension interfaces (backends, terms, exporters) |
 | [Optimization](optimization.md) | Objectives, constraints, solvers |
 | [Registries](registries.md) | Plugin registries for robots, formats, metrics |
+| [Enums](enums.md) | `TaskKind`, registry keys, frames, run status |
+| [Asset store](asset-store.md) | `AssetStore`, manifests, install requirements |
+| [Export types](export-api.md) | `ExportSpec`, `ExportResult`, `Exporter` |
+| [Pose and timing](pose.md) | `Pose`, `PoseSequence`, resampling helpers |
 | [Full reference](reference.md) | Complete `retarget` package index |
 
 ## Public exports

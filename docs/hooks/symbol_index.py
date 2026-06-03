@@ -44,8 +44,10 @@ REGISTRY_EXPORT_ANCHORS: dict[str, str] = {
 
 AMBIGUOUS_SHORT_NAMES = frozenset(
     {
+        "State",
         "config",
         "data",
+        "detect",
         "engine",
         "format",
         "frame",
@@ -54,6 +56,8 @@ AMBIGUOUS_SHORT_NAMES = frozenset(
         "kind",
         "load",
         "meta",
+        "register",
+        "save",
         "motion",
         "name",
         "object",
@@ -76,16 +80,17 @@ AMBIGUOUS_SHORT_NAMES = frozenset(
 
 # When several anchors share a short name, prefer these parent types.
 PREFER_CLASS_FOR_SHORT: dict[str, str] = {
+    "frame_count": "RetargetingResult",
+    "fps": "MotionSequence",
     "joint_names": "MotionSequence",
     "joint_positions": "MotionSequence",
+    "metadata": "RetargetingResult",
 }
 
 FIELD_SHORT_BLOCKLIST = frozenset(
     {
         "contacts",
-        "fps",
         "height_m",
-        "metadata",
         "mesh_path",
         "name",
     }

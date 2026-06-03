@@ -1,5 +1,7 @@
 # Your first retarget
 
+Shorter smoke test: [Quickstart](../quickstart.md).
+
 This tutorial runs a complete retargeting job with the bundled fixture motion, saves a result, and checks it with the evaluation CLI. Everything uses built-in robots and formats—no external assets required.
 
 ## Prerequisites

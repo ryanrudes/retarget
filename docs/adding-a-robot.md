@@ -1,6 +1,6 @@
 # Add A Robot
 
-Create a `RobotSpec` with joint names, height, limits, contact links, optional asset paths, and mappings for both actuated joints and retargeted links.
+Create a `RobotSpec` with joint names, height, limits, contact links, optional asset paths, and mappings for both actuated joints and retargeted links. For manifests and installing URDF/MJCF into a local store, see [Assets](assets.md).
 
 `default_joint_mapping` maps motion joints to actuated robot joints for nominal tracking or simple IK-style terms. `default_link_mapping` maps motion joints to robot body/link points used by the interaction mesh.
 

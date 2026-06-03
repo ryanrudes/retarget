@@ -23,6 +23,8 @@ The fastest path—ground contact and foot constraints without extra geometry:
       --output robot_only.npz
     ```
 
+Same as the Quickstart minimal run with a different output name—see [Quickstart](../quickstart.md).
+
 === "Python"
 
     ```python

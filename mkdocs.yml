@@ -119,6 +119,10 @@ nav:
       - Protocols: api/protocols.md
       - Optimization: api/optimization.md
       - Registries: api/registries.md
+      - Enums: api/enums.md
+      - Asset store: api/asset-store.md
+      - Export types: api/export-api.md
+      - Pose and timing: api/pose.md
       - Batch: api/batch.md
       - Full reference: api/reference.md
 

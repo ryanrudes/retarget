@@ -112,6 +112,25 @@ class EnergyObjective:
 
 Then include `ObjectiveSpec(name="energy", weight=0.1)` in a `RetargetingProblem`. The registry stores an instance of the decorated class and validates that it implements the objective protocol. Constraint terms return `ConstraintContribution` with optional joint-increment bounds, a trust radius, and linear constraints.
 
+```python
+from dataclasses import dataclass
+
+from retarget.optimization import ConstraintContribution, ConstraintSpec, TermContext, constraint_terms
+
+@constraint_terms.register("my_constraint")
+@dataclass(frozen=True)
+class MyConstraint:
+    name: str = "my_constraint"
+
+    def describe(self) -> str:
+        return "Example custom constraint."
+
+    def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
+        return ConstraintContribution()
+```
+
+Then add `ConstraintSpec(name="my_constraint")` to the problem's constraint list.
+
 For CLI run specs, list extension modules explicitly so they load before registry preflight:
 
 ```toml

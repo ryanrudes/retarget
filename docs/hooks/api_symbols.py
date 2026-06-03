@@ -41,6 +41,14 @@ def _page_priority(page_url: str) -> int:
         return 80
     if page_url.endswith("/api/pipeline/"):
         return 75
+    if page_url.endswith("/api/enums/"):
+        return 55
+    if page_url.endswith("/api/asset-store/"):
+        return 55
+    if page_url.endswith("/api/export-api/"):
+        return 55
+    if page_url.endswith("/api/pose/"):
+        return 55
     if page_url.endswith("/api/"):
         return 90
     return 50

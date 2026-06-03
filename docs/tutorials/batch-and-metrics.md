@@ -2,6 +2,8 @@
 
 When you have many motion files—subjects, clips, or augmentation variants—use **`retarget batch`** to retarget them with shared settings and **`retarget evaluate`** to score every output. Both commands write JSON manifests so runs are resumable and auditable.
 
+For manifest fields and resume semantics, see [Batch and Evaluation](../batch-evaluation.md).
+
 ## Prepare a motion directory
 
 Copy or symlink motions into one folder. This tutorial reuses the JSON fixture twice to simulate two clips:
@@ -70,14 +72,7 @@ uv run retarget evaluate \
 
 ### Built-in metrics (summary)
 
-| Metric | Meaning (high level) |
-|--------|----------------------|
-| `optimization_cost` | Mean per-frame solver objective |
-| `foot_sliding` | Stance foot XY motion (needs problem for best fidelity) |
-| `contact_preservation` | Source vs retargeted contact agreement |
-| `penetration` | Ground/object/terrain clearance violations |
-
-Failed metric plugins yield `partial` reports instead of aborting the whole batch. Details: [Batch and evaluation](../batch-evaluation.md).
+Reports include `optimization_cost`, `foot_sliding`, `contact_preservation`, and `penetration` (definitions and partial-report behavior in [Batch and evaluation](../batch-evaluation.md)).
 
 ## Evaluate an entire batch
 

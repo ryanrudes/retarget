@@ -35,6 +35,8 @@ See [Interactive playground](../interactive-playground.md) for troubleshooting.
 | Mental model and engine flow | [Architecture](../architecture.md) |
 | Frames, units, resampling | [Coordinate conventions](../coordinate-conventions.md) |
 | NPZ fields and provenance | [Result schema](../result-schema.md) |
+| Batch manifests, resume, evaluation metrics | [Batch and evaluation](../batch-evaluation.md) |
+| Exporters, viewers, tracking NPZ layout | [Export and visualization](../export-visualization.md) |
 | Asset manifests and stores | [Assets](../assets.md) |
 | Add robots, formats, objectives | [Extending](../extending.md) |
 | API signatures | [API](../api/index.md) |

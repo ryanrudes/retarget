@@ -1,6 +1,9 @@
 # Export and view
 
-After retargeting you usually need (1) a quick sanity check of the trajectory and (2) a file downstream simulators or policies can consume. This tutorial covers both using the bundled synthetic humanoid result from [Your first retarget](your-first-retarget.md).
+!!! warning "Prerequisite"
+    Complete [Your first retarget](your-first-retarget.md) first so you have `tutorials_first_result.npz` on disk.
+
+After retargeting you usually need (1) a quick sanity check of the trajectory and (2) a file downstream simulators or policies can consume. This tutorial covers both using that result. Full exporter and viewer options: [Export and visualization](../export-visualization.md).
 
 ## Summarize a result (no extra deps)
 

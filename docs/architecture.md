@@ -2,7 +2,7 @@
 
 The public API is organized around immutable inputs and typed outputs:
 
-- `RetargetingProblem` describes the robot, motion, scene, solver, objectives, and constraints.
+- `RetargetingProblem` describes the robot, motion, scene, solver, objectives, constraints, and optional Rich progress reporting (`show_progress`).
 - `Retargeter` executes the run and returns `RetargetingResult`.
 - Registries hold motion formats, robots, objective terms, constraint terms, solvers, metrics, and visualizers.
 - Heavy backends such as MuJoCo, CVXPY, and Viser are optional and isolated behind protocols.

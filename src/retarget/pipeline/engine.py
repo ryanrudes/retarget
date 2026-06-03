@@ -20,6 +20,7 @@ from retarget.motion.spec import MotionSequence
 from retarget.optimization.problem import ConstraintContribution, LinearConstraint, QuadraticProblem, TermContext
 from retarget.optimization.registry import constraint_terms, objective_terms
 from retarget.optimization.solvers import create_solver, resolve_solver_backend_name
+from retarget.pipeline.progress import frame_progress
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.results.spec import RetargetingResult
 from retarget.robots.spec import RobotSpec
@@ -98,54 +99,64 @@ class InteractionMeshRetargetingEngine:
         iterations: list[int] = []
         solver_statuses: list[str] = []
         warnings: list[str] = []
+        scale_warning = _scale_to_robot_skipped_warning(problem)
+        if scale_warning is not None:
+            warnings.append(scale_warning)
+        progress_label = problem.progress_description or problem.name
 
-        for frame_idx in range(motion.frame_count):
-            if frame_idx > 0:
-                qpos[frame_idx, joint_slice] = qpos[frame_idx - 1, joint_slice]
-            q_current = qpos[frame_idx].copy()
-            reference_pose = _object_reference_pose(problem, frame_idx)
-            environment_points = _environment_points(problem, reference_pose)
-            human_points = _human_points(motion, human_names, frame_idx)
-            if reference_pose is not None:
-                human_points = reference_pose.inverse_transform_points(human_points)
+        with frame_progress(
+            enabled=problem.show_progress,
+            description=progress_label,
+            total=motion.frame_count,
+        ) as advance_frame:
+            for frame_idx in range(motion.frame_count):
+                if frame_idx > 0:
+                    qpos[frame_idx, joint_slice] = qpos[frame_idx - 1, joint_slice]
+                q_current = qpos[frame_idx].copy()
+                reference_pose = _object_reference_pose(problem, frame_idx)
+                environment_points = _environment_points(problem, reference_pose)
+                human_points = _human_points(motion, human_names, frame_idx)
+                if reference_pose is not None:
+                    human_points = reference_pose.inverse_transform_points(human_points)
 
-            mesh = mesh_builder.build(human_points, environment_points)
-            target_laplacian = mesh.laplacian_coordinates()
-            frame_cost = np.inf
-            frame_status = "not_run"
-            used_iterations = 0
-            iteration_count = problem.solver.max_iterations * (5 if frame_idx == 0 else 1)
-            q_previous = qpos[max(frame_idx - 1, 0)]
+                mesh = mesh_builder.build(human_points, environment_points)
+                target_laplacian = mesh.laplacian_coordinates()
+                frame_cost = np.inf
+                frame_status = "not_run"
+                used_iterations = 0
+                iteration_count = problem.solver.max_iterations * (5 if frame_idx == 0 else 1)
+                q_previous = qpos[max(frame_idx - 1, 0)]
 
-            for iteration_idx in range(iteration_count):
-                q_joint_current = q_current[joint_slice].copy()
-                quadratic = self._build_subproblem(
-                    problem=problem,
-                    backend=backend,
-                    q_current=q_current,
-                    q_previous=q_previous,
-                    robot_point_names=robot_point_names,
-                    environment_points=environment_points,
-                    adjacency=mesh.adjacency,
-                    target_laplacian=target_laplacian,
-                    reference_pose=reference_pose,
-                    joint_lower=joint_lower,
-                    joint_upper=joint_upper,
-                    frame_contacts=contacts[frame_idx] if frame_idx < len(contacts) else {},
-                    frame_idx=frame_idx,
-                )
-                solved = solver.solve(quadratic)
-                q_current[joint_slice] = q_joint_current + solved.solution
-                frame_cost = solved.cost
-                frame_status = solved.status
-                used_iterations = iteration_idx + 1
-                if float(np.linalg.norm(solved.solution)) <= problem.solver.tolerance:
-                    break
+                for iteration_idx in range(iteration_count):
+                    q_joint_current = q_current[joint_slice].copy()
+                    quadratic = self._build_subproblem(
+                        problem=problem,
+                        backend=backend,
+                        q_current=q_current,
+                        q_previous=q_previous,
+                        robot_point_names=robot_point_names,
+                        environment_points=environment_points,
+                        adjacency=mesh.adjacency,
+                        target_laplacian=target_laplacian,
+                        reference_pose=reference_pose,
+                        joint_lower=joint_lower,
+                        joint_upper=joint_upper,
+                        frame_contacts=contacts[frame_idx] if frame_idx < len(contacts) else {},
+                        frame_idx=frame_idx,
+                    )
+                    solved = solver.solve(quadratic)
+                    q_current[joint_slice] = q_joint_current + solved.solution
+                    frame_cost = solved.cost
+                    frame_status = solved.status
+                    used_iterations = iteration_idx + 1
+                    if float(np.linalg.norm(solved.solution)) <= problem.solver.tolerance:
+                        break
 
-            qpos[frame_idx] = q_current
-            costs[frame_idx] = frame_cost
-            iterations.append(used_iterations)
-            solver_statuses.append(frame_status)
+                qpos[frame_idx] = q_current
+                costs[frame_idx] = frame_cost
+                iterations.append(used_iterations)
+                solver_statuses.append(frame_status)
+                advance_frame()
 
         robot_link_names, robot_link_positions, playback_warnings = _robot_playback_links(
             problem=problem,
@@ -270,15 +281,41 @@ def _scale_motion_to_robot(problem: RetargetingProblem) -> MotionSequence:
     return problem.motion.scaled(factor)
 
 
-def _motion_scale_factor(problem: RetargetingProblem) -> float | None:
-    if not problem.scale_to_robot:
-        return None
+def _source_height_m(problem: RetargetingProblem) -> float | None:
+    """Return a positive source actor height in meters, if one is available."""
+
     source_height = problem.motion.metadata.get("height_m")
     if source_height is None and problem.motion_format is not None:
         source_height = problem.motion_format.default_height_m
-    if source_height is None or float(source_height) <= 0:
+    if source_height is None:
         return None
-    return problem.robot.height_m / float(source_height)
+    value = float(source_height)
+    if value <= 0:
+        return None
+    return value
+
+
+def _motion_scale_factor(problem: RetargetingProblem) -> float | None:
+    if not problem.scale_to_robot:
+        return None
+    source_height = _source_height_m(problem)
+    if source_height is None:
+        return None
+    return problem.robot.height_m / source_height
+
+
+def _scale_to_robot_skipped_warning(problem: RetargetingProblem) -> str | None:
+    if not problem.scale_to_robot or _source_height_m(problem) is not None:
+        return None
+    format_hint = (
+        f"motion_format.default_height_m ({problem.motion_format.name})"
+        if problem.motion_format is not None
+        else "motion_format.default_height_m"
+    )
+    return (
+        "scale_to_robot is enabled but motion was not scaled: no positive source height. "
+        f"Set motion.metadata['height_m'], {format_hint}, or disable scale_to_robot."
+    )
 
 
 def _result_metadata(problem: RetargetingProblem, output: EngineOutput, *, runtime_s: float) -> dict[str, Any]:

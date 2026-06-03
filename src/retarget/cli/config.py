@@ -166,6 +166,7 @@ class RetargetingRunConfig(BaseModel):
         imports (tuple[str, ...]): Extension modules or ``.py`` plugins to import before validation.
         scale_to_robot (bool): Scale source motion to the target robot height.
         output_fps (float | None): Optional result frame rate override.
+        show_progress (bool): Show a Rich per-frame progress bar during optimization.
         joint_mapping (dict[str, str] | None): Source-to-robot joint name overrides.
         mesh (InteractionMeshSpec): Interaction mesh construction settings.
         solver (SolverSpec): Optimization solver configuration.
@@ -188,6 +189,7 @@ class RetargetingRunConfig(BaseModel):
     imports: tuple[str, ...] = ()
     scale_to_robot: bool = True
     output_fps: float | None = None
+    show_progress: bool = False
     joint_mapping: dict[str, str] | None = None
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
     solver: SolverSpec = Field(default_factory=SolverSpec)
@@ -241,6 +243,7 @@ class RetargetingRunConfig(BaseModel):
         robot: str | None = None,
         task_kind: TaskKind | None = None,
         name: str | None = None,
+        show_progress: bool | None = None,
     ) -> Self:
         """Return a copy with explicit CLI overrides applied."""
 
@@ -259,6 +262,8 @@ class RetargetingRunConfig(BaseModel):
             updates["task_kind"] = task_kind
         if name is not None:
             updates["name"] = name
+        if show_progress is not None:
+            updates["show_progress"] = show_progress
         return self.model_copy(update=updates)
 
     def build_problem(self) -> RetargetingProblem:
@@ -284,6 +289,7 @@ class RetargetingRunConfig(BaseModel):
             ),
             scale_to_robot=self.scale_to_robot,
             output_fps=self.output_fps,
+            show_progress=self.show_progress,
             metadata=self.metadata,
         )
 

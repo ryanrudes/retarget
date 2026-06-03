@@ -29,8 +29,11 @@ class RetargetingProblem(BaseModel):
         solver (SolverSpec): Backend selection and SQP subproblem solver options.
         objectives (tuple[ObjectiveSpec, ...]): Weighted least-squares terms applied each frame.
         constraints (tuple[ConstraintSpec, ...]): Bounds and linear constraints merged per subproblem.
-        scale_to_robot (bool): Rescale motion to ``robot.height_m`` when format height is known.
+        scale_to_robot (bool): Rescale motion to ``robot.height_m`` when source height is known;
+            emits a run warning when enabled but ``height_m`` / ``default_height_m`` is missing.
         output_fps (float | None): Resample motion and scene to this rate before retargeting; ``None`` keeps motion fps.
+        show_progress (bool): When ``True``, show a Rich progress bar during per-frame optimization.
+        progress_description (str | None): Progress bar label; defaults to :attr:`name`.
         metadata (dict[str, Any]): Opaque key-value tags stored on results and manifests.
     """
 
@@ -49,6 +52,8 @@ class RetargetingProblem(BaseModel):
     constraints: tuple[ConstraintSpec, ...] = OptimizationProfile.defaults().constraints
     scale_to_robot: bool = True
     output_fps: float | None = None
+    show_progress: bool = False
+    progress_description: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -131,6 +136,8 @@ class RetargetingProblem(BaseModel):
             constraints=profile.constraints,
             scale_to_robot=self.scale_to_robot,
             output_fps=self.output_fps,
+            show_progress=self.show_progress,
+            progress_description=self.progress_description,
             metadata={**self.metadata, "optimization_profile": profile.name},
         )
 
@@ -163,5 +170,7 @@ class RetargetingProblem(BaseModel):
             constraints=self.constraints,
             scale_to_robot=self.scale_to_robot,
             output_fps=fps,
+            show_progress=self.show_progress,
+            progress_description=self.progress_description,
             metadata=dict(self.metadata),
         )

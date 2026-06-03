@@ -33,6 +33,7 @@ from retarget.optimization import (
     constraint_terms,
     objective_terms,
 )
+from retarget.pipeline import engine as pipeline_engine
 from retarget.robots import robots
 
 
@@ -82,6 +83,80 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert report.source_name == "fixture"
     assert report.frame_count == motion.frame_count
     assert report.metric_units["optimization_cost"] == "cost"
+
+
+def test_scale_to_robot_warns_when_source_height_unknown() -> None:
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal").model_copy(update={"metadata": {}})
+    robot = robots.get("synthetic_humanoid")
+    problem = RetargetingProblem(
+        name="scale_warning",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("smplx"),
+        scene=SceneSpec.robot_only(),
+        solver=SolverSpec(backend="numpy_least_squares"),
+        scale_to_robot=True,
+    )
+
+    result = Retargeter().run(problem)
+
+    assert any("scale_to_robot" in warning for warning in result.warnings)
+    assert result.metadata["provenance"]["motion_scale_factor"] is None
+
+
+def test_scale_to_robot_does_not_warn_when_source_height_known() -> None:
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+    problem = RetargetingProblem(
+        name="scale_ok",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("minimal"),
+        scene=SceneSpec.robot_only(),
+        solver=SolverSpec(backend="numpy_least_squares"),
+        scale_to_robot=True,
+    )
+
+    result = Retargeter().run(problem)
+
+    assert not any("scale_to_robot" in warning for warning in result.warnings)
+    assert result.metadata["provenance"]["motion_scale_factor"] is not None
+
+
+def test_engine_advances_progress_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+    problem = RetargetingProblem(
+        name="progress_fixture",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("minimal"),
+        scene=SceneSpec.robot_only(),
+        solver=SolverSpec(backend="numpy_least_squares"),
+        show_progress=True,
+    )
+    advances: list[int] = []
+
+    def fake_frame_progress(**_kwargs: object):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _manager():
+            def advance() -> None:
+                advances.append(1)
+
+            yield advance
+
+        return _manager()
+
+    monkeypatch.setattr(pipeline_engine, "frame_progress", fake_frame_progress)
+
+    Retargeter().run(problem)
+
+    assert len(advances) == motion.frame_count
 
 
 def test_retargeter_output_fps_resamples_motion_before_optimization():

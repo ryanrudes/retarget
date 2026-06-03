@@ -29,8 +29,9 @@ output = "my_run.npz"
 
 Add tuning sections as experiments grow:
 
-| Section | Purpose |
-|---------|---------|
+| Key / section | Purpose |
+|---------------|---------|
+| `show_progress` | Rich per-frame progress bar during optimization (also `retarget run --progress`) |
 | `[mesh]` | Interaction mesh topology (`delaunay`, `k_neighbors`, …) |
 | `[solver]` | Backend (`auto`, `numpy_least_squares`, `cvxpy_clarabel`), iterations, trust region |
 | `[scene]` | Ground grid for robot-only tasks; nested `[scene.object]` / `[scene.terrain]` for other task kinds |

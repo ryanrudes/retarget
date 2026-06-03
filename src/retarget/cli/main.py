@@ -100,6 +100,10 @@ def run(
         typer.Option("--task-kind", help="Retargeting workflow kind."),
     ] = None,
     name: Annotated[str | None, typer.Option("--name", help="Optional run/result name.")] = None,
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show a Rich per-frame progress bar while retargeting."),
+    ] = None,
 ) -> None:
     """Run a single retargeting job."""
 
@@ -111,6 +115,7 @@ def run(
         robot_name=robot_name,
         task_kind=task_kind,
         name=name,
+        show_progress=progress,
     )
     result = _run_from_config(run_config)
     console.print(f"Saved {result.name} to {run_config.output}")
@@ -244,6 +249,14 @@ def view(
         bool,
         typer.Option("--show-diagnostics", help="Overlay source points, root paths, and link diagnostics."),
     ] = False,
+    playback_fps: Annotated[
+        float | None,
+        typer.Option(
+            "--playback-fps",
+            min=1.0,
+            help="Initial playback frame rate in live Viser mode (defaults to the result fps).",
+        ),
+    ] = None,
 ) -> None:
     """View or summarize a retargeting result."""
 
@@ -253,6 +266,7 @@ def view(
         dry_run=dry_run,
         robot_spec=robot,
         show_diagnostics=show_diagnostics,
+        playback_fps=playback_fps,
     )
 
 
@@ -435,6 +449,7 @@ def _run_config_from_inputs(
     robot_name: str | None,
     task_kind: TaskKind | None,
     name: str | None,
+    show_progress: bool | None = None,
 ) -> RetargetingRunConfig:
     if config_path is not None:
         return RetargetingRunConfig.load(config_path).with_overrides(
@@ -444,6 +459,7 @@ def _run_config_from_inputs(
             robot=robot_name,
             task_kind=task_kind,
             name=name,
+            show_progress=show_progress,
         )
     if motion is None:
         raise typer.BadParameter("--motion is required when --config is not provided")
@@ -456,6 +472,7 @@ def _run_config_from_inputs(
         format_name=format_name or "minimal",
         robot=robot_name or "synthetic_humanoid",
         task_kind=task_kind or TaskKind.ROBOT_ONLY,
+        show_progress=show_progress if show_progress is not None else False,
     )
 
 

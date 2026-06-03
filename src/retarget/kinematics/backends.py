@@ -8,6 +8,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from retarget.core.enums import KinematicsBackendName
+from retarget.kinematics.mujoco_xml import (
+    build_mujoco_body_name_map,
+    resolve_mujoco_body_name,
+    strip_floor_contact_pairs,
+)
 from retarget.kinematics.registry import kinematics_backends
 from retarget.kinematics.types import GeometryDistance
 from retarget.robots.spec import RobotSpec
@@ -211,6 +216,19 @@ class SimpleKinematicsBackend:
         return tuple((first, second) for idx, first in enumerate(names) for second in names[idx + 1 :])
 
 
+def _load_mujoco_model(mujoco: object, path: Path) -> object:
+    """Load a MuJoCo model, stripping Holosoma foot–floor pairs when needed."""
+
+    try:
+        return mujoco.MjModel.from_xml_path(str(path))  # type: ignore[attr-defined]
+    except ValueError as exc:
+        if "floor" not in str(exc):
+            raise
+        if not strip_floor_contact_pairs(path):
+            raise
+        return mujoco.MjModel.from_xml_path(str(path))  # type: ignore[attr-defined]
+
+
 class MuJoCoKinematicsBackend:
     """MuJoCo-backed kinematics adapter.
 
@@ -230,8 +248,13 @@ class MuJoCoKinematicsBackend:
             raise ValueError("A MuJoCo XML path is required")
         self._mujoco = mujoco
         self.robot = robot
-        self.model = mujoco.MjModel.from_xml_path(str(path))
+        self.model = _load_mujoco_model(mujoco, path)
         self.data = mujoco.MjData(self.model)
+        link_names = set(self.robot.link_names) | set(self.robot.contact_links)
+        link_names.update(self.robot.default_link_mapping.values())
+        metadata_aliases = self.robot.metadata.get("mujoco_body_names")
+        aliases = metadata_aliases if isinstance(metadata_aliases, dict) else None
+        self._mujoco_body_names = build_mujoco_body_name_map(mujoco, self.model, link_names, aliases=aliases)
 
     def forward_kinematics(self, qpos: NDArray[np.float64], link_names: tuple[str, ...]) -> NDArray[np.float64]:
         """Return MuJoCo body positions for named links."""
@@ -246,7 +269,8 @@ class MuJoCoKinematicsBackend:
         mujoco.mj_forward(self.model, self.data)
         positions = []
         for link_name in link_names:
-            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, link_name)
+            mujoco_body = self._mujoco_body_name(link_name)
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, mujoco_body)
             if body_id < 0:
                 raise KeyError(f"Body {link_name!r} not found in MuJoCo model")
             positions.append(self.data.xpos[body_id].copy())
@@ -278,7 +302,8 @@ class MuJoCoKinematicsBackend:
         positions = np.zeros((len(body_names), 3), dtype=np.float64)
         qpos_joint_slice = self.robot.qpos_layout.joint_slice(self.robot.dof)
         for idx, body_name in enumerate(body_names):
-            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            mujoco_body = self._mujoco_body_name(body_name)
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, mujoco_body)
             if body_id < 0:
                 raise KeyError(f"Body {body_name!r} not found in MuJoCo model")
             positions[idx] = self.data.xpos[body_id]
@@ -381,6 +406,18 @@ class MuJoCoKinematicsBackend:
         """Return MuJoCo geom pairs within a collision margin."""
 
         return self.geom_distances(qpos, geom_pairs, max_distance=margin)
+
+    def _mujoco_body_name(self, link_name: str) -> str:
+        cached = self._mujoco_body_names.get(link_name)
+        if cached is not None:
+            return cached
+        metadata_aliases = self.robot.metadata.get("mujoco_body_names")
+        aliases = metadata_aliases if isinstance(metadata_aliases, dict) else None
+        resolved = resolve_mujoco_body_name(self._mujoco, self.model, link_name, aliases)
+        if resolved is None:
+            return link_name
+        self._mujoco_body_names[link_name] = resolved
+        return resolved
 
     def _set_qpos(self, qpos: NDArray[np.float64]) -> None:
         q = np.asarray(qpos, dtype=np.float64)

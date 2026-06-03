@@ -1,0 +1,69 @@
+{#- Summary of attributes (or enum members). -#}
+
+{% import "_base/enum_macros.jinja" as enum %}
+{% import "language.html.jinja" as lang with context %}
+
+{% block logs scoped %}
+  {#- Logging block. -#}
+{% endblock logs %}
+
+{% if not obj.docstring.parsed | selectattr("kind.value", "eq", "attributes") | list %}
+  {% if enum.is_enum_class(obj) %}
+    {% set member_type = enum.enum_member_type(obj) or 'int' %}
+    {% with attributes = obj.attributes
+        |filter_objects(
+          filters=config.filters,
+          members_list=members_list,
+          inherited_members=config.inherited_members,
+          keep_no_docstrings=config.show_if_no_docstring,
+        )
+        |order_members(config.members_order, members_list)
+        |list
+      %}
+      {% if attributes %}
+        <p><span class="doc-section-title">Members:</span></p>
+        <table>
+          <thead>
+            <tr>
+              <th>{{ lang.t("Name") }}</th>
+              <th>{{ lang.t("Type") }}</th>
+              <th>{{ lang.t("Description") }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for attribute in attributes %}
+              {% if attribute.is_public %}
+                <tr class="doc-section-item">
+                  <td><code><autoref identifier="{{ obj.path }}.{{ attribute.name }}" optional hover>{{ attribute.name }}</autoref></code></td>
+                  <td><code>{{ member_type }}</code></td>
+                  <td>
+                    <div class="doc-md-description">
+                      {% if attribute.docstring %}
+                        {{ attribute.docstring.value.split("\n", 1)[0] }}
+                      {% elif attribute.value is not none %}
+                        Value <code>{{ attribute.value }}</code>.
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endwith %}
+  {% else %}
+    {% with section = obj.attributes
+        |filter_objects(
+          filters=config.filters,
+          members_list=members_list,
+          inherited_members=config.inherited_members,
+          keep_no_docstrings=config.show_if_no_docstring,
+        )
+        |order_members(config.members_order, members_list)
+        |as_attributes_section(check_public=not members_list)
+      %}
+      {% if section %}{% include "docstring/attributes.html.jinja" with context %}{% endif %}
+    {% endwith %}
+  {% endif %}
+{% endif %}

@@ -1,0 +1,21 @@
+/* Enum / member symbol badges (custom templates; theme colors in docs/stylesheets/extra.css). */
+
+code.doc-symbol-enum,
+a code.doc-symbol-enum {
+  color: var(--doc-symbol-enum-fg-color);
+  background-color: var(--doc-symbol-enum-bg-color);
+}
+
+code.doc-symbol-enum::after {
+  content: "enum";
+}
+
+code.doc-symbol-member,
+a code.doc-symbol-member {
+  color: var(--doc-symbol-member-fg-color);
+  background-color: var(--doc-symbol-member-bg-color);
+}
+
+code.doc-symbol-member::after {
+  content: "member";
+}

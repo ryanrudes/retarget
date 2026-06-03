@@ -21,6 +21,12 @@
   --sop-gold: #fad000;
   --sop-code-bg: var(--sop-editor-bg);
 
+  /* mkdocstrings symbol badges (enum/member use custom templates). */
+  --doc-symbol-enum-fg-color: #7ee8d3;
+  --doc-symbol-enum-bg-color: #7ee8d324;
+  --doc-symbol-member-fg-color: #ffd866;
+  --doc-symbol-member-bg-color: #ffd86624;
+
   --md-hue: 255deg;
 
   --md-default-fg-color: #ffffffde;

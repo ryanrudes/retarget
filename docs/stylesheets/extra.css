@@ -236,6 +236,18 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   background-color: var(--doc-symbol-class-bg-color);
 }
 
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-enum > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading > .doc-symbol.doc-symbol-heading.doc-symbol-enum {
+  color: var(--doc-symbol-enum-fg-color);
+  background-color: var(--doc-symbol-enum-bg-color);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-member > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading > .doc-symbol.doc-symbol-heading.doc-symbol-member {
+  color: var(--doc-symbol-member-fg-color);
+  background-color: var(--doc-symbol-member-bg-color);
+}
+
 [data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-module > code {
   color: var(--doc-symbol-module-fg-color);
   background-color: var(--doc-symbol-module-bg-color);
@@ -293,6 +305,22 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   background-color: var(--doc-symbol-module-bg-color) !important;
 }
 
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-enum > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link code.doc-symbol-toc.doc-symbol-enum,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-enum > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link code.doc-symbol-toc.doc-symbol-enum {
+  color: var(--doc-symbol-enum-fg-color) !important;
+  background-color: var(--doc-symbol-enum-bg-color) !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-member > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link code.doc-symbol-toc.doc-symbol-member,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-member > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link code.doc-symbol-toc.doc-symbol-member {
+  color: var(--doc-symbol-member-fg-color) !important;
+  background-color: var(--doc-symbol-member-bg-color) !important;
+}
+
 [data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-class-name,
 [data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-attribute-name,
 [data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-function-name {
@@ -320,6 +348,8 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
 [data-md-color-scheme="slate"] .doc-label-abstractmethod:not(.doc-label-toc),
 [data-md-color-scheme="slate"] .doc-label-module:not(.doc-label-toc),
 [data-md-color-scheme="slate"] .doc-label-dataclass:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-enum:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-member:not(.doc-label-toc),
 [data-md-color-scheme="slate"] .doc-label-class-attribute:not(.doc-label-toc),
 [data-md-color-scheme="slate"] .doc-label-instance-attribute:not(.doc-label-toc),
 [data-md-color-scheme="slate"] .doc-label-module-attribute:not(.doc-label-toc) {
@@ -371,6 +401,32 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   background-color: var(--doc-symbol-module-bg-color) !important;
 }
 
+.doc-label-toc.doc-label-enum > code.shiki,
+.doc-label-toc.doc-label-member > code.shiki,
+.md-typeset .doc-label-enum > code.shiki,
+.md-typeset .doc-label-member > code.shiki,
+.md-typeset code.doc-symbol-toc.doc-symbol-enum.shiki,
+.md-typeset code.doc-symbol-toc.doc-symbol-member.shiki {
+  color: inherit !important;
+  background-color: transparent !important;
+}
+
+.doc-label-toc.doc-label-enum > code.shiki,
+.md-typeset .doc-label-enum > code.shiki,
+.md-typeset code.doc-symbol-toc.doc-symbol-enum,
+.md-typeset code.doc-symbol-heading.doc-symbol-enum {
+  color: var(--doc-symbol-enum-fg-color) !important;
+  background-color: var(--doc-symbol-enum-bg-color) !important;
+}
+
+.doc-label-toc.doc-label-member > code.shiki,
+.md-typeset .doc-label-member > code.shiki,
+.md-typeset code.doc-symbol-toc.doc-symbol-member,
+.md-typeset code.doc-symbol-heading.doc-symbol-member {
+  color: var(--doc-symbol-member-fg-color) !important;
+  background-color: var(--doc-symbol-member-bg-color) !important;
+}
+
 [data-md-color-scheme="slate"] .doc-contents .highlight,
 [data-md-color-scheme="slate"] .doc .highlight {
   background-color: var(--sop-code-bg);
@@ -385,6 +441,18 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
 .md-typeset code.doc-symbol-heading.doc-symbol-class {
   color: var(--doc-symbol-class-fg-color);
   background-color: var(--doc-symbol-class-bg-color);
+}
+
+.md-typeset code.doc-symbol-enum,
+.md-typeset code.doc-symbol-heading.doc-symbol-enum {
+  color: var(--doc-symbol-enum-fg-color);
+  background-color: var(--doc-symbol-enum-bg-color);
+}
+
+.md-typeset code.doc-symbol-member,
+.md-typeset code.doc-symbol-heading.doc-symbol-member {
+  color: var(--doc-symbol-member-fg-color);
+  background-color: var(--doc-symbol-member-bg-color);
 }
 
 .md-typeset code.doc-symbol-method,

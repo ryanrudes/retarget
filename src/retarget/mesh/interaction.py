@@ -14,7 +14,14 @@ from retarget.core.array import FloatArray, as_float_array
 
 
 class MeshTopology(StrEnum):
-    """Interaction mesh topology policy."""
+    """Interaction mesh topology policy.
+
+    Attributes:
+        DELAUNAY (str): Delaunay triangulation over mesh sites.
+        CHAIN (str): Open chain along ordered sites.
+        COMPLETE (str): Fully connected graph.
+        K_NEAREST (str): k-nearest-neighbor edges (uses ``k_neighbors``).
+    """
 
     DELAUNAY = "delaunay"
     CHAIN = "chain"

@@ -1,0 +1,15 @@
+{#- Helpers for Enum / IntEnum / StrEnum rendering in custom mkdocstrings templates. -#}
+
+{% macro is_enum_class(obj) -%}
+{%- for base in obj.bases -%}
+{%- set b = base | string -%}
+{%- if b in ['Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag'] or b.endswith('Enum') or b.endswith('Flag') -%}true{%- endif -%}
+{%- endfor -%}
+{%- endmacro %}
+
+{% macro enum_member_type(obj) -%}
+{%- for base in obj.bases -%}
+{%- set b = base | string -%}
+{%- if b == 'StrEnum' or (b.endswith('Enum') and b.startswith('Str')) -%}str{%- elif b == 'IntEnum' or (b.endswith('Enum') and b.startswith('Int')) -%}int{%- elif b == 'Enum' -%}int{%- endif -%}
+{%- endfor -%}
+{%- endmacro %}

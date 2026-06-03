@@ -55,6 +55,43 @@
   background-color: transparent !important;
 }
 
+/* API symbol hover + click in code blocks (api-navigation.mjs) */
+::highlight(api-nav-target) {
+  background-color: #fad00033;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 0.1em;
+  text-underline-offset: 0.15em;
+  text-decoration-color: #fad000;
+}
+
+.md-typeset mark.api-nav-hover-mark {
+  background-color: #fad00033;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 0.1em;
+  text-underline-offset: 0.15em;
+  text-decoration-color: #fad000;
+  border-radius: 0.1em;
+  padding: 0;
+}
+
+body.api-nav-hovering .md-typeset pre code,
+body.api-nav-hovering .md-typeset :not(pre) > code {
+  cursor: pointer;
+}
+
+.md-typeset pre code {
+  cursor: text;
+}
+
+/* Code-block API tooltips: match compact inline autoref badges (no wrap on long names). */
+.md-tooltip2.api-nav-tooltip .md-tooltip2__inner {
+  white-space: nowrap;
+  width: max-content;
+  max-width: none;
+}
+
 .md-typeset .highlight:hover .md-clipboard::before,
 .md-typeset pre:hover .md-clipboard::before {
   color: #e3dfff;
@@ -88,6 +125,182 @@
 }
 
 /* mkdocstrings API reference — Shades of Purple accents */
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5em;
+  row-gap: 0.25em;
+  margin-top: 1.75em;
+  margin-bottom: 0.65em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid #6943ff44;
+}
+
+/* Decorator label OR symbol badge, not both: "property my_prop" vs "class MyType" */
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading:has(> .doc-labels) > .doc-symbol {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading:has(> .doc-labels) > .doc-labels {
+  order: 0;
+  flex-shrink: 0;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading:has(> .doc-labels) > .doc-object-name {
+  order: 1;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading:not(:has(> .doc-labels)) > .doc-symbol {
+  order: 0;
+  flex-shrink: 0;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading:not(:has(> .doc-labels)) > .doc-object-name {
+  order: 1;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading > .headerlink {
+  position: absolute;
+  right: 0;
+  top: 0;
+  margin: 0;
+  order: 3;
+}
+
+/* mkdocstrings wraps labels in <small> — match code.doc-symbol badge size */
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label {
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label > code {
+  border-radius: 0.1rem;
+  font-size: 1em;
+  padding: 0 0.3em;
+  font-weight: bold;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-property > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-instance-attribute > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-class-attribute > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-module-attribute > code {
+  color: var(--doc-symbol-attribute-fg-color);
+  background-color: var(--doc-symbol-attribute-bg-color);
+}
+
+[data-md-color-scheme="slate"]
+  .md-typeset
+  .doc.doc-heading
+  .doc-labels
+  .doc-label-property
+  > code.shiki
+  span,
+[data-md-color-scheme="slate"]
+  .md-typeset
+  .doc.doc-heading
+  .doc-labels
+  .doc-label-instance-attribute
+  > code.shiki
+  span,
+[data-md-color-scheme="slate"]
+  .md-typeset
+  .doc.doc-heading
+  .doc-labels
+  .doc-label-class-attribute
+  > code.shiki
+  span,
+[data-md-color-scheme="slate"]
+  .md-typeset
+  .doc.doc-heading
+  .doc-labels
+  .doc-label-module-attribute
+  > code.shiki
+  span {
+  color: inherit !important;
+  background-color: transparent !important;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-classmethod > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-staticmethod > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-async > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-abstractmethod > code {
+  color: var(--doc-symbol-method-fg-color);
+  background-color: var(--doc-symbol-method-bg-color);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-dataclass > code,
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-class > code {
+  color: var(--doc-symbol-class-fg-color);
+  background-color: var(--doc-symbol-class-bg-color);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc.doc-heading .doc-labels .doc-label-module > code {
+  color: var(--doc-symbol-module-fg-color);
+  background-color: var(--doc-symbol-module-bg-color);
+}
+
+/* Sidebar / page TOC: decorator badge when heading has doc-labels (see sync_toc_labels hook) */
+[data-md-color-scheme="slate"] .md-nav__link .doc-label-toc {
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link .doc-label-toc > code {
+  border-radius: 0.1rem;
+  font-size: 1em;
+  padding: 0 0.3em;
+  font-weight: bold;
+}
+
+/* TOC link text color (#a599e9 / active gold) inherits — badge colors need !important */
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-property > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-instance-attribute > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-class-attribute > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-module-attribute > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-property > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-instance-attribute > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-class-attribute > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-module-attribute > code {
+  color: var(--doc-symbol-attribute-fg-color) !important;
+  background-color: var(--doc-symbol-attribute-bg-color) !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-classmethod > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-staticmethod > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-async > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-abstractmethod > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-classmethod > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-staticmethod > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-async > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-abstractmethod > code {
+  color: var(--doc-symbol-method-fg-color) !important;
+  background-color: var(--doc-symbol-method-bg-color) !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-dataclass > code,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-class > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-dataclass > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-class > code {
+  color: var(--doc-symbol-class-fg-color) !important;
+  background-color: var(--doc-symbol-class-bg-color) !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-module > code,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav--secondary .md-nav__link .doc-label-toc.doc-label-module > code {
+  color: var(--doc-symbol-module-fg-color) !important;
+  background-color: var(--doc-symbol-module-bg-color) !important;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-class-name,
+[data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-attribute-name,
+[data-md-color-scheme="slate"] .md-typeset .doc-heading .doc-function-name {
+  color: #fad000;
+  font-family: var(--md-code-font), monospace;
+  font-weight: 600;
+}
+
 [data-md-color-scheme="slate"] .doc .doc-object-name a {
   color: #b362ff;
 }
@@ -96,10 +309,66 @@
   color: #fad000;
 }
 
-[data-md-color-scheme="slate"] .doc-label-class,
-[data-md-color-scheme="slate"] .doc-label-function,
-[data-md-color-scheme="slate"] .doc-label-attribute {
+/* Non-heading labels (tables, signatures) — not TOC badges */
+[data-md-color-scheme="slate"] .doc-label-class:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-function:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-attribute:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-property:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-classmethod:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-staticmethod:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-async:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-abstractmethod:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-module:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-dataclass:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-class-attribute:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-instance-attribute:not(.doc-label-toc),
+[data-md-color-scheme="slate"] .doc-label-module-attribute:not(.doc-label-toc) {
   color: #a599e9;
+}
+
+/* Shiki must not style mkdocstrings decorator labels (see shiki-highlight.mjs). */
+.md-typeset .doc-label > code.shiki,
+.md-typeset .doc-label-toc > code.shiki {
+  background-color: transparent !important;
+  padding: 0 0.3em;
+}
+
+.doc-label-toc.doc-label-property > code.shiki,
+.doc-label-toc.doc-label-instance-attribute > code.shiki,
+.doc-label-toc.doc-label-class-attribute > code.shiki,
+.doc-label-toc.doc-label-module-attribute > code.shiki,
+.md-typeset .doc-label-property > code.shiki,
+.md-typeset .doc-label-instance-attribute > code.shiki,
+.md-typeset .doc-label-class-attribute > code.shiki,
+.md-typeset .doc-label-module-attribute > code.shiki {
+  color: var(--doc-symbol-attribute-fg-color) !important;
+  background-color: var(--doc-symbol-attribute-bg-color) !important;
+}
+
+.doc-label-toc.doc-label-classmethod > code.shiki,
+.doc-label-toc.doc-label-staticmethod > code.shiki,
+.doc-label-toc.doc-label-async > code.shiki,
+.doc-label-toc.doc-label-abstractmethod > code.shiki,
+.md-typeset .doc-label-classmethod > code.shiki,
+.md-typeset .doc-label-staticmethod > code.shiki,
+.md-typeset .doc-label-async > code.shiki,
+.md-typeset .doc-label-abstractmethod > code.shiki {
+  color: var(--doc-symbol-method-fg-color) !important;
+  background-color: var(--doc-symbol-method-bg-color) !important;
+}
+
+.doc-label-toc.doc-label-class > code.shiki,
+.doc-label-toc.doc-label-dataclass > code.shiki,
+.md-typeset .doc-label-class > code.shiki,
+.md-typeset .doc-label-dataclass > code.shiki {
+  color: var(--doc-symbol-class-fg-color) !important;
+  background-color: var(--doc-symbol-class-bg-color) !important;
+}
+
+.doc-label-toc.doc-label-module > code.shiki,
+.md-typeset .doc-label-module > code.shiki {
+  color: var(--doc-symbol-module-fg-color) !important;
+  background-color: var(--doc-symbol-module-bg-color) !important;
 }
 
 [data-md-color-scheme="slate"] .doc-contents .highlight,
@@ -111,41 +380,108 @@
   color: #cec5ff;
 }
 
-[data-md-color-scheme="default"] .doc .doc-object-name a {
-  color: #5d37f0;
+/* mkdocstrings symbol badges — match TOC palette (also when Shiki skipped them) */
+.md-typeset code.doc-symbol-class,
+.md-typeset code.doc-symbol-heading.doc-symbol-class {
+  color: var(--doc-symbol-class-fg-color);
+  background-color: var(--doc-symbol-class-bg-color);
 }
 
-[data-md-color-scheme="default"] .doc .highlight {
-  background-color: var(--sop-code-bg);
+.md-typeset code.doc-symbol-method,
+.md-typeset code.doc-symbol-function,
+.md-typeset code.doc-symbol-heading.doc-symbol-method,
+.md-typeset code.doc-symbol-heading.doc-symbol-function {
+  color: var(--doc-symbol-method-fg-color);
+  background-color: var(--doc-symbol-method-bg-color);
 }
 
-/* Live code — minimal status pill + floating icon actions */
-.live-code-bar {
-  position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  z-index: 300;
-  display: flex;
+.md-typeset code.doc-symbol-attribute,
+.md-typeset code.doc-symbol-heading.doc-symbol-attribute {
+  color: var(--doc-symbol-attribute-fg-color);
+  background-color: var(--doc-symbol-attribute-bg-color);
+}
+
+.md-typeset code.doc-symbol-module,
+.md-typeset code.doc-symbol-heading.doc-symbol-module {
+  color: var(--doc-symbol-module-fg-color);
+  background-color: var(--doc-symbol-module-bg-color);
+}
+
+.md-typeset code.doc-symbol-type_alias,
+.md-typeset code.doc-symbol-heading.doc-symbol-type_alias {
+  color: var(--doc-symbol-type_alias-fg-color);
+  background-color: var(--doc-symbol-type_alias-bg-color);
+}
+
+.md-typeset code.doc-symbol-parameter,
+.md-typeset code.doc-symbol-type_parameter {
+  color: var(--doc-symbol-parameter-fg-color);
+  background-color: var(--doc-symbol-parameter-bg-color);
+}
+
+/* Pythonic ::after labels (override _mkdocstrings.css meth/func/mod, …) */
+code.doc-symbol-method::after,
+a code.doc-symbol-method::after,
+code.doc-symbol-function::after,
+a code.doc-symbol-function::after {
+  content: "def";
+}
+
+code.doc-symbol-class::after,
+a code.doc-symbol-class::after {
+  content: "class";
+}
+
+code.doc-symbol-module::after,
+a code.doc-symbol-module::after {
+  content: "module";
+}
+
+code.doc-symbol-attribute::after,
+a code.doc-symbol-attribute::after {
+  content: "var";
+}
+
+code.doc-symbol-type_alias::after,
+a code.doc-symbol-type_alias::after {
+  content: "type";
+}
+
+/* Live code — header status pill + floating icon actions on code blocks */
+/* Single dark palette only — hide any cached palette toggle chrome */
+.md-header__option[data-md-component="palette"],
+.md-header__button[for="__palette"] {
+  display: none !important;
+}
+
+.md-header__inner > .live-code-bar {
+  display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0;
-  background: none;
-  border: none;
-  box-shadow: none;
-  pointer-events: none;
+  gap: 0.3rem;
+  /* Push the live-code + search cluster to the header right; DOM order keeps pill left of search. */
+  margin: 0 0.35rem 0 auto;
+  padding: 0.1rem 0.4rem 0.1rem 0.28rem;
+  border: 1px solid rgba(92, 92, 138, 0.7);
+  border-radius: 999px;
+  background: rgba(30, 30, 63, 0.5);
+  flex-shrink: 0;
 }
 
-.live-code-bar__status,
-.live-code-bar__toggle {
+.live-code-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   pointer-events: auto;
 }
 
 .live-code-bar__status {
   font-family: var(--md-code-font), monospace;
-  font-size: 0.72rem;
+  font-size: 0.62rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .live-code-bar--live .live-code-bar__status {
@@ -153,11 +489,12 @@
   text-shadow: 0 0 12px rgba(165, 255, 144, 0.45);
 }
 
-.live-code-bar--inactive .live-code-bar__status {
+.live-code-bar--inactive .live-code-bar__status,
+.live-code-bar--starting .live-code-bar__status {
   color: #a599e9;
 }
 
-.live-code-bar--uninstalled .live-code-bar__status {
+.live-code-bar--offline .live-code-bar__status {
   color: #ff628c;
   text-shadow: 0 0 10px rgba(255, 98, 140, 0.35);
 }
@@ -166,14 +503,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.05rem;
+  height: 1.05rem;
   margin: 0;
   padding: 0;
   border: 1px solid #5c5c8a;
   border-radius: 50%;
   background: rgba(30, 30, 63, 0.55);
   cursor: pointer;
+  flex-shrink: 0;
   transition:
     border-color 0.15s ease,
     background 0.15s ease,
@@ -182,11 +520,22 @@
 
 .live-code-bar__dot {
   display: block;
-  width: 0.45rem;
-  height: 0.45rem;
+  width: 0.38rem;
+  height: 0.38rem;
   border-radius: 50%;
   background: #5c5c8a;
   transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-header__inner > .live-code-bar {
+    margin-right: 0;
+    padding: 0.08rem;
+  }
+
+  .live-code-bar__status {
+    display: none;
+  }
 }
 
 .live-code-bar--inactive .live-code-bar__dot {
@@ -226,12 +575,12 @@
   }
 }
 
-.live-code-bar--uninstalled .live-code-bar__toggle {
+.live-code-bar--offline .live-code-bar__toggle {
   border-color: #ff628c;
   background: rgba(255, 98, 140, 0.1);
 }
 
-.live-code-bar--uninstalled .live-code-bar__dot {
+.live-code-bar--offline .live-code-bar__dot {
   background: #ff628c;
 }
 

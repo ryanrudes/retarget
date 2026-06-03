@@ -19,7 +19,7 @@ Context:
 
 {% import "language.html.jinja" as lang with context %}
 {#- Language module providing the `t` translation method. -#}
-{% import "_base/enum_macros.jinja" as enum %}
+{% import "enum_macros.jinja" as enum %}
 {% set is_enum = enum.is_enum_class(class) %}
 
 <div class="doc doc-object {% if is_enum %}doc-enum{% else %}doc-class{% endif %}">

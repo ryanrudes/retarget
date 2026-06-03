@@ -10,7 +10,7 @@ Context:
   config (dict): The configuration options.
 -#}
 
-{% import "_base/enum_macros.jinja" as enum %}
+{% import "enum_macros.jinja" as enum %}
 {% set parent_is_enum = enum.is_enum_class(attribute.parent) %}
 
 {% block logs scoped %}

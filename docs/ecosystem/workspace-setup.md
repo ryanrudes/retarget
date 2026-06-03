@@ -52,6 +52,8 @@ python -c "from motion_sync import SyncClip; from contact_detection import class
 
 API pages for **motion_sync** and **contact_detection** use mkdocstrings with paths under `vendor/` (git submodules). From the **retarget** repo root:
 
+Published docs: **https://ryanrudes.github.io/retarget/** (built on each push to `master`).
+
 ```bash
 git submodule update --init
 uv sync --extra dev

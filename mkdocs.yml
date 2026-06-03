@@ -1,5 +1,8 @@
 site_name: retarget
 site_description: Typed, extensible motion retargeting research toolkit.
+site_url: https://ryanrudes.github.io/retarget/
+repo_url: https://github.com/ryanrudes/retarget
+edit_uri: edit/master/docs/
 
 extra:
   generator: false

@@ -70,4 +70,14 @@ uv run retarget assets install examples/assets_manifest.toml --store .retarget_a
 
 Robot specs can be loaded from Python registries or external TOML/YAML/JSON files, for example `examples/custom_robot.toml`.
 
-Documentation lives in `docs/` and is configured with MkDocs.
+## Documentation
+
+**https://ryanrudes.github.io/retarget/** — built from `docs/` with MkDocs Material (GitHub Pages on `master`).
+
+Local preview (includes live-code Jupyter; not on the hosted site):
+
+```bash
+git submodule update --init
+uv sync --extra dev
+uv run mkdocs serve
+```

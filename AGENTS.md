@@ -13,7 +13,7 @@
 
 ## Learned Workspace Facts
 
-- Docs are built with MkDocs Material; preview with `uv sync --extra dev` then `uv run mkdocs serve`.
+- Docs are built with MkDocs Material; preview with `uv sync --extra dev` then `uv run mkdocs serve`. Published at https://ryanrudes.github.io/retarget/ via `.github/workflows/docs.yml` (GitHub Pages; `submodules: recursive` for vendor API paths). Live-code Jupyter remains local-only.
 - Site chrome theming lives in `docs/stylesheets/sop-theme.css`; code block layout overrides in `docs/stylesheets/extra.css`. Wide-layout sidebars: keep Material `height: 0` placeholders, paint `.md-sidebar__scrollwrap`, and `position: fixed` the scroll columns (`top: 4.8rem` = header + `navigation.tabs`, `height: calc(100vh - 4.8rem)`) so sidebars stay pinned for the full viewport and do not shift upward when the main document is scrolled to the bottom (do not set `height: auto` on `.md-sidebar`).
 - Syntax highlighting uses Shiki at runtime via `docs/javascripts/shiki-highlight.mjs` and `docs/themes/shades-of-purple-shiki.json`.
 - Live-code execution uses `docs/javascripts/live-code*.mjs` with local Jupyter via `./scripts/docs-jupyter.sh`; `docs/hooks/jupyter_serve.py` starts a helper on `http://127.0.0.1:8889` during `mkdocs serve` (and mirrors routes on the docs origin when possible) so the header switch can spawn Jupyter.

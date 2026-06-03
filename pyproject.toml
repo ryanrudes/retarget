@@ -76,7 +76,16 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["clarabel", "cvxpy", "mujoco", "scipy.*", "viser", "yaml"]
+module = [
+  "clarabel",
+  "cvxpy",
+  "mujoco",
+  "scipy.*",
+  "trimesh",
+  "viser",
+  "viser.extras",
+  "yaml",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -38,6 +38,13 @@ stance = foot.stance_matrix()  # (frames, 2) for retarget L_Foot / R_Foot
 
 ## Phase B — Fuse into retarget inputs
 
+Foot-support must be on the clip before fuse (Phase A step 5). Re-run if you re-synced:
+
+```bash
+cd ~/GitHub/motion_sync
+uv run motion-sync detect foot-support output/synced/<demo> --plot
+```
+
 ```bash
 cd ~/GitHub/retarget
 uv sync
@@ -61,10 +68,16 @@ Writes:
 
 ## Phase C — retarget
 
+Run from `examples/skateboarding/` (paths in `run_config_pushoff5.toml` are relative to that directory). Example demo: `pushoff5_twoshoes` after Phase B.
+
 ```bash
-uv run retarget run --config examples/skateboarding/run_config_pushoff5.toml
-uv run retarget view --result skateboarding_retarget.npz --dry-run
+cd ~/GitHub/retarget/examples/skateboarding
+uv run retarget run --config run_config_pushoff5.toml
+uv run retarget evaluate --result pushoff5_retarget.npz --config run_config_pushoff5.toml
+uv run retarget view --result pushoff5_retarget.npz --dry-run
 ```
+
+Synthetic-only fixture: `fuse_motion.py` + `run_config.toml` → `skateboarding_retarget.npz` in the same directory.
 
 Tune objectives and constraints in the TOML ([Run configs](../tutorials/run-configs.md), [Introduction](../introduction.md)).
 

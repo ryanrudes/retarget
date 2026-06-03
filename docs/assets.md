@@ -40,6 +40,6 @@ HTTP(S) sources are refused unless `--allow-downloads` is supplied. File `sha256
 
 Robot assets can be loaded through `robot_providers.get("asset_store")` when the registered asset is a spec file or a directory containing `robot.toml`, `robot.yaml`, `robot.yml`, or `robot.json`.
 
-Object and terrain assets can be referenced from run specs with `mesh_path`. When explicit `sample_points` are not supplied, the CLI samples `mesh_sample_count` deterministic points from the mesh for non-penetration and interaction-mesh constraints. OBJ files are supported dependency-free; other mesh formats require the optional `trimesh` dependency.
+Object and terrain assets can be referenced from run specs with `mesh_path`. When explicit `sample_points` are not supplied, the run config or scene spec (`mesh_sample_count` under `[scene.object]` or `[scene.terrain]`) samples deterministic surface points for non-penetration and interaction-mesh constraints. OBJ files are supported dependency-free; other mesh formats need `trimesh`, which is installed with the `mujoco` or `viz` extras (`uv sync --extra mujoco` or `uv sync --extra viz`), not as a standalone extra.
 
 Optional slow tests look for `RETARGET_ASSET_STORE` or `.retarget_assets`. When that store contains `g1`, `g1_like`, `t1`, or `t1_like` robot records, the tests load those specs through the asset-store provider and validate their qpos layout, joint names, and joint limits.

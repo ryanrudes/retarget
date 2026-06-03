@@ -1,5 +1,7 @@
 # Workspace setup
 
+GitHub repo **[contact_detection](https://github.com/ryanrudes/contact_detection)**; Python package `contact_detection`; retarget submodule `vendor/event_detection`; local clone folder name is arbitrary (often `event_detection`).
+
 ## Clone layout
 
 **Docs and API reference (retarget repo):** clone with submodules so mkdocstrings can import `motion_sync` and `contact_detection`:

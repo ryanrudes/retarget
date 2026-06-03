@@ -22,7 +22,9 @@ Several tutorials include runnable Python blocks. To execute them in the docs UI
 
 1. Start MkDocs: `uv sync --extra dev` then `uv run mkdocs serve`
 2. Start Jupyter: `./scripts/docs-jupyter.sh` (second terminal)
-3. Flip **Live** in the bottom-right corner of the docs page
+3. Flip **Live** in the page header (left of the search bar)
+
+The [hosted site](https://ryanrudes.github.io/retarget/) is read-only: no Live switch or Jupyter kernel.
 
 See [Interactive playground](../interactive-playground.md) for troubleshooting.
 

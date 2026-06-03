@@ -2,7 +2,7 @@
 
 Foot-support **classification algorithms** (air / ground / skateboard). Persistence and clip wiring live in **motion_sync** (`SyncClip.detect`, contact layers on `synced.npz`).
 
-Requires [event_detection](https://github.com/ryanrudes/event_detection) on `PYTHONPATH`. See [Workspace setup](../ecosystem/workspace-setup.md).
+Requires the [contact_detection](https://github.com/ryanrudes/contact_detection) package on `PYTHONPATH` (`import contact_detection`). In this repo it is vendored at `vendor/event_detection` (submodule path; GitHub repo name is **contact_detection**). A sibling clone folder name is arbitrary—often `event_detection`. See [Workspace setup](../ecosystem/workspace-setup.md).
 
 ## Primary entry points
 
@@ -22,4 +22,4 @@ Requires [event_detection](https://github.com/ryanrudes/event_detection) on `PYT
 
 ## CLI diagnostics
 
-`event_detection` repo `main.py` discovers `synced.npz` trials and plots classifications. Prefer `motion-sync detect foot-support` to persist layers on the clip.
+The contact_detection repo’s `main.py` discovers `synced.npz` trials and plots classifications. Prefer `motion-sync detect foot-support` to persist layers on the clip.

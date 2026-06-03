@@ -8,6 +8,9 @@
 | [contact_detection](https://github.com/ryanrudes/contact_detection) | `contact_detection` | Foot-support **algorithms** (air / ground / board); no clip I/O |
 | **retarget** (this site) | `retarget` | `MotionSequence` + `SceneSpec` → `RetargetingResult` |
 
+!!! note "contact_detection naming"
+    GitHub repo: **[contact_detection](https://github.com/ryanrudes/contact_detection)**. Python package: `contact_detection`. Retarget submodule path: `vendor/event_detection`. Local clone folder name is arbitrary (often `event_detection`).
+
 ```mermaid
 flowchart TB
   subgraph capture [Capture]

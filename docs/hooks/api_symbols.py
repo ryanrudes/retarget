@@ -19,12 +19,13 @@ if str(_REPO_ROOT) not in sys.path:
 
 from docs.hooks.symbol_index import LOWERCASE_SHORT_NAMES, SECTION_SUFFIXES, write_anchor_cache
 
-ANCHOR_RE = re.compile(r'\bid="(retarget[^"]+)"')
+_API_ID_PREFIX = r"(?:retarget|motion_sync|contact_detection)"
+ANCHOR_RE = re.compile(rf'\bid="({_API_ID_PREFIX}[^"]+)"')
 AUTOREF_TITLE_RE = re.compile(
     r'<a class="autorefs[^"]*" title="([^"]*)" href="[^"]*#([^"]+)"'
 )
 HEADING_TITLE_RE = re.compile(
-    r'<h[1-6] id="(retarget[^"]+)" class="doc doc-heading"[^>]*>(.*?)</h[1-6]>',
+    rf'<h[1-6] id="({_API_ID_PREFIX}[^"]+)" class="doc doc-heading"[^>]*>(.*?)</h[1-6]>',
     re.DOTALL,
 )
 
@@ -32,6 +33,10 @@ HEADING_TITLE_RE = re.compile(
 def _page_priority(page_url: str) -> int:
     if page_url.endswith("/api/reference/"):
         return 100
+    if page_url.endswith("/api/motion-sync/"):
+        return 45
+    if page_url.endswith("/api/contact-detection/"):
+        return 45
     if page_url.endswith("/api/models/"):
         return 80
     if page_url.endswith("/api/pipeline/"):
@@ -42,11 +47,15 @@ def _page_priority(page_url: str) -> int:
 
 
 def _is_primary_symbol(anchor_id: str) -> bool:
-    if anchor_id == "retarget":
+    if anchor_id in ("retarget", "motion_sync", "contact_detection"):
         return True
     if any(anchor_id.endswith(suffix) for suffix in SECTION_SUFFIXES):
         return False
-    return anchor_id.startswith("retarget.")
+    return (
+        anchor_id.startswith("retarget.")
+        or anchor_id.startswith("motion_sync.")
+        or anchor_id.startswith("contact_detection.")
+    )
 
 
 def _short_name(anchor_id: str) -> str | None:

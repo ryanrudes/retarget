@@ -14,17 +14,22 @@ Motion inputs can be JSON, NPY, NPZ, or wide CSV files. CSV columns use the regi
 For repeatable experiments, put the run in a TOML or YAML config:
 
 ```bash
-uv run retarget run --config examples/run_config.toml
+uv run retarget run --config examples/run_config.toml   # writes examples/configured_fixture.npz
 uv run retarget evaluate --result examples/configured_fixture.npz --config examples/run_config.toml
 ```
+
+For a full capture-to-robot path (Vicon, GVHMR, foot support, fuse, retarget), see [Research ecosystem](ecosystem/index.md) and `examples/skateboarding/`.
 
 Verify local changes with the same gates used by CI:
 
 ```bash
+git submodule update --init   # vendor motion_sync + contact_detection for API docs
 uv run ruff check src tests examples docs
 uv run mypy src
 uv run pytest
 uv run mkdocs build --strict
 ```
 
-The pytest suite executes every script in `examples/` from a temporary working directory, so examples must remain self-contained and free of repo-local output assumptions.
+Sibling-repo layout and optional editable installs: [Workspace setup](ecosystem/workspace-setup.md).
+
+Pytest runs a fixed set of example scripts from a temporary working directory (`tests/test_examples.py`: `basic_robot_only.py`, `batch_and_evaluate.py`, `climbing_terrain.py`, `custom_motion_format.py`, `custom_objective.py`, `custom_robot.py`, `object_interaction.py`, `skateboarding/run_retarget.py`). Keep those scripts self-contained and free of repo-local output assumptions.

@@ -3,12 +3,16 @@
 `RetargetingResult` stores:
 
 - `schema_version`: result NPZ schema version.
+- `name`: run identifier (from the problem or CLI config).
+- `status`: `RunStatus` (`success`, `partial`, `failed`, …) for the retargeting run.
 - `qpos`: `(frames, nq)` robot trajectory.
 - `fps`: result frame rate.
-- `cost`: optional per-frame optimization cost.
+- `cost`: optional optimization cost; length **1** (single aggregate) or **per frame** matching `qpos`.
 - `human_joints`: optional source motion positions.
 - `metadata`: robot, task, solver, and mapping information.
 - `metadata_json` and `warnings_json` in saved NPZ files for inspectable metadata without loading pickled object arrays.
+
+See [API models](api/models.md) for field types and validators.
 
 Use `RetargetingResult.resampled(fps)` when comparing or exporting runs on a common time grid. When `RetargetingProblem.output_fps` is set, `Retargeter` resamples the source motion and any dynamic object trajectory before optimization, so the saved result frame count matches the requested output rate.
 
@@ -18,9 +22,10 @@ Result metadata includes a `provenance` object with the run name, task kind, inp
 
 `EvaluationReport` stores:
 
+- `status`: overall evaluation outcome (`success` or `partial` when individual metrics fail).
 - `source_name`, `frame_count`, `qpos_dimension`, and `fps` for joining reports back to results.
 - `task_kind`, `robot_name`, and `motion_name` when evaluation used a `RetargetingProblem`.
-- `metrics`: scalar metric values.
+- `metrics`: scalar metric values (access as `report.metrics["metric_name"]`, not a bare `metrics` dict on the result).
 - `metric_units`: display units such as `m`, `m/s`, `fraction`, or `cost`.
 - `details`: machine-readable result/problem context.
 - `warnings`: result warnings plus any metric failures.

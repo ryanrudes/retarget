@@ -52,7 +52,7 @@ class MyExporter:
         )
 ```
 
-Visualization uses the same extension pattern through `visualizers`. `retarget view --dry-run` prints a Rich summary without optional dependencies; `--live` uses the registered Viser visualizer when `retarget[viz]` is installed.
+Visualization uses the same extension pattern through `visualizers`. `retarget view` defaults to **dry-run** (Rich summary of frames, DOF, warnings, and provenance) and needs no optional dependencies. Pass `--live` for the Viser-backed viewer after `uv sync --extra viz`. Use `--robot-spec <path>` when live playback should load URDF-backed geometry from a `RobotSpec` file (for example an asset-store `robot.toml`); without it, the viewer falls back to primitive scaffolding from result metadata.
 
 Playback adapters share a typed `PlaybackData` model:
 

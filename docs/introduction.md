@@ -4,7 +4,7 @@ This page walks through a **complete research-style project**—retargeting a hu
 
 If you have not installed the toolkit yet, run [Quickstart](quickstart.md) first (`uv sync`, `retarget doctor`, one fixture run). Then return here.
 
-Lab capture and time sync live in **[motion_sync](https://github.com/ryanrudes/motion_sync)** with contact algorithms in **[contact_detection](https://github.com/ryanrudes/event_detection)**. See the [Ecosystem](ecosystem/index.md) section for workspace layout, [custom schemas](ecosystem/custom-schemas.md), and the [full pipeline](ecosystem/pipeline.md).
+Lab capture and time sync live in **[motion_sync](https://github.com/ryanrudes/motion_sync)** (Python package `motion_sync`, CLI `motion-sync`) with foot-support algorithms in **[contact_detection](https://github.com/ryanrudes/contact_detection)** (Python package `contact_detection`; local clone folders are often named `event_detection`). See the [Ecosystem](ecosystem/index.md) section for workspace layout, [custom schemas](ecosystem/custom-schemas.md), and the [full pipeline](ecosystem/pipeline.md).
 
 Runnable scripts for this walkthrough live in `examples/skateboarding/`.
 
@@ -127,20 +127,36 @@ When exporting from your own fusion script, build a `MotionSequence` and optiona
 
 | Path | Script | Data |
 |------|--------|------|
-| Synthetic fixture (no lab data) | `examples/skateboarding/fuse_motion.py` | Checked-in demo NPZ |
+| Synthetic fixture (no lab data) | `examples/skateboarding/fuse_motion.py` | NPZ under `examples/skateboarding/data/` (written by the script) |
 | Real `synced.npz` from motion_sync | `examples/skateboarding/fuse_unified.py` | Your capture |
 
 ```bash
-# Fixture only
+# Fixture only (repo root)
 uv run python examples/skateboarding/fuse_motion.py
 
-# Real clip (after motion-sync sync + detect)
+# Real clip (repo root; after motion-sync sync + detect — see Ecosystem pipeline)
+uv run motion-sync detect foot-support ../motion_sync/output/synced/<demo>
 uv run python examples/skateboarding/fuse_unified.py \
   --synced ../motion_sync/output/synced/<demo> \
   --output examples/skateboarding/data/<demo>
 ```
 
 Exports use `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()` and `clip.core_joint_positions()`. For SMPL-X, use `motion_formats.get("smplx")` and contact keys `L_Foot` / `R_Foot`.
+
+`fuse_unified.py` converts video FK joints from **Y-up to Z-up** before aligning to the Vicon lab frame (see [Coordinate conventions](coordinate-conventions.md)).
+
+### Real clip example (`pushoff5_twoshoes`)
+
+After [motion-sync detect](ecosystem/pipeline.md) and fuse (above with `<demo>` = `pushoff5_twoshoes`), run retarget from `examples/skateboarding/` so relative paths in `run_config_pushoff5.toml` resolve:
+
+```bash
+cd examples/skateboarding
+uv run retarget run --config run_config_pushoff5.toml
+uv run retarget evaluate --result pushoff5_retarget.npz --config run_config_pushoff5.toml
+uv run retarget view --result pushoff5_retarget.npz --dry-run
+```
+
+Outputs: `pushoff5_retarget.npz` in `examples/skateboarding/`; fused inputs in `examples/skateboarding/data/pushoff5_twoshoes/`.
 
 Optional `root_poses` improve root initialization when your tracker provides global pelvis pose.
 
@@ -207,7 +223,9 @@ Tune weights in a run config (`[[objectives]]`, `[[constraints]]`) so foot and s
 
 ## Step 7 — Freeze a reproducible run config
 
-Once paths and weights stabilize, capture the experiment in TOML/YAML ([Run configs](tutorials/run-configs.md)). The repository includes `examples/skateboarding/run_config.toml`:
+Once paths and weights stabilize, capture the experiment in TOML/YAML ([Run configs](tutorials/run-configs.md)). Run configs use **paths relative to `examples/skateboarding/`**; run `retarget run`, `evaluate`, and `view` from that directory (or pass absolute paths).
+
+**Synthetic fixture** — `run_config.toml` after `fuse_motion.py`:
 
 ```bash
 cd examples/skateboarding
@@ -217,11 +235,22 @@ uv run retarget evaluate --result skateboarding_retarget.npz --config run_config
 uv run retarget view --result skateboarding_retarget.npz --dry-run
 ```
 
-Pass the **same config** to `evaluate` when metrics need scene geometry (for example penetration against the deck samples). Swap `format` / `robot` and motion paths when moving from the synthetic fixture to SMPL-X and `g1_like`.
+**Real clip** — `run_config_pushoff5.toml` after `fuse_unified.py` (Step 3); same directory, `pushoff5_retarget.npz` output.
+
+Pass the **same `--config`** to `evaluate` when metrics need scene geometry (for example penetration against the deck samples). Swap `format` / `robot` and motion paths when moving from the synthetic fixture to SMPL-X and `g1_like`.
 
 ## Step 8 — Evaluate and iterate
 
 `retarget evaluate` writes scalar metrics (optimization cost, foot sliding proxies, and others). Use them to compare contact thresholds, clearance, and smoothness weights across clips.
+
+From `examples/skateboarding/`, pass the **same config** you used for `retarget run` when the run config defines scene geometry:
+
+```bash
+cd examples/skateboarding
+uv run retarget evaluate --result skateboarding_retarget.npz --config run_config.toml
+# real clip:
+uv run retarget evaluate --result pushoff5_retarget.npz --config run_config_pushoff5.toml
+```
 
 Typical iteration loop:
 
@@ -234,15 +263,16 @@ Scale to many clips with [Batch and metrics](tutorials/batch-and-metrics.md).
 
 ## Runnable learning slice
 
-From the repository root:
+From the repository root (programmatic demo only; `.npz` for CLI lives under `examples/skateboarding/`):
 
 ```bash
 uv sync --extra dev
 uv run python examples/skateboarding/run_retarget.py
-uv run retarget evaluate --result skateboarding_retarget.npz
+cd examples/skateboarding
+uv run retarget evaluate --result skateboarding_retarget.npz --config run_config.toml
 ```
 
-This runs the full skateboarding fixture (moving board, foot contacts, `object_interaction`) without external datasets. Export files for the CLI path with `fuse_motion.py`, then `run_config.toml` as above.
+This runs the full skateboarding fixture (moving board, foot contacts, `object_interaction`) without external datasets. Export files for the CLI path with `fuse_motion.py` in `examples/skateboarding/`, then `run_config.toml` as in Step 7.
 
 For a static box without a board trajectory, see `examples/object_interaction.py`. For human-only retargeting, use [Your first retarget](tutorials/your-first-retarget.md).
 

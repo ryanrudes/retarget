@@ -74,7 +74,7 @@ Robot specs can be loaded from Python registries or external TOML/YAML/JSON file
 
 **https://ryanrudes.github.io/retarget/** — built from `docs/` with MkDocs Material (GitHub Pages on `master`).
 
-Local preview (includes live-code Jupyter; not on the hosted site):
+Local preview (includes live-code Jupyter; not on the hosted site). Initialize submodules first so vendor API pages (`motion_sync`, `contact_detection`) resolve for `mkdocs build` / `mkdocs serve`:
 
 ```bash
 git submodule update --init

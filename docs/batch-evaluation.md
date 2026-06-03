@@ -7,6 +7,8 @@ retarget batch --input-dir motions --pattern "*.npz" --format smplx --output-dir
 retarget evaluate --result results/example.npz --output results/example.metrics.json
 ```
 
+SMPL-X batch runs need a target humanoid: pass `--robot <name>` or a shared `--config` whose `[run]` section sets `robot` (without either, batch defaults to `synthetic_humanoid`, which is usually wrong for SMPL-X motion).
+
 Recursive patterns preserve input-relative output paths, so duplicate filenames in different subjects or trials do not collide:
 
 ```bash

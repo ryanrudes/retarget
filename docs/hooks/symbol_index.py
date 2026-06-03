@@ -92,6 +92,7 @@ FIELD_SHORT_BLOCKLIST = frozenset(
 )
 
 SECTION_SUFFIXES = ("-functions", "-attributes", "-classes")
+API_PACKAGE_PREFIXES = ("retarget.", "motion_sync.", "contact_detection.")
 ANCHOR_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "api-anchor-ids.json"
 
 
@@ -216,7 +217,11 @@ def load_cached_anchor_ids() -> set[str] | None:
         return None
     if not isinstance(payload, list):
         return None
-    return {item for item in payload if isinstance(item, str) and item.startswith("retarget.")}
+    return {
+        item
+        for item in payload
+        if isinstance(item, str) and item.startswith(API_PACKAGE_PREFIXES)
+    }
 
 
 def write_anchor_cache(anchor_ids: set[str]) -> None:
@@ -241,6 +246,6 @@ def resolve_identifier(text: str, by_id: dict[str, str], by_short: dict[str, str
         return None
     if text in by_short:
         return by_short[text]
-    if "." in text and text.startswith("retarget."):
+    if "." in text and text.startswith(API_PACKAGE_PREFIXES):
         return by_id.get(text)
     return None

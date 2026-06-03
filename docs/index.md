@@ -10,7 +10,10 @@ hide:
 The implementation is independent of the holosoma reference repository.
 
 !!! tip "First time here?"
-    Jump to [Quickstart](quickstart.md) for install, a one-command run, and CI checks. Read [Introduction](introduction.md) for a complete research use case (what to build upstream vs. what `retarget` consumes). Follow the [Tutorials](tutorials/index.md) for shorter step-by-step lessons. Skim [Architecture](architecture.md) when you want the mental model. With Jupyter running locally, flip **Live** on (bottom-right), then use the icons on the Python tab to run code.
+    Jump to [Quickstart](quickstart.md) for install, a one-command run, and CI checks. Read [Introduction](introduction.md) for a complete research use case (what to build upstream vs. what `retarget` consumes). Follow the [Tutorials](tutorials/index.md) for shorter step-by-step lessons. Skim [Architecture](architecture.md) when you want the mental model. With Jupyter running locally, flip **Live** in the page header (left of the search bar), then use the icons on Python tabs to run code — see [Interactive playground](interactive-playground.md).
+
+!!! note "Live code (local only)"
+    Runnable blocks and Jupyter work only with local `uv run mkdocs serve`. The [hosted docs](https://ryanrudes.github.io/retarget/) are read-only (no Live switch or kernel).
 
 === "CLI"
 
@@ -44,9 +47,11 @@ The implementation is independent of the holosoma reference repository.
 | Run something in 60 seconds | [Quickstart](quickstart.md) |
 | Map a real project (sensors → problem) | [Introduction](introduction.md) |
 | Learn by doing (guided paths) | [Tutorials](tutorials/index.md) |
-| Understand the pipeline | [Architecture](architecture.md) |
+| Understand the pipeline (in-repo engine and types) | [Architecture](architecture.md) |
+| End-to-end lab workflow (capture → clip → retarget) | [Ecosystem](ecosystem/index.md) · [Pipeline](ecosystem/pipeline.md) |
 | Frames, units, conventions | [Coordinate Conventions](coordinate-conventions.md) |
-| Extend the toolkit | [Extending](adding-a-robot.md) |
+| Extend the toolkit | [Extending](extending.md) |
 | API reference | [API](api/index.md) |
+| motion_sync API (vendored submodule) | [motion_sync](api/motion-sync.md) |
 
 Press ++ctrl+f++ (or ++cmd+f++) to search — results are highlighted and shareable. Use the **back-to-top** button after long pages; the header tucks away while you scroll.

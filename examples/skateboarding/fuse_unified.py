@@ -6,9 +6,10 @@ Example (pushoff5_twoshoes):
         --synced /path/to/motion-sync/output/synced/pushoff5_twoshoes/synced.npz \\
         --output examples/skateboarding/data/pushoff5_twoshoes
 
-Requires ``motion-sync`` and ``contact_detection`` (event_detection):
+Requires ``motion-sync`` and the ``contact_detection`` package
+(https://github.com/ryanrudes/contact_detection; clone folder often ``event_detection``):
 
-    uv pip install -e ../motion-sync
+    uv pip install -e ../motion_sync
     uv pip install -e ../event_detection
 """
 

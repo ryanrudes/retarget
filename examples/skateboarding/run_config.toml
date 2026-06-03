@@ -1,44 +1,62 @@
-# Skateboarding introduction example — run from this directory after fuse_motion.py:
-#   uv run python fuse_motion.py
-#   uv run retarget run --config run_config.toml
-#   uv run retarget evaluate --result skateboarding_retarget.npz --config run_config.toml
-#   uv run retarget view --result skateboarding_retarget.npz --dry-run
-#   uv sync --extra viz
-#   uv run retarget view --result skateboarding_retarget.npz --live
+# Real skateboarding clip config. Prepare inputs first:
+#   uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
+#   uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
+#
+# Programmatic MuJoCo-aware run:
+#   uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
+#
+# CLI run from the repository root:
+#   uv run retarget run --config examples/skateboarding/run_config.toml
 
-name = "synthetic_skate_clip"
-motion = "data/skate_motion.npz"
-format = "minimal"
-robot = "g1_like"
+name = "pushoff5_twoshoes"
+motion = "generated/pushoff5_twoshoes/skate_motion.npz"
+format = "smplx"
+robot = "g1"
+robot_provider = "asset_store"
 task_kind = "object_interaction"
-output = "skateboarding_retarget.npz"
-scale_to_robot = true
+output = "generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz"
+scale_to_robot = false
 output_fps = 30
 
+[robot_options]
+store = "../../.retarget_assets"
+
 [scene]
-ground_size = 12
-ground_range = [-2.0, 2.0]
+ground_size = 15
+ground_range = [-3.0, 3.0]
 
 [scene.object]
 name = "skateboard"
-sample_points_path = "data/deck_samples.npy"
-trajectory_path = "data/board_trajectory.npz"
+sample_points_path = "generated/pushoff5_twoshoes/deck_samples.npy"
+trajectory_path = "generated/pushoff5_twoshoes/board_trajectory.npz"
 
 [solver]
 backend = "numpy_least_squares"
-max_iterations = 4
-trust_radius = 0.2
+max_iterations = 6
+trust_radius = 0.12
 
 [[objectives]]
-name = "laplacian"
-weight = 10.0
+name = "link_tracking"
+weight = 1.0
 
 [[objectives]]
 name = "smoothness"
-weight = 0.15
+weight = 0.12
+
+[[objectives]]
+name = "nominal_tracking"
+weight = 0.05
 
 [[constraints]]
 name = "joint_limits"
 
 [[constraints]]
 name = "trust_region"
+
+[[constraints]]
+name = "foot_contact"
+parameters = { tolerance = 0.002 }
+
+[[constraints]]
+name = "non_penetration"
+parameters = { links = ["left_ankle_roll_link", "right_ankle_roll_link"], scene_clearance = 0.015, activation_distance = 0.05 }

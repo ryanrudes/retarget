@@ -13,7 +13,6 @@ EXAMPLES = (
     "custom_objective.py",
     "custom_robot.py",
     "object_interaction.py",
-    "skateboarding/run_retarget.py",
 )
 
 
@@ -25,6 +24,29 @@ def test_example_script_executes(example_name: str, tmp_path: Path):
 
     subprocess.run(
         [sys.executable, str(repo_root / "examples" / example_name)],
+        check=True,
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    (
+        "skateboarding/prepare_clip.py",
+        "skateboarding/run_retarget.py",
+        "../scripts/bootstrap_robot_assets.py",
+    ),
+)
+def test_research_scripts_show_help(script_name: str, tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{repo_root / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
+    subprocess.run(
+        [sys.executable, str(repo_root / "examples" / script_name), "--help"],
         check=True,
         cwd=tmp_path,
         env=env,

@@ -1,40 +1,54 @@
 # Humanoid Skateboarding Retargeting
 
-Runnable code for the [Introduction](../../docs/introduction.md) walkthrough: humanoid motion retargeting with a moving skateboard object.
+Runnable code for the research skateboarding walkthrough. This example starts from
+`motion_sync` synced clips, uses `contact_detection` foot-support labels as
+retargeter hints, and renders the retargeted humanoid with a real URDF-backed G1
+model.
 
-The checked-in fixture is synthetic because the repository cannot ship lab motion capture or robot assets. It still exercises the same path as a real clip: `MotionSequence` human joints, explicit foot contacts, `ObjectTrajectory` board poses, a humanoid `RobotSpec`, retargeting, evaluation, and visualization.
+Generated inputs and results are written under `examples/skateboarding/generated/`
+and are ignored by git.
 
 | Script | Purpose |
 |--------|---------|
-| `_synthetic.py` | Synthetic motion, deck samples, and board trajectory (no external data) |
-| `fuse_motion.py` | Synthetic export to `data/` (no lab data) |
-| `fuse_unified.py` | Real pipeline: `motion-sync` `synced.npz` → same NPZ layout for retarget |
-| `probe_mapping.py` | Print `resolved_link_mapping()` for the humanoid template |
-| `run_retarget.py` | Full Python API retarget → `skateboarding_retarget.npz` |
-| `run_config.toml` | Same job via CLI (run `fuse_motion.py` first) |
+| `prepare_clip.py` | Convert `motion_sync_output/synced/<demo>/synced.npz` into retarget inputs and link-target hints |
+| `run_retarget.py` | Prepare if needed, load the G1 asset, solve the retargeting problem, and save the result |
+| `run_config.toml` | CLI equivalent once generated inputs and robot assets exist |
+
+## Setup
 
 ```bash
-# From repository root
-uv run python examples/skateboarding/run_retarget.py
-uv run retarget evaluate --result skateboarding_retarget.npz
-uv run retarget view --result skateboarding_retarget.npz --dry-run
+uv sync --extra dev
+git submodule update --init
+uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
+```
+
+The bootstrap script copies Holosoma's G1 URDF/MJCF assets into
+`.retarget_assets/robot/g1`, writes `.retarget_assets/robot/g1/robot.toml`, and
+registers the asset-store manifest.
+
+## Prepare and Run
+
+```bash
+uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
+uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
+```
+
+For MuJoCo-backed kinematics, install the optional stack:
+
+```bash
+uv sync --extra mujoco
+uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --kinematics mujoco
+```
+
+## View
+
+```bash
 uv sync --extra viz
-uv run retarget view --result skateboarding_retarget.npz --live
-
-# CLI path (writes fixtures into examples/skateboarding/data/)
-cd examples/skateboarding
-uv run python fuse_motion.py
-uv run retarget run --config run_config.toml
-uv run retarget view --result skateboarding_retarget.npz --dry-run
-uv run retarget view --result skateboarding_retarget.npz --live
+uv run retarget view \
+  --result examples/skateboarding/generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz \
+  --live \
+  --robot-spec .retarget_assets/robot/g1/robot.toml
 ```
 
-The fixture uses the `minimal` motion format and the `g1_like` humanoid template so it runs without lab assets. Live Viser playback renders real robot geometry when the result metadata or `--robot-spec` points to a URDF-backed `RobotSpec`; without those assets it falls back to a neutral primitive scaffold that is useful for checking timing and object coupling but is not a real G1 visualization.
-
-For real SMPL-X + G1 work, run `fuse_unified.py` on a synced demo (see script docstring), set `format = "smplx"` in the run config, and provide a file-backed G1 `RobotSpec` with `urdf_path` for Viser playback. When viewing an older result that lacks robot asset metadata, pass the model explicitly:
-
-```bash
-uv run retarget view --result skateboarding_retarget.npz --live --robot-spec /path/to/g1/robot.toml
-```
-
-The default profile is intentionally small and robust: Laplacian + smoothness objectives with joint-limit and trust-region constraints. Add foot-contact, non-penetration, or self-collision constraints in `run_config.toml` when you are ready to tune the synthetic clip or run against real assets.
+Live robot playback requires a valid URDF. Missing robot assets are treated as a
+setup error rather than drawn as point or line primitives.

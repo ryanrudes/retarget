@@ -7,7 +7,8 @@ The checked-in fixture is synthetic because the repository cannot ship lab motio
 | Script | Purpose |
 |--------|---------|
 | `_synthetic.py` | Synthetic motion, deck samples, and board trajectory (no external data) |
-| `fuse_motion.py` | Export `data/skate_motion.npz`, `data/deck_samples.npy`, `data/board_trajectory.npz` |
+| `fuse_motion.py` | Synthetic export to `data/` (no lab data) |
+| `fuse_unified.py` | Real pipeline: `motion-sync` `synced.npz` → same NPZ layout for retarget |
 | `probe_mapping.py` | Print `resolved_link_mapping()` for the humanoid template |
 | `run_retarget.py` | Full Python API retarget → `skateboarding_retarget.npz` |
 | `run_config.toml` | Same job via CLI (run `fuse_motion.py` first) |
@@ -30,7 +31,7 @@ uv run retarget view --result skateboarding_retarget.npz --live
 
 The fixture uses the `minimal` motion format and the `g1_like` humanoid template so it runs without lab assets. Live Viser playback renders real robot geometry when the result metadata or `--robot-spec` points to a URDF-backed `RobotSpec`; without those assets it falls back to a neutral primitive scaffold that is useful for checking timing and object coupling but is not a real G1 visualization.
 
-For real SMPL-X + G1 work, set `format = "smplx"`, provide a file-backed or asset-store-backed G1 `RobotSpec` with `urdf_path` for Viser playback, and replace `data/skate_motion.npz` with your fused export. When viewing an older result that lacks robot asset metadata, pass the model explicitly:
+For real SMPL-X + G1 work, run `fuse_unified.py` on a synced demo (see script docstring), set `format = "smplx"` in the run config, and provide a file-backed G1 `RobotSpec` with `urdf_path` for Viser playback. When viewing an older result that lacks robot asset metadata, pass the model explicitly:
 
 ```bash
 uv run retarget view --result skateboarding_retarget.npz --live --robot-spec /path/to/g1/robot.toml

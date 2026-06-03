@@ -23,8 +23,22 @@ Typed specs and results passed through the pipeline.
 ::: retarget.scene.spec.TerrainSpec
 
 ::: retarget.motion.spec.MotionSequence
+    options:
+      members:
+        - name
+        - joint_names
+        - joint_positions
+        - fps
+        - root_poses
+        - metadata
+        - contacts
 
 ::: retarget.motion.spec.MotionFormatSpec
+    options:
+      members:
+        - joint_names
+
+::: retarget.motion.loaders.load_motion
 
 ## Robots
 

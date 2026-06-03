@@ -10,7 +10,7 @@ hide:
 The implementation is independent of the holosoma reference repository.
 
 !!! tip "First time here?"
-    Jump to [Quickstart](quickstart.md) for install, a one-command run, and CI checks. Skim [Architecture](architecture.md) when you want the mental model. With Jupyter running locally, flip **Live** on (bottom-right), then use the icons on the Python tab to run code.
+    Jump to [Quickstart](quickstart.md) for install, a one-command run, and CI checks. Read [Introduction](introduction.md) for a complete research use case (what to build upstream vs. what `retarget` consumes). Follow the [Tutorials](tutorials/index.md) for shorter step-by-step lessons. Skim [Architecture](architecture.md) when you want the mental model. With Jupyter running locally, flip **Live** on (bottom-right), then use the icons on the Python tab to run code.
 
 === "CLI"
 
@@ -42,6 +42,8 @@ The implementation is independent of the holosoma reference repository.
 | Goal | Page |
 |------|------|
 | Run something in 60 seconds | [Quickstart](quickstart.md) |
+| Map a real project (sensors → problem) | [Introduction](introduction.md) |
+| Learn by doing (guided paths) | [Tutorials](tutorials/index.md) |
 | Understand the pipeline | [Architecture](architecture.md) |
 | Frames, units, conventions | [Coordinate Conventions](coordinate-conventions.md) |
 | Extend the toolkit | [Extending](adding-a-robot.md) |

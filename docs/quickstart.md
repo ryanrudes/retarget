@@ -1,5 +1,7 @@
 # Quickstart
 
+After this smoke test, read [Introduction](introduction.md) for a full research-style walkthrough (sensors → `MotionSequence` → scene → robot). For shorter hands-on lessons, see [Tutorials](tutorials/index.md).
+
 ```bash
 uv sync --extra dev
 uv run retarget doctor

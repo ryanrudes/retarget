@@ -9,4 +9,4 @@ End-to-end guides for assets, batch runs, export, and debugging:
 | [Export and Visualization](export-visualization.md) | NPZ export, MuJoCo XML, viewers |
 | [Troubleshooting](troubleshooting.md) | Common failures and diagnostics |
 
-For a single run from the shell, start with [Quickstart](quickstart.md).
+For a single run from the shell, start with [Quickstart](quickstart.md) or the [Your first retarget](tutorials/your-first-retarget.md) tutorial.

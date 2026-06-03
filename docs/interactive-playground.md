@@ -5,16 +5,18 @@
 
 On any page with Python or shell examples, use the icon buttons on the top-right of each block: **edit**, **run**, **reset**, **copy**. Edit opens a syntax-highlighted editor; run shows output below. Reset restores the original snippet.
 
-## Setup (two terminals)
+## Setup
 
-**Terminal 1 — docs**
+**Docs** (from the repo root):
 
 ```bash
 uv sync --extra dev
 uv run mkdocs serve
 ```
 
-**Terminal 2 — Jupyter** (from the repo root)
+While `mkdocs serve` is running, the header **Live** switch can **start Jupyter for you** if it is installed (`uv sync --extra dev`) but not running yet.
+
+**Optional — start Jupyter yourself** in a second terminal:
 
 ```bash
 ./scripts/docs-jupyter.sh
@@ -24,7 +26,7 @@ Defaults: token `retarget-docs`, Jupyter at `http://127.0.0.1:8888`, docs at `ht
 
 ## Enable
 
-Use the bottom-right control: **Inactive** → flip the switch to **Live** (once per browser session). If Jupyter is not running, the status shows **Uninstalled**.
+Use the **Live** control in the top header (next to search): **Inactive** → flip the switch to **Live** (once per browser session). If Jupyter is not running, the status shows **Not running** — click the switch to start it (local `mkdocs serve` only) or run `./scripts/docs-jupyter.sh` yourself.
 
 ## Try it
 
@@ -54,11 +56,12 @@ list(motion.keys())
 | Symptom | Fix |
 |---------|-----|
 | Run asks to turn on Live | Flip the switch so the status reads **Live**. |
-| Status is **Uninstalled** | Start Jupyter (`./scripts/docs-jupyter.sh`), then click the switch to retry. |
+| Status is **Not running** | With `mkdocs serve` running, click the switch to auto-start Jupyter. Or run `./scripts/docs-jupyter.sh` in another terminal, then click again. |
+| Launcher 404 in MkDocs logs | Restart `mkdocs serve` once so the Jupyter helper loads (listens on `http://127.0.0.1:8889`). You should see `Live-code Jupyter launcher at http://127.0.0.1:8889/...` in the terminal. |
 | Could not connect | Start Jupyter via `./scripts/docs-jupyter.sh`. |
-| CORS errors / “Uninstalled” | Restart Jupyter via `./scripts/docs-jupyter.sh` (allows both `localhost` and `127.0.0.1`). Open docs at the same host you used before, or set `JUPYTER_ALLOW_ORIGIN_PAT`. |
+| CORS errors / **Not running** | Restart Jupyter via `./scripts/docs-jupyter.sh` (allows both `localhost` and `127.0.0.1`). Open docs at the same host you used before, or set `JUPYTER_ALLOW_ORIGIN_PAT`. |
 | Stuck on **Connecting…** | Hard-refresh the docs tab (`Cmd+Shift+R`). Stop Jupyter, run `pkill -f "ipykernel_launcher.*retarget"` to clear orphaned kernels, start `./scripts/docs-jupyter.sh` again, then toggle Live off and on. |
 | Jupyter log spam (`Kernel does not exist` / channels 404) | Same as above — usually stale kernels from earlier failed connects. |
 | `ModuleNotFoundError: retarget` | Run Jupyter with `uv run` from the repo root after `uv sync --extra dev`. |
 
-API reference signatures are not wired to the kernel.
+API reference signatures are not wired to the kernel. Elsewhere in the docs, hover a `retarget` symbol in a code block for its API tooltip, or click to jump to the definition.

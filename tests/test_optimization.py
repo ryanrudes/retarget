@@ -1,6 +1,9 @@
 import numpy as np
 
 import retarget.optimization.solvers as solver_module
+from retarget import RetargetingProblem, SceneSpec, TaskKind
+from retarget.kinematics.backends import SimpleKinematicsBackend
+from retarget.motion import MotionSequence
 from retarget.optimization import (
     ConstraintSpec,
     CvxpyClarabelSolver,
@@ -10,9 +13,12 @@ from retarget.optimization import (
     OptimizationProfile,
     QuadraticProblem,
     SolverSpec,
+    TermContext,
     create_solver,
     resolve_solver_backend_name,
 )
+from retarget.optimization.terms import LinkTrackingObjective
+from retarget.robots import robots
 
 
 def test_numpy_solver_respects_bounds_and_trust_region():
@@ -101,3 +107,58 @@ def test_task_profile_presets_include_scene_constraints():
     assert object_profile.constraint("non_penetration").parameters["links"] == ("left_hand",)
     assert climbing_profile.name == "climbing"
     assert climbing_profile.constraint("non_penetration").parameters["scene_clearance"] == 0.02
+
+
+def test_link_tracking_objective_builds_active_weighted_rows():
+    robot = robots.get("synthetic_humanoid")
+    backend = SimpleKinematicsBackend(robot)
+    qpos = np.zeros(robot.qpos_size(), dtype=np.float64)
+    qpos[3] = 1.0
+    current, _jacobians = backend.point_jacobians(qpos, ("left_toe",))
+    target = current.copy()
+    target[0, 2] += 0.1
+    motion = MotionSequence(
+        name="targets",
+        joint_names=("Pelvis",),
+        joint_positions=np.zeros((1, 1, 3), dtype=np.float64),
+        metadata={
+            "link_targets": {
+                "names": ("left_toe", "right_toe"),
+                "positions": np.asarray([[target[0], [0.0, 0.0, 0.0]]], dtype=np.float64),
+                "weights": np.asarray([[4.0, 0.0]], dtype=np.float64),
+                "masks": np.asarray([[True, True]], dtype=bool),
+            }
+        },
+    )
+    problem = RetargetingProblem(
+        name="link_tracking_test",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        scene=SceneSpec.robot_only(),
+    )
+    context = TermContext(
+        problem=problem,
+        backend=backend,
+        q_current=qpos,
+        q_previous=qpos,
+        frame_idx=0,
+        frame_contacts={},
+        robot_point_names=("left_toe",),
+        robot_points=current,
+        robot_jacobians=np.zeros((1, 3, robot.dof), dtype=np.float64),
+        environment_points=np.zeros((0, 3), dtype=np.float64),
+        adjacency=((),),
+        target_laplacian=np.zeros((1, 3), dtype=np.float64),
+        reference_pose=None,
+        joint_lower=np.full(robot.dof, -1.0, dtype=np.float64),
+        joint_upper=np.full(robot.dof, 1.0, dtype=np.float64),
+        current_joints=np.zeros(robot.dof, dtype=np.float64),
+    )
+
+    contributions = LinkTrackingObjective().build(context, ObjectiveSpec(name="link_tracking"))
+
+    assert len(contributions) == 1
+    contribution = contributions[0]
+    assert contribution.matrix.shape == (3, robot.dof)
+    assert np.allclose(contribution.target, [0.0, 0.0, 0.2])

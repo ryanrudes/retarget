@@ -78,6 +78,37 @@ class SmoothnessObjective:
 
 
 @dataclass(frozen=True)
+class LinkTrackingObjective:
+    """Track named robot links to per-frame world-space target positions."""
+
+    weight: float = 1.0
+    name: str = "link_tracking"
+
+    def describe(self) -> str:
+        """Return a short label for logs and diagnostics."""
+
+        return "Track robot links to motion-provided target positions."
+
+    def build(self, context: TermContext, spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        """Build link-position tracking rows from ``motion.metadata['link_targets']``."""
+
+        targets = _link_targets_for_frame(context, spec)
+        if targets is None:
+            return ()
+        names, positions, weights = targets
+        current_positions, current_jacobians = context.backend.point_jacobians(context.q_current, names)
+        matrix = current_jacobians.reshape(3 * len(names), context.dof)
+        target = (positions - current_positions).reshape(-1)
+        scales = np.repeat(np.sqrt(weights), 3)
+        return (
+            ObjectiveContribution(
+                matrix=matrix * scales[:, None],
+                target=target * scales,
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class NominalTrackingObjective:
     """Pull selected joints toward the robot's nominal posture."""
 
@@ -376,6 +407,70 @@ def self_collision_constraints(*, context: TermContext, spec: ConstraintSpec) ->
     return constraints
 
 
+def _link_targets_for_frame(
+    context: TermContext,
+    spec: ObjectiveSpec,
+) -> tuple[tuple[str, ...], FloatArray, FloatArray] | None:
+    raw = context.problem.motion.metadata.get("link_targets")
+    if not isinstance(raw, dict):
+        return None
+    names = _link_target_names(raw)
+    positions = np.asarray(raw.get("positions"), dtype=np.float64)
+    if positions.ndim != 3 or positions.shape[1] != len(names) or positions.shape[2] != 3:
+        raise ValueError("motion metadata link_targets.positions must have shape (frames, links, 3)")
+    if context.frame_idx >= positions.shape[0]:
+        return None
+
+    weights = _link_target_weights(raw.get("weights"), positions.shape[:2])
+    masks = _link_target_masks(raw.get("masks"), positions.shape[:2])
+    frame_positions = positions[context.frame_idx]
+    frame_weights = weights[context.frame_idx] * float(spec.parameters.get("weight_scale", 1.0))
+    finite = np.isfinite(frame_positions).all(axis=1)
+    active = masks[context.frame_idx] & finite & (frame_weights > 0.0)
+    if not np.any(active):
+        return None
+    active_indices = np.flatnonzero(active)
+    active_names = tuple(names[int(idx)] for idx in active_indices)
+    return active_names, frame_positions[active_indices], frame_weights[active_indices]
+
+
+def _link_target_names(raw: dict[str, Any]) -> tuple[str, ...]:
+    value = raw.get("names", raw.get("link_names"))
+    if value is None:
+        raise ValueError("motion metadata link_targets requires names")
+    array = np.asarray(value)
+    names = (str(array.reshape(()).item()),) if array.shape == () else tuple(str(name) for name in array.tolist())
+    if not names:
+        raise ValueError("motion metadata link_targets.names must not be empty")
+    return names
+
+
+def _link_target_weights(value: Any, shape: tuple[int, int]) -> FloatArray:
+    frames, links = shape
+    if value is None:
+        return np.ones((frames, links), dtype=np.float64)
+    weights = np.asarray(value, dtype=np.float64)
+    if weights.shape == ():
+        return np.full((frames, links), float(weights), dtype=np.float64)
+    if weights.shape == (links,):
+        return np.tile(weights.reshape(1, links), (frames, 1))
+    if weights.shape == (frames, links):
+        return weights
+    raise ValueError("motion metadata link_targets.weights must be scalar, (links,), or (frames, links)")
+
+
+def _link_target_masks(value: Any, shape: tuple[int, int]) -> NDArray[np.bool_]:
+    frames, links = shape
+    if value is None:
+        return np.ones((frames, links), dtype=bool)
+    masks = np.asarray(value, dtype=bool)
+    if masks.shape == (links,):
+        return np.tile(masks.reshape(1, links), (frames, 1))
+    if masks.shape == (frames, links):
+        return masks
+    raise ValueError("motion metadata link_targets.masks must have shape (links,) or (frames, links)")
+
+
 def _parameter(spec: ConstraintSpec, name: str, default: float) -> float:
     return float(spec.parameters.get(name, default))
 
@@ -482,6 +577,7 @@ def _pairs(spec: ConstraintSpec) -> tuple[tuple[str, str], ...] | None:
 
 
 objective_terms.register(Objective.LAPLACIAN, LaplacianObjective())
+objective_terms.register(Objective.LINK_TRACKING, LinkTrackingObjective())
 objective_terms.register(Objective.SMOOTHNESS, SmoothnessObjective())
 objective_terms.register(Objective.NOMINAL_TRACKING, NominalTrackingObjective())
 

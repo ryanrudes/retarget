@@ -124,11 +124,13 @@ class Objective(StrEnum):
 
     Attributes:
         LAPLACIAN (str): Interaction-mesh Laplacian deformation objective.
+        LINK_TRACKING (str): Track named robot links to per-frame world-space target points.
         SMOOTHNESS (str): Temporal smoothness on generalized coordinates.
         NOMINAL_TRACKING (str): Track a nominal pose trajectory.
     """
 
     LAPLACIAN = "laplacian"
+    LINK_TRACKING = "link_tracking"
     SMOOTHNESS = "smoothness"
     NOMINAL_TRACKING = "nominal_tracking"
 

@@ -22,6 +22,8 @@
   let scrollRaf = 0;
   /** @type {string | null} */
   let activeId = null;
+  /** @type {string | null} */
+  let highlightId = null;
   /** @type {MutationObserver | undefined} */
   let classObserver;
   let reconciling = false;
@@ -159,25 +161,68 @@
 
   function clearAllTocHighlights() {
     activeId = null;
+    highlightId = null;
     for (const nav of allTocNavs()) {
       stripMaterialTocState(nav);
     }
   }
 
   /**
-   * @param {string | null} id
+   * When a collapsible branch is closed, its child TOC links are hidden — keep the
+   * yellow indicator on the collapsed section header instead of a missing child.
+   *
+   * @param {string} id
+   * @param {HTMLElement} nav
    */
-  function applyActiveId(id) {
+  function resolveHighlightId(id, nav) {
+    const link = [...nav.querySelectorAll(".md-nav__link")].find((candidate) => {
+      const href = candidate.getAttribute("href");
+      return (
+        href?.includes("#") && decodeURIComponent(candidate.hash.slice(1)) === id
+      );
+    });
+    if (!link) {
+      return id;
+    }
+
+    let resolvedLink = link;
+    let el = link.parentElement;
+    while (el && el !== nav) {
+      if (
+        el instanceof HTMLElement &&
+        el.matches("li.retarget-toc-collapsible.retarget-toc-collapsed")
+      ) {
+        const sectionLink = el.querySelector(":scope > a.md-nav__link");
+        if (sectionLink) {
+          resolvedLink = sectionLink;
+        }
+      }
+      el = el.parentElement;
+    }
+
+    return decodeURIComponent(resolvedLink.hash.slice(1));
+  }
+
+  /**
+   * @param {string | null} id
+   * @param {{ exact?: boolean }} [options]
+   */
+  function applyActiveId(id, options = {}) {
     clearAllTocHighlights();
     if (!id) return;
 
     activeId = id;
+    highlightId = id;
+
     for (const nav of allTocNavs()) {
+      const displayId = options.exact ? id : resolveHighlightId(id, nav);
+      highlightId = displayId;
+
       for (const link of nav.querySelectorAll(".md-nav__link")) {
         const href = link.getAttribute("href");
         if (!href || !href.includes("#")) continue;
         const linkId = decodeURIComponent(link.hash.slice(1));
-        if (linkId === id) {
+        if (linkId === displayId) {
           link.setAttribute(ACTIVE_ATTR, "true");
         }
       }
@@ -304,7 +349,7 @@
     }
     scrollToEntry(entry);
     pinActive(index);
-    applyActiveId(entry.el.id);
+    applyActiveId(entry.el.id, { exact: true });
     requestAnimationFrame(() => ensureActiveTocVisible(nav));
   }
 
@@ -330,7 +375,7 @@
             href && href.includes("#")
               ? decodeURIComponent(link.hash.slice(1))
               : "";
-          const shouldBeActive = linkId === activeId;
+          const shouldBeActive = linkId === highlightId;
           const isActive = link.getAttribute(ACTIVE_ATTR) === "true";
           if (shouldBeActive && !isActive) {
             link.setAttribute(ACTIVE_ATTR, "true");
@@ -369,6 +414,7 @@
   }
 
   document.addEventListener("click", onTocClick);
+  document.addEventListener("retarget-toc-collapse-change", scheduleUpdate);
   window.addEventListener("scroll", scheduleUpdate, { passive: true });
   window.addEventListener("resize", scheduleUpdate, { passive: true });
   if ("onscrollend" in window) {

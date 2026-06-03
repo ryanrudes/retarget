@@ -34,6 +34,7 @@ function setExpanded(item, expanded) {
   item.classList.toggle("retarget-toc-collapsed", !expanded);
   const toggle = item.querySelector(":scope > .retarget-toc-toggle");
   toggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  document.dispatchEvent(new CustomEvent("retarget-toc-collapse-change"));
 }
 
 /**

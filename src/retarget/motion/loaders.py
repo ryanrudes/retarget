@@ -110,6 +110,9 @@ class NpzMotionLoader:
             metadata["height_m"] = float(np.asarray(data["height"]).reshape(()))
         if "height_m" in data:
             metadata["height_m"] = float(np.asarray(data["height_m"]).reshape(()))
+        link_targets = _link_targets_from_npz(data, frame_count=positions.shape[0])
+        if link_targets is not None:
+            metadata["link_targets"] = link_targets
         fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
@@ -217,6 +220,46 @@ def _contacts_from_npz(data: Any, spec: MotionFormatSpec) -> Any:
         {name: bool(values[frame_idx, contact_idx]) for contact_idx, name in enumerate(names)}
         for frame_idx in range(values.shape[0])
     )
+
+
+def _link_targets_from_npz(data: Any, *, frame_count: int) -> dict[str, Any] | None:
+    has_names = "link_target_names" in data or "link_names" in data
+    has_positions = "link_target_positions" in data
+    if not has_names and not has_positions:
+        return None
+    if not has_names or not has_positions:
+        raise KeyError("link targets require link_target_names and link_target_positions")
+    names = _string_tuple(data["link_target_names"] if "link_target_names" in data else data["link_names"])
+    positions = np.asarray(data["link_target_positions"], dtype=np.float64)
+    if (
+        positions.ndim != 3
+        or positions.shape[0] != frame_count
+        or positions.shape[1] != len(names)
+        or positions.shape[2] != 3
+    ):
+        raise ValueError("link_target_positions must have shape (frames, link_target_names, 3)")
+    out: dict[str, Any] = {"names": names, "positions": positions}
+    if "link_target_weights" in data:
+        out["weights"] = _validate_link_target_weights(data["link_target_weights"], frame_count, len(names))
+    if "link_target_masks" in data:
+        out["masks"] = _validate_link_target_masks(data["link_target_masks"], frame_count, len(names))
+    if "link_target_source" in data:
+        out["source"] = _scalar_string(data["link_target_source"])
+    return out
+
+
+def _validate_link_target_weights(value: Any, frames: int, links: int) -> np.ndarray:
+    weights = np.asarray(value, dtype=np.float64)
+    if weights.shape in {(), (links,), (frames, links)}:
+        return weights
+    raise ValueError("link_target_weights must be scalar, (links,), or (frames, links)")
+
+
+def _validate_link_target_masks(value: Any, frames: int, links: int) -> np.ndarray:
+    masks = np.asarray(value, dtype=bool)
+    if masks.shape in {(links,), (frames, links)}:
+        return masks
+    raise ValueError("link_target_masks must have shape (links,) or (frames, links)")
 
 
 def _root_poses_from_mapping(

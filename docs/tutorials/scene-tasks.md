@@ -15,36 +15,22 @@ The fastest path—ground contact and foot constraints without extra geometry:
 === "CLI"
 
     ```bash
-    uv run retarget run \
-      --motion tests/fixtures/minimal_motion.json \
-      --format minimal \
-      --robot synthetic_humanoid \
-      --task-kind robot_only \
-      --output robot_only.npz
+    uv run retarget run --motion tests/fixtures/minimal_motion.json --format minimal \
+      --robot synthetic_humanoid --task-kind robot_only --output robot_only.npz
     ```
 
-Same as the Quickstart minimal run with a different output name—see [Quickstart](../quickstart.md).
+    Full CLI walkthrough and flags: [Your first retarget — Step 1](your-first-retarget.md#step-1--run-from-the-cli).
 
 === "Python"
 
     ```python
-    from retarget import Retargeter, RetargetingProblem, SceneSpec, TaskKind
-    from retarget.motion import load_motion, motion_formats
-    from retarget.robots import robots
+    from retarget import SceneSpec, TaskKind
 
-    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
-    problem = RetargetingProblem(
-        name="robot_only",
-        task_kind=TaskKind.ROBOT_ONLY,
-        robot=robots.get("synthetic_humanoid"),
-        motion=motion,
-        motion_format=motion_formats.get("minimal"),
-        scene=SceneSpec.robot_only(ground_size=15, ground_range=(-1.0, 1.0)),
-    )
-    Retargeter().run(problem).save_npz("robot_only.npz")
+    scene = SceneSpec.robot_only(ground_size=15, ground_range=(-1.0, 1.0))
+    # RetargetingProblem(..., task_kind=TaskKind.ROBOT_ONLY, scene=scene)
     ```
 
-Tune the ground grid with `[scene]` in a run config (`ground_size`, `ground_range`).
+    Full problem setup: [Your first retarget — Step 4](your-first-retarget.md#step-4--same-job-in-python). Tune the ground grid with `[scene]` in a run config (`ground_size`, `ground_range`).
 
 ## Object interaction
 

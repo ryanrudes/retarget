@@ -33,50 +33,9 @@ Import from the package root for ergonomics:
 from retarget import Retargeter, RetargetingProblem, SceneSpec, TaskKind
 ```
 
-## Minimal end-to-end script
+For the minimal robot-only script, see [Your first retarget — Step 4](your-first-retarget.md#step-4--same-job-in-python) and `examples/basic_robot_only.py`.
 
-`examples/basic_robot_only.py` animates the pelvis forward and saves a result:
-
-```python
-import numpy as np
-from retarget import Retargeter, RetargetingProblem, SceneSpec, TaskKind
-from retarget.motion import MotionSequence, motion_formats
-from retarget.robots import robots
-
-fmt = motion_formats.get("minimal")
-names = fmt.joint_names
-pos = np.zeros((20, len(names), 3))
-pos[:, names.index("Pelvis"), 0] = np.linspace(0.0, 0.2, 20)
-pos[:, names.index("L_Toe"), 2] = -0.8
-pos[:, names.index("R_Toe"), 2] = -0.8
-
-motion = MotionSequence(
-    name="basic",
-    joint_names=names,
-    joint_positions=pos,
-    fps=30,
-    metadata={"height_m": 1.7},
-)
-problem = RetargetingProblem(
-    name="basic",
-    task_kind=TaskKind.ROBOT_ONLY,
-    robot=robots.get("synthetic_humanoid"),
-    motion=motion,
-    motion_format=fmt,
-    scene=SceneSpec.robot_only(),
-)
-result = Retargeter().run(problem)
-result.save_npz("basic_robot_only.npz")
-print("qpos", result.qpos.shape, "fps", result.fps)
-```
-
-Run from the repo root so relative imports and fixture paths stay consistent:
-
-```bash
-uv run python examples/basic_robot_only.py
-```
-
-Pytest also executes every `examples/*.py` in a temp directory—keep scripts self-contained and avoid assuming repo-local output paths in CI.
+Pytest runs a fixed set of example scripts from a temporary working directory (`tests/test_examples.py`: `basic_robot_only.py`, `batch_and_evaluate.py`, `climbing_terrain.py`, `custom_motion_format.py`, `custom_objective.py`, `custom_robot.py`, `object_interaction.py`, `skateboarding/run_retarget.py`). Keep those scripts self-contained and free of repo-local output assumptions.
 
 ## Load config files in Python
 

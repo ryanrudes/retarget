@@ -35,6 +35,8 @@ def _page_priority(page_url: str) -> int:
         return 100
     if page_url.endswith("/api/motion-sync/"):
         return 45
+    if page_url.endswith("/api/motion-sync-reference/"):
+        return 48
     if page_url.endswith("/api/contact-detection/"):
         return 45
     if page_url.endswith("/api/models/"):

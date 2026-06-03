@@ -70,9 +70,7 @@ uv run retarget evaluate \
   --output tutorials_batch_results/clip_a.metrics.json
 ```
 
-### Built-in metrics (summary)
-
-Reports include `optimization_cost`, `foot_sliding`, `contact_preservation`, and `penetration` (definitions and partial-report behavior in [Batch and evaluation](../batch-evaluation.md)).
+Metric names, definitions, and partial-report behavior: [Batch and evaluation](../batch-evaluation.md).
 
 ## Evaluate an entire batch
 

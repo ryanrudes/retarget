@@ -13,6 +13,7 @@ Generated from docstrings in the installed package. Use the sidebar sections bel
 | Section | Contents |
 |---------|----------|
 | [motion_sync](motion-sync.md) | `SyncClip`, sessions, mocap/video/contact schemas (sibling repo) |
+| [motion_sync (full)](motion-sync-reference.md) | Full package tree (`show_submodules`) for discoverability |
 | [contact_detection](contact-detection.md) | Foot-support classification algorithms (sibling repo) |
 | [Pipeline](pipeline.md) | `Retargeter`, problem spec, engine, batch runner |
 | [Data models](models.md) | Results, scene, motion, robot specs |

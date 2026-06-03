@@ -20,7 +20,7 @@ uv run retarget doctor
 
 You should see registries for motion formats, robots, objectives, and constraints. Missing optional packages (MuJoCo, Viser, CVXPY) are fine for this walkthrough; the default solver falls back to the built-in NumPy/SciPy path when CVXPY is not installed.
 
-## Step 1 — Run from the CLI
+## Step 1 — Run from the CLI { #step-1--run-from-the-cli }
 
 The smallest motion fixture lives under `tests/fixtures/`. It uses the `minimal` format (eleven named joints in Z-up meters).
 
@@ -69,7 +69,7 @@ print(result.metadata.get("provenance", {}).get("task_kind"))
 
 Key fields are documented in [Result schema](../result-schema.md). Prefer `metadata_json` in raw NPZ inspection; `RetargetingResult` already parses provenance for you.
 
-## Step 4 — Same job in Python
+## Step 4 — Same job in Python { #step-4--same-job-in-python }
 
 The CLI is a thin wrapper around `Retargeter` and `RetargetingProblem`. Equivalent code:
 
@@ -102,5 +102,6 @@ Compare CLI and API outputs with the same evaluation command, swapping the file 
 ## Next steps
 
 - Put the run spec in version control: [Run configs](run-configs.md)
+- [Python API](python-api.md) for registries, config load, export from code
 - Prepare your own mocap: [Motion input](motion-input.md)
 - Add objects or terrain: [Scenes and task kinds](scene-tasks.md)

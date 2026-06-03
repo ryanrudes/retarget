@@ -87,10 +87,10 @@ nav:
   - Tutorials:
       - Overview: tutorials/index.md
       - Your first retarget: tutorials/your-first-retarget.md
+      - Python API: tutorials/python-api.md
       - Run configs: tutorials/run-configs.md
       - Motion input: tutorials/motion-input.md
       - Scenes and task kinds: tutorials/scene-tasks.md
-      - Python API: tutorials/python-api.md
       - Batch and metrics: tutorials/batch-and-metrics.md
       - Export and view: tutorials/export-and-view.md
   - Architecture: architecture.md
@@ -113,6 +113,7 @@ nav:
   - API:
       - Overview: api/index.md
       - motion_sync: api/motion-sync.md
+      - "motion_sync (full)": api/motion-sync-reference.md
       - contact_detection: api/contact-detection.md
       - Pipeline: api/pipeline.md
       - Data models: api/models.md

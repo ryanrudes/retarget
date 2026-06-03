@@ -122,36 +122,50 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   display: block;
 }
 
+/* Label left, chevron right on the same row; children full width below. */
 .md-nav--secondary .retarget-toc-collapsible {
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.2rem;
 }
 
-.md-nav--secondary .retarget-toc-toggle {
-  position: absolute;
-  left: 0;
-  top: 0.35rem;
-  z-index: 1;
-  width: 1.1rem;
-  height: 1.1rem;
+.md-nav--secondary .retarget-toc-collapsible > .md-nav__link {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  padding-right: 0 !important;
+}
+
+.md-nav--secondary .retarget-toc-collapsible > .retarget-toc-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: center;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.05rem;
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 0.15rem;
+  border-radius: 0.1rem;
   background: transparent;
   color: #a599e9;
   cursor: pointer;
-  line-height: 1;
-  font: inherit;
+  line-height: 0;
 }
 
 .md-nav--secondary .retarget-toc-toggle::before {
   content: "";
   display: block;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin: 0.2rem auto;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+  width: 0.26rem;
+  height: 0.26rem;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
   transform: rotate(-45deg);
   transition: transform 0.15s ease;
 }
@@ -160,8 +174,9 @@ body.api-nav-hovering .md-typeset :not(pre) > code {
   transform: rotate(45deg);
 }
 
-.md-nav--secondary .retarget-toc-collapsible > .md-nav__link {
-  padding-left: 1.15rem !important;
+.md-nav--secondary .retarget-toc-collapsible > nav.md-nav {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 .md-nav--secondary .retarget-toc-toggle:hover,

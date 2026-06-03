@@ -71,7 +71,7 @@ export function setupCollapsibleToc(nav) {
       setExpanded(item, !item.classList.contains("retarget-toc-expanded"));
     });
 
-    link?.insertAdjacentElement("beforebegin", toggle);
+    link?.insertAdjacentElement("afterend", toggle);
   }
 }
 

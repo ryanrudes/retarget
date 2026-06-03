@@ -52,7 +52,7 @@ class MyExporter:
         )
 ```
 
-Visualization uses the same extension pattern through `visualizers`. `retarget view` defaults to **dry-run** (Rich summary of frames, DOF, warnings, and provenance) and needs no optional dependencies. Pass `--live` for the Viser-backed viewer after `uv sync --extra viz`. Robot playback in live mode requires URDF-backed geometry from result metadata or `--robot-spec <path>` (for example an asset-store `robot.toml`). Missing URDF assets are reported as setup errors instead of being drawn as primitives.
+Visualization uses the same extension pattern through `visualizers`. `retarget view` defaults to **dry-run** (Rich summary of frames, DOF, warnings, and provenance) and needs no optional dependencies. Pass `--live` for the Viser-backed viewer after `uv sync --extra viz`. Use the **Play** checkbox and **FPS** control in the Viser sidebar to animate the frame slider; scrub **Frame** manually when playback is paused. Optional `--playback-fps` sets the initial FPS (defaults to the result frame rate). Robot playback in live mode requires URDF-backed geometry from result metadata or `--robot-spec <path>` (for example an asset-store `robot.toml`). Missing URDF assets are reported as setup errors instead of being drawn as primitives.
 
 Playback adapters share a typed `PlaybackData` model:
 

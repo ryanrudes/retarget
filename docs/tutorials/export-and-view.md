@@ -24,6 +24,8 @@ uv sync --extra viz
 uv run retarget view --result tutorials_first_result.npz --live
 ```
 
+In the Viser sidebar, enable **Play** to animate the trajectory, adjust **FPS** for playback speed, and scrub **Frame** while paused. Pass `--playback-fps 30` to set the initial FPS (defaults to the result frame rate).
+
 If Viser is missing, `--live` fails with an import error; `--dry-run` still works.
 
 Python equivalent:

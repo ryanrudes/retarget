@@ -75,6 +75,7 @@ class ViserVisualizer:
         block: bool = True,
         robot_spec: RobotSpec | None = None,
         show_diagnostics: bool = False,
+        playback_fps: float | None = None,
     ) -> None:
         """Configure Viser server options for live result playback.
 
@@ -84,19 +85,22 @@ class ViserVisualizer:
             block (bool): When ``True``, keep the process alive until interrupted (default).
             robot_spec (RobotSpec | None): Optional spec for URDF-backed rendering and joint mapping.
             show_diagnostics (bool): Overlay human points, root paths, and link diagnostics.
+            playback_fps (float | None): Initial FPS for the playback control (defaults to result fps).
         """
         self.host = host
         self.port = port
         self.block = block
         self.robot_spec = robot_spec
         self.show_diagnostics = show_diagnostics
+        self.playback_fps = playback_fps
 
     def view(self, result: RetargetingResult) -> None:
         """Open an interactive Viser scene for a retargeting result.
 
         Requires the ``retarget[viz]`` extra (``viser``, and optionally ``trimesh`` / URDF extras).
-        Populates a floor grid, URDF-backed robot, optional object mesh or box, and an optional
-        frame slider. Blocks until interrupted when :attr:`block` is ``True``.
+        Populates a floor grid, URDF-backed robot, optional object mesh or box, a frame slider,
+        and playback controls (play/pause and FPS). Blocks until interrupted when
+        :attr:`block` is ``True``.
 
         Args:
             result (RetargetingResult): Solved retargeting output to visualize.
@@ -110,13 +114,14 @@ class ViserVisualizer:
             raise RuntimeError("Install retarget[viz] to use ViserVisualizer") from exc
         playback = build_playback_data(result, robot_spec=self.robot_spec)
         server = viser.ViserServer(host=self.host, port=self.port)
-        _populate_viser_scene(server, playback, show_diagnostics=self.show_diagnostics)
+        gui = _populate_viser_scene(
+            server,
+            playback,
+            show_diagnostics=self.show_diagnostics,
+            playback_fps=self.playback_fps,
+        )
         if self.block:  # pragma: no cover - requires interactive optional dependency
-            try:
-                while True:
-                    time.sleep(1.0)
-            except KeyboardInterrupt:
-                return
+            _run_viser_playback_loop(playback, gui)
 
 
 @dataclass
@@ -139,32 +144,90 @@ class _DiagnosticSceneHandles:
     human_points: Any | None = None
 
 
-def _populate_viser_scene(server: Any, playback: PlaybackData, *, show_diagnostics: bool = False) -> None:
+@dataclass
+class _PlaybackGuiHandles:
+    frame_slider: Any | None = None
+    playing: Any | None = None
+    fps: Any | None = None
+    update_frame: Any | None = None
+
+
+def _populate_viser_scene(
+    server: Any,
+    playback: PlaybackData,
+    *,
+    show_diagnostics: bool = False,
+    playback_fps: float | None = None,
+) -> _PlaybackGuiHandles:
     scene = server.scene
     _add_scene_context(scene)
     frame = playback.frame(0)
     robot_handles = _add_robot_scene(server, playback.robot, frame, show_diagnostics=show_diagnostics)
     object_handles = _add_object_scene(scene, playback.object, frame, show_diagnostics=show_diagnostics)
     diagnostics = _add_diagnostics(scene, playback, frame) if show_diagnostics else _DiagnosticSceneHandles()
+    gui_handles = _PlaybackGuiHandles()
     if hasattr(server, "gui"):
+        update_frame = _make_frame_updater(
+            playback,
+            robot_handles=robot_handles,
+            object_handles=object_handles,
+            diagnostics=diagnostics,
+        )
         slider = _call_if_present(
             server.gui,
             "add_slider",
             "Frame",
             min=0,
-            max=playback.frame_count - 1,
+            max=max(playback.frame_count - 1, 0),
             step=1,
             initial_value=0,
         )
         if slider is not None:
             slider.value = 0
-            _attach_slider_callback(
-                slider,
-                playback,
-                robot_handles=robot_handles,
-                object_handles=object_handles,
-                diagnostics=diagnostics,
-            )
+            gui_handles.frame_slider = slider
+            gui_handles.update_frame = update_frame
+            _attach_frame_callback(slider, update_frame)
+            update_frame(0)
+        gui_handles.playing = _call_if_present(
+            server.gui,
+            "add_checkbox",
+            "Play",
+            initial_value=False,
+        )
+        initial_fps = playback_fps if playback_fps is not None else playback.fps
+        gui_handles.fps = _call_if_present(
+            server.gui,
+            "add_number",
+            "FPS",
+            initial_value=float(initial_fps),
+            min=1.0,
+            max=240.0,
+            step=1.0,
+        )
+    return gui_handles
+
+
+def _run_viser_playback_loop(playback: PlaybackData, gui: _PlaybackGuiHandles) -> None:
+    """Advance the frame slider while playing and sleep according to the FPS control."""
+    slider = gui.frame_slider
+    if slider is None:
+        try:
+            while True:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            return
+    update_frame = gui.update_frame
+    try:
+        while True:
+            if gui.playing is not None and bool(gui.playing.value) and playback.frame_count > 1:
+                next_index = (int(slider.value) + 1) % playback.frame_count
+                slider.value = next_index
+                if update_frame is not None:
+                    update_frame(next_index)
+            fps = float(gui.fps.value) if gui.fps is not None else playback.fps
+            time.sleep(1.0 / max(fps, 1e-6))
+    except KeyboardInterrupt:
+        return
 
 
 def _add_scene_context(scene: Any) -> None:
@@ -369,26 +432,29 @@ def _call_if_present(target: Any, method_name: str, *args: Any, **kwargs: Any) -
     return method(*args, **kwargs)
 
 
-def _attach_slider_callback(
-    slider: Any,
+def _make_frame_updater(
     playback: PlaybackData,
     *,
     robot_handles: _RobotSceneHandles,
     object_handles: _ObjectSceneHandles,
     diagnostics: _DiagnosticSceneHandles,
-) -> None:
-    on_update = getattr(slider, "on_update", None)
-    if not callable(on_update):
-        return
-
-    def update_frame() -> None:
-        frame = playback.frame(int(slider.value))
+) -> Any:
+    def update_frame(frame_index: int) -> None:
+        frame = playback.frame(frame_index)
         _update_robot_scene(playback.robot, robot_handles, frame)
         _update_object_scene(playback.object, object_handles, frame)
         _update_diagnostics(diagnostics, frame)
 
+    return update_frame
+
+
+def _attach_frame_callback(slider: Any, update_frame: Any) -> None:
+    on_update = getattr(slider, "on_update", None)
+    if not callable(on_update):
+        return
+
     def _on_slider_update(_event: Any) -> None:
-        update_frame()
+        update_frame(int(slider.value))
 
     on_update(_on_slider_update)
 
@@ -439,6 +505,7 @@ def view_result(
     dry_run: bool = True,
     robot_spec: RobotSpec | None = None,
     show_diagnostics: bool = False,
+    playback_fps: float | None = None,
 ) -> None:
     """View or summarize a retargeting result via the visualizer registry.
 
@@ -451,12 +518,17 @@ def view_result(
         dry_run (bool): Print a summary instead of launching Viser.
         robot_spec (RobotSpec | None): Optional robot spec for URDF-backed live playback.
         show_diagnostics (bool): Pass through to :class:`ViserVisualizer` for diagnostic overlays.
+        playback_fps (float | None): Initial Viser playback FPS when ``dry_run`` is ``False``.
     """
 
     if dry_run:
         visualizer = visualizers.get(VisualizerName.DRY_RUN)
     else:
-        visualizer = ViserVisualizer(robot_spec=robot_spec, show_diagnostics=show_diagnostics)
+        visualizer = ViserVisualizer(
+            robot_spec=robot_spec,
+            show_diagnostics=show_diagnostics,
+            playback_fps=playback_fps,
+        )
     visualizer.view(result)
 
 

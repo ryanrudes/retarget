@@ -6,7 +6,11 @@ from retarget.core.enums import RunStatus
 from retarget.results import RetargetingResult
 from retarget.robots import RobotSpec
 from retarget.visualization import DryRunVisualizer, build_playback_data
-from retarget.visualization.viewers import _populate_viser_scene
+from retarget.visualization.viewers import (
+    _PlaybackGuiHandles,
+    _populate_viser_scene,
+    _run_viser_playback_loop,
+)
 
 
 def test_build_playback_data_uses_result_root_pose_and_human_points():
@@ -173,6 +177,51 @@ def test_populate_viser_scene_uses_model_oriented_scene_methods_by_default():
     assert all(call[1] != "/retarget/robot" for call in server.scene.calls)
     assert all(call[0] != "point_cloud" for call in server.scene.calls)
     assert server.gui.slider_value == 0
+    assert server.gui.playing is not None
+    assert server.gui.fps_value == 10.0
+
+
+def test_populate_viser_scene_uses_playback_fps_override():
+    result = RetargetingResult(
+        name="viser_fps",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((3, 5), dtype=np.float64),
+        fps=24.0,
+    )
+    playback = build_playback_data(result)
+    server = _FakeViserServer()
+
+    _populate_viser_scene(server, playback, playback_fps=60.0)
+
+    assert server.gui.fps_value == 60.0
+
+
+def test_run_viser_playback_loop_advances_frames_when_playing(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = RetargetingResult(
+        name="loop",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((4, 5), dtype=np.float64),
+        fps=100.0,
+    )
+    playback = build_playback_data(result)
+    slider = _FakeSlider(0)
+    playing = _FakeCheckbox(True)
+    gui = _PlaybackGuiHandles(
+        frame_slider=slider,
+        playing=playing,
+        fps=_FakeNumber(100.0),
+        update_frame=lambda index: setattr(slider, "last_updated", index),
+    )
+
+    def stop_after_one_tick(_duration: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("retarget.visualization.viewers.time.sleep", stop_after_one_tick)
+
+    _run_viser_playback_loop(playback, gui)
+
+    assert slider.value == 1
+    assert slider.last_updated == 1
 
 
 def test_populate_viser_scene_requires_urdf_for_robot_playback():
@@ -241,16 +290,42 @@ class _FakeHandle:
     dimensions: object = None
 
 
+class _FakeCheckbox:
+    def __init__(self, value: bool) -> None:
+        self.value = value
+
+
+class _FakeNumber:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+
+class _FakeSlider:
+    def __init__(self, value: int) -> None:
+        self.value = value
+        self.last_updated: int | None = None
+
+    def on_update(self, callback: object) -> None:
+        self._callback = callback
+
+
 class _FakeGui:
     def __init__(self) -> None:
         self.slider_value: int | None = None
+        self.playing: _FakeCheckbox | None = None
+        self.fps_value: float | None = None
 
     def add_slider(self, _name: str, **kwargs: object) -> object:
         slider = _FakeSlider(int(kwargs["initial_value"]))
         self.slider_value = slider.value
         return slider
 
+    def add_checkbox(self, _name: str, **kwargs: object) -> _FakeCheckbox:
+        playing = _FakeCheckbox(bool(kwargs["initial_value"]))
+        self.playing = playing
+        return playing
 
-class _FakeSlider:
-    def __init__(self, value: int) -> None:
-        self.value = value
+    def add_number(self, _name: str, **kwargs: object) -> _FakeNumber:
+        number = _FakeNumber(float(kwargs["initial_value"]))
+        self.fps_value = number.value
+        return number

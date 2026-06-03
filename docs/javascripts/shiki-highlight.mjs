@@ -122,7 +122,30 @@ async function highlightInlineCodeElement(codeEl, highlighter) {
   codeEl.dataset.shikiHighlighted = "true";
 }
 
+function isMkdocstringsBadgeCode(el) {
+  if (!(el instanceof HTMLElement) || el.tagName !== "CODE") {
+    return false;
+  }
+  if (el.classList.contains("doc-symbol")) {
+    return true;
+  }
+  return Boolean(el.closest(".doc-label, .doc-labels, .doc-label-toc"));
+}
+
+function resetMkdocstringsBadges(root) {
+  for (const el of root.querySelectorAll(
+    "code.doc-symbol.shiki, .doc-label code.shiki, .doc-label-toc code.shiki",
+  )) {
+    const text = el.textContent ?? "";
+    el.classList.remove("shiki", "shiki-inline");
+    delete el.dataset.shikiHighlighted;
+    el.replaceChildren();
+    el.textContent = text;
+  }
+}
+
 async function highlightAll(root) {
+  resetMkdocstringsBadges(root);
   const highlighter = await getHighlighter();
   const blockCodes = new Set();
   const inlineCodes = new Set();
@@ -133,6 +156,10 @@ async function highlightAll(root) {
       return;
     }
     if (el.closest(".highlight") !== null) {
+      return;
+    }
+    /* mkdocstrings badges (def/class/var, property, module-attribute, …) — CSS only */
+    if (isMkdocstringsBadgeCode(el)) {
       return;
     }
     inlineCodes.add(el);

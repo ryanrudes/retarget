@@ -44,8 +44,10 @@ const KERNEL_CONNECT_MS = 25_000;
 const EXECUTE_TIMEOUT_MS = 90_000;
 /** @type {Promise<typeof import('./live-code-codemirror.mjs')> | null>} */
 let editorModulePromise = null;
-/** @type {'uninstalled' | 'inactive' | 'live'} */
+/** @type {'offline' | 'starting' | 'inactive' | 'live'} */
 let connectionState = "inactive";
+/** True when `mkdocs serve` exposes /__retarget/jupyter/* (dev only). */
+let jupyterLauncherAvailable = false;
 
 function isLive() {
   return connectionState === "live";
@@ -169,6 +171,101 @@ async function probeJupyter() {
   } catch {
     return false;
   }
+}
+
+const JUPYTER_LAUNCHER_PATH = "/__retarget/jupyter";
+const JUPYTER_LAUNCHER_FALLBACK = "http://127.0.0.1:8889/__retarget/jupyter";
+/** @type {string | null} */
+let jupyterLauncherBase = null;
+
+async function discoverLauncherBase() {
+  for (const base of [JUPYTER_LAUNCHER_PATH, JUPYTER_LAUNCHER_FALLBACK]) {
+    try {
+      const response = await fetch(`${base}/status`, { method: "GET" });
+      if (!response.ok) {
+        continue;
+      }
+      const data = await response.json();
+      if (data?.launcher) {
+        jupyterLauncherBase = base;
+        return base;
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  jupyterLauncherBase = null;
+  return null;
+}
+
+async function probeLauncher() {
+  return Boolean(jupyterLauncherBase ?? (await discoverLauncherBase()));
+}
+
+async function waitForJupyter(timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await probeJupyter()) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function tryStartJupyter() {
+  const status = document.getElementById("live-code-status");
+  if (!(await probeLauncher())) {
+    return false;
+  }
+
+  connectionState = "starting";
+  updateBarUi();
+
+  try {
+    const base = jupyterLauncherBase ?? (await discoverLauncherBase());
+    if (!base) {
+      connectionState = "offline";
+      updateBarUi();
+      return false;
+    }
+    const response = await fetch(`${base}/start`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      if (status) {
+        status.textContent = "Start failed";
+      }
+      connectionState = "offline";
+      updateBarUi();
+      return false;
+    }
+
+    if (status) {
+      status.textContent = "Starting…";
+    }
+    const ready = await waitForJupyter();
+    if (!ready) {
+      connectionState = "offline";
+      updateBarUi();
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error(error);
+    connectionState = "offline";
+    updateBarUi();
+    return false;
+  }
+}
+
+async function ensureJupyterReachable() {
+  if (await probeJupyter()) {
+    return true;
+  }
+  if (await probeLauncher()) {
+    return tryStartJupyter();
+  }
+  return false;
 }
 
 function withTimeout(promise, ms, message) {
@@ -1076,9 +1173,11 @@ async function handleAction(wrap, action) {
     if (!isLive()) {
       void renderConsole(consoleEl, {
         error:
-          connectionState === "uninstalled"
-            ? "Jupyter is not running — see /interactive-playground/ for setup."
-            : "Turn on Live mode using the switch at the bottom-right.",
+          connectionState === "offline"
+            ? jupyterLauncherAvailable
+              ? "Could not start Jupyter — try ./scripts/docs-jupyter.sh manually."
+              : "Start Jupyter with ./scripts/docs-jupyter.sh — see /interactive-playground/."
+            : "Turn on Live mode using the switch in the header.",
       });
       setRunFailed(wrap, true);
       return;
@@ -1138,24 +1237,56 @@ function wrapAllBlocks() {
   });
 }
 
-function ensureLaunchBar() {
-  let bar = document.getElementById("live-code-bar");
-  if (bar) {
-    return bar;
+function findSearchHeaderAnchor(headerInner) {
+  return (
+    headerInner.querySelector('label[for="__search"]') ??
+    headerInner.querySelector('[data-md-component="search"]') ??
+    headerInner.querySelector('.md-header__option[data-md-component="search"]') ??
+    headerInner.querySelector('form[data-md-component="search"]')?.closest(".md-header__option")
+  );
+}
+
+function mountLaunchBar(bar) {
+  const headerInner = document.querySelector(".md-header__inner");
+  if (!headerInner) {
+    if (bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+    return;
   }
 
-  bar = document.createElement("div");
-  bar.id = "live-code-bar";
-  bar.className = "live-code-bar live-code-bar--inactive";
-  bar.setAttribute("role", "status");
-  bar.innerHTML = [
-    '<span id="live-code-status" class="live-code-bar__status">Inactive</span>',
-    '<button type="button" id="live-code-toggle" class="live-code-bar__toggle"',
-    ' aria-label="Turn on live code" aria-pressed="false">',
-    '<span class="live-code-bar__dot" aria-hidden="true"></span>',
-    "</button>",
-  ].join("");
-  document.body.appendChild(bar);
+  const anchor = findSearchHeaderAnchor(headerInner) ?? headerInner.querySelector(".md-header__option");
+  const placed =
+    bar.parentElement === headerInner &&
+    (anchor ? bar.nextElementSibling === anchor : bar === headerInner.lastElementChild);
+  if (placed) {
+    return;
+  }
+
+  if (anchor) {
+    headerInner.insertBefore(bar, anchor);
+  } else {
+    headerInner.appendChild(bar);
+  }
+}
+
+function ensureLaunchBar() {
+  let bar = document.getElementById("live-code-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "live-code-bar";
+    bar.className = "live-code-bar live-code-bar--inactive";
+    bar.setAttribute("role", "status");
+    bar.innerHTML = [
+      '<button type="button" id="live-code-toggle" class="live-code-bar__toggle"',
+      ' aria-label="Turn on live code" aria-pressed="false">',
+      '<span class="live-code-bar__dot" aria-hidden="true"></span>',
+      "</button>",
+      '<span id="live-code-status" class="live-code-bar__status">Inactive</span>',
+    ].join("");
+  }
+
+  mountLaunchBar(bar);
   return bar;
 }
 
@@ -1170,7 +1301,8 @@ function updateBarUi() {
   bar.className = `live-code-bar live-code-bar--${connectionState}`;
 
   const labels = {
-    uninstalled: "Uninstalled",
+    offline: "Not running",
+    starting: "Starting…",
     inactive: "Inactive",
     live: "Live",
   };
@@ -1180,11 +1312,15 @@ function updateBarUi() {
   toggle.setAttribute("aria-pressed", isOn ? "true" : "false");
   toggle.setAttribute(
     "aria-label",
-    connectionState === "uninstalled"
-      ? "Retry Jupyter connection"
-      : isOn
-        ? "Turn off live code"
-        : "Turn on live code",
+    connectionState === "offline"
+      ? jupyterLauncherAvailable
+        ? "Start Jupyter server"
+        : "Check for Jupyter server"
+      : connectionState === "starting"
+        ? "Starting Jupyter server"
+        : isOn
+          ? "Turn off live code"
+          : "Turn on live code",
   );
 }
 
@@ -1201,7 +1337,7 @@ async function connectLive() {
     console.error(error);
     await resetKernel();
     sessionStorage.removeItem(STORAGE_KEY);
-    connectionState = (await probeJupyter()) ? "inactive" : "uninstalled";
+    connectionState = (await probeJupyter()) ? "inactive" : "offline";
   } finally {
     updateBarUi();
   }
@@ -1220,12 +1356,13 @@ async function refreshInstallState() {
     status.textContent = "Checking…";
   }
 
+  jupyterLauncherAvailable = await probeLauncher();
   const available = await probeJupyter();
   if (!available) {
-    connectionState = "uninstalled";
+    connectionState = "offline";
     void resetKernel();
     sessionStorage.removeItem(STORAGE_KEY);
-  } else if (connectionState === "uninstalled") {
+  } else if (connectionState === "offline" || connectionState === "starting") {
     connectionState = "inactive";
   }
   updateBarUi();
@@ -1233,11 +1370,21 @@ async function refreshInstallState() {
 }
 
 async function onToggleClick() {
-  if (connectionState === "uninstalled") {
-    const available = await refreshInstallState();
-    if (!available) {
+  if (connectionState === "offline") {
+    if (await probeJupyter()) {
+      connectionState = "inactive";
+      updateBarUi();
+    } else if (!(await ensureJupyterReachable())) {
+      await refreshInstallState();
       return;
+    } else {
+      connectionState = "inactive";
+      updateBarUi();
     }
+  }
+
+  if (connectionState === "starting") {
+    return;
   }
 
   const toggle = document.getElementById("live-code-toggle");
@@ -1278,6 +1425,12 @@ async function initPage() {
 
   await refreshInstallState();
 
+  if (wantsLive && connectionState === "offline") {
+    if (await ensureJupyterReachable()) {
+      connectionState = "inactive";
+    }
+  }
+
   if (wantsLive && connectionState === "inactive") {
     activeKernel = null;
     kernelFlight = null;
@@ -1301,7 +1454,7 @@ function scheduleInit() {
 }
 
 window.addEventListener("focus", () => {
-  if (connectionState === "uninstalled") {
+  if (connectionState === "offline") {
     void refreshInstallState();
   }
 });

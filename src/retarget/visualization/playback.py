@@ -27,7 +27,6 @@ class PlaybackFrame(BaseModel):
         qpos (FloatArray): Full generalized coordinates for this frame.
         human_points (FloatArray | None): Source human joint positions ``(points, 3)``, if present.
         robot_points (FloatArray | None): Robot link positions ``(links, 3)``, if present.
-        robot_segments (FloatArray | None): Line segment endpoints ``(segments, 2, 3)``, if present.
         object_points (FloatArray | None): Transformed object sample points ``(points, 3)``, if present.
     """
 
@@ -40,7 +39,6 @@ class PlaybackFrame(BaseModel):
     qpos: FloatArray
     human_points: FloatArray | None = None
     robot_points: FloatArray | None = None
-    robot_segments: FloatArray | None = None
     object_points: FloatArray | None = None
 
     @field_validator("root_position", mode="before")
@@ -79,16 +77,6 @@ class PlaybackFrame(BaseModel):
         arr = as_float_array(value, shape_tail=(3,), name="robot_points")
         if arr.ndim != 2:
             raise ValueError("robot_points must have shape (points, 3)")
-        return arr
-
-    @field_validator("robot_segments", mode="before")
-    @classmethod
-    def _validate_robot_segments(cls, value: Any) -> FloatArray | None:
-        if value is None:
-            return None
-        arr = as_float_array(value, shape_tail=(3,), name="robot_segments")
-        if arr.ndim != 3 or arr.shape[1] != 2:
-            raise ValueError("robot_segments must have shape (segments, 2, 3)")
         return arr
 
     @field_validator("object_points", mode="before")
@@ -184,7 +172,6 @@ class PlaybackRobot(BaseModel):
         name (str): Robot identifier for scene paths and labels.
         link_names (tuple[str, ...]): Names for each rendered link.
         link_positions (FloatArray): Link positions with shape ``(frames, links, 3)``.
-        edges (tuple[tuple[int, int], ...]): Undirected link index pairs drawn as segments.
         joint_names (tuple[str, ...]): Actuated joint names for URDF configuration.
         joint_start (int): Index in ``qpos`` where actuated joints begin.
         urdf_path (Path | None): Optional URDF for mesh-backed rendering.
@@ -196,7 +183,6 @@ class PlaybackRobot(BaseModel):
     name: str
     link_names: tuple[str, ...]
     link_positions: FloatArray
-    edges: tuple[tuple[int, int], ...] = ()
     joint_names: tuple[str, ...] = ()
     joint_start: int = 7
     urdf_path: Path | None = None
@@ -219,9 +205,6 @@ class PlaybackRobot(BaseModel):
     def _validate_links(self) -> PlaybackRobot:
         if self.link_positions.shape[1] != len(self.link_names):
             raise ValueError("link_names length must match link_positions")
-        for first, second in self.edges:
-            if first < 0 or second < 0 or first >= len(self.link_names) or second >= len(self.link_names):
-                raise ValueError("robot edge indices must reference link_names")
         if self.joint_start < 0:
             raise ValueError("joint_start must be non-negative")
         return self
@@ -231,20 +214,6 @@ class PlaybackRobot(BaseModel):
         """Number of rendered robot links."""
 
         return len(self.link_names)
-
-    @property
-    def edge_count(self) -> int:
-        """Number of rendered robot line segments."""
-
-        return len(self.edges)
-
-    def segments(self, frame_index: int) -> FloatArray | None:
-        """Line segment endpoints for one frame."""
-
-        if not self.edges:
-            return None
-        points = self.link_positions[frame_index]
-        return np.asarray([[points[first], points[second]] for first, second in self.edges], dtype=np.float64)
 
     def joint_configuration(self, qpos: FloatArray) -> FloatArray:
         """Return robot actuated joints from one qpos vector."""
@@ -376,7 +345,6 @@ class PlaybackData(BaseModel):
             qpos=self.qpos[index],
             human_points=None if self.human_points is None else self.human_points[index],
             robot_points=None if self.robot is None else self.robot.link_positions[index],
-            robot_segments=None if self.robot is None else self.robot.segments(index),
             object_points=None if self.object is None else self.object.world_points[index],
         )
 
@@ -476,7 +444,6 @@ def _robot_playback(result: RetargetingResult, *, robot_spec: RobotSpec | None =
         name=str(metadata.get("name", "robot")),
         link_names=link_names,
         link_positions=result.robot_link_positions,
-        edges=_robot_edges(metadata.get("edges"), link_names),
         joint_names=_string_tuple(metadata.get("joint_names")),
         joint_start=_integer_value(metadata.get("joint_start"), default=7),
         urdf_path=_metadata_path(metadata.get("urdf_path")),
@@ -497,30 +464,6 @@ def _robot_link_names(metadata: dict[str, Any], link_count: int) -> tuple[str, .
     if isinstance(names, list | tuple) and len(names) == link_count:
         return tuple(str(name) for name in names)
     return tuple(f"link_{idx}" for idx in range(link_count))
-
-
-def _robot_edges(value: Any, link_names: tuple[str, ...]) -> tuple[tuple[int, int], ...]:
-    if not isinstance(value, list | tuple):
-        return ()
-    indices = {name: idx for idx, name in enumerate(link_names)}
-    edges: list[tuple[int, int]] = []
-    for item in value:
-        if not isinstance(item, list | tuple) or len(item) != 2:
-            continue
-        first = _edge_index(item[0], indices)
-        second = _edge_index(item[1], indices)
-        if first is None or second is None or first == second:
-            continue
-        edge = (first, second)
-        if edge not in edges:
-            edges.append(edge)
-    return tuple(edges)
-
-
-def _edge_index(value: Any, indices: dict[str, int]) -> int | None:
-    if isinstance(value, int):
-        return value if 0 <= value < len(indices) else None
-    return indices.get(str(value))
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:

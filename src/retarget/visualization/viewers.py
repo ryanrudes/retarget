@@ -95,8 +95,8 @@ class ViserVisualizer:
         """Open an interactive Viser scene for a retargeting result.
 
         Requires the ``retarget[viz]`` extra (``viser``, and optionally ``trimesh`` / URDF extras).
-        Populates a floor grid, robot (URDF or primitive links), optional object mesh or box,
-        and an optional frame slider. Blocks until interrupted when :attr:`block` is ``True``.
+        Populates a floor grid, URDF-backed robot, optional object mesh or box, and an optional
+        frame slider. Blocks until interrupted when :attr:`block` is ``True``.
 
         Args:
             result (RetargetingResult): Solved retargeting output to visualize.
@@ -124,10 +124,6 @@ class _RobotSceneHandles:
     base_frame: Any | None = None
     urdf: Any | None = None
     urdf_joint_names: tuple[str, ...] = ()
-    primitive_links: tuple[Any, ...] = ()
-    primitive_segments: tuple[tuple[Any, int, int], ...] = ()
-    diagnostic_points: Any | None = None
-    diagnostic_segments: Any | None = None
 
 
 @dataclass
@@ -205,61 +201,24 @@ def _add_robot_scene(
         wxyz=frame.root_quaternion,
         show_axes=False,
     )
-    urdf = _try_add_urdf_robot(server, robot)
-    if urdf is not None:
-        _update_urdf_robot(robot, urdf, frame)
-        return _RobotSceneHandles(
-            base_frame=base_frame,
-            urdf=urdf,
-            urdf_joint_names=tuple(str(name) for name in urdf.get_actuated_joint_names()),
-        )
-
-    primitive_links = tuple(
-        _call_if_present(
-            scene,
-            "add_icosphere",
-            f"/retarget/robot_primitive/{_scene_name_component(name)}",
-            radius=_link_radius(name, robot),
-            color=(205, 209, 218),
-            position=position,
-            subdivisions=2,
-        )
-        for name, position in zip(robot.link_names, frame.robot_points, strict=True)
-    )
-    primitive_segments: list[tuple[Any, int, int]] = []
-    if frame.robot_segments is not None:
-        for edge_index, (first, second) in enumerate(robot.edges):
-            first_point = frame.robot_points[first]
-            second_point = frame.robot_points[second]
-            midpoint, wxyz, length = _segment_pose(first_point, second_point)
-            handle = _call_if_present(
-                scene,
-                "add_box",
-                f"/retarget/robot_primitive/limb_{edge_index:02d}",
-                color=(174, 181, 195),
-                dimensions=(0.045, 0.045, max(length, 0.01)),
-                position=midpoint,
-                wxyz=wxyz,
-                material="standard",
-                flat_shading=False,
-            )
-            primitive_segments.append((handle, first, second))
-    handles = _RobotSceneHandles(
+    urdf = _add_urdf_robot(server, robot)
+    _update_urdf_robot(robot, urdf, frame)
+    return _RobotSceneHandles(
         base_frame=base_frame,
-        primitive_links=primitive_links,
-        primitive_segments=tuple(primitive_segments),
+        urdf=urdf,
+        urdf_joint_names=tuple(str(name) for name in urdf.get_actuated_joint_names()),
     )
-    if show_diagnostics:
-        handles.diagnostic_points = _add_robot_point_diagnostics(scene, frame)
-        handles.diagnostic_segments = _add_robot_segment_diagnostics(scene, frame)
-    return handles
 
 
-def _try_add_urdf_robot(server: Any, robot: PlaybackRobot) -> Any | None:
+def _add_urdf_robot(server: Any, robot: PlaybackRobot) -> Any:
     if robot.urdf_path is None:
-        return None
+        raise RuntimeError(
+            "Live robot playback requires a URDF-backed robot model. "
+            "Pass --robot-spec pointing at a robot.toml with urdf_path, or run "
+            "uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets."
+        )
     if not robot.urdf_path.exists():
-        return None
+        raise RuntimeError(f"Live robot playback URDF does not exist: {robot.urdf_path}")
     try:
         from viser.extras import ViserUrdf
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -367,33 +326,6 @@ def _add_diagnostics(scene: Any, playback: PlaybackData, frame: PlaybackFrame) -
     return _DiagnosticSceneHandles(root_path=root_path, human_points=human_points)
 
 
-def _add_robot_point_diagnostics(scene: Any, frame: PlaybackFrame) -> Any | None:
-    if frame.robot_points is None:
-        return None
-    colors = np.tile(np.asarray([[120, 165, 220]], dtype=np.uint8), (frame.robot_points.shape[0], 1))
-    return _call_if_present(
-        scene,
-        "add_point_cloud",
-        "/retarget/diagnostics/robot_links",
-        points=frame.robot_points,
-        colors=colors,
-        point_size=0.018,
-    )
-
-
-def _add_robot_segment_diagnostics(scene: Any, frame: PlaybackFrame) -> Any | None:
-    if frame.robot_segments is None:
-        return None
-    return _call_if_present(
-        scene,
-        "add_line_segments",
-        "/retarget/diagnostics/robot_segments",
-        points=frame.robot_segments,
-        colors=np.asarray([130, 170, 220], dtype=np.uint8),
-        line_width=1.0,
-    )
-
-
 def _add_object_point_diagnostics(
     scene: Any,
     obj: PlaybackObject,
@@ -420,46 +352,6 @@ def _add_object_point_diagnostics(
         colors=colors,
         point_size=0.016,
     )
-
-
-def _link_radius(name: str, robot: PlaybackRobot) -> float:
-    lower = name.lower()
-    if "head" in lower:
-        return 0.065
-    if "foot" in lower or "toe" in lower or "hand" in lower or "wrist" in lower:
-        return 0.04
-    if robot.link_count <= 5:
-        return 0.045
-    return 0.05
-
-
-def _segment_pose(
-    first: NDArray[np.float64],
-    second: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
-    start = np.asarray(first, dtype=np.float64)
-    stop = np.asarray(second, dtype=np.float64)
-    delta = stop - start
-    length = float(np.linalg.norm(delta))
-    midpoint = (start + stop) / 2.0
-    if length <= 1e-12:
-        return midpoint, np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float64), 0.0
-    return midpoint, _quaternion_from_z_axis(delta / length), length
-
-
-def _quaternion_from_z_axis(direction: NDArray[np.float64]) -> NDArray[np.float64]:
-    z_axis = np.asarray([0.0, 0.0, 1.0], dtype=np.float64)
-    unit = np.asarray(direction, dtype=np.float64)
-    unit = unit / np.linalg.norm(unit)
-    dot = float(np.clip(np.dot(z_axis, unit), -1.0, 1.0))
-    if dot > 1.0 - 1e-12:
-        return np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-    if dot < -1.0 + 1e-12:
-        return np.asarray([0.0, 1.0, 0.0, 0.0], dtype=np.float64)
-    axis = np.cross(z_axis, unit)
-    scale = np.sqrt((1.0 + dot) * 2.0)
-    quaternion = np.asarray([scale * 0.5, axis[0] / scale, axis[1] / scale, axis[2] / scale], dtype=np.float64)
-    return quaternion / np.linalg.norm(quaternion)
 
 
 def _object_box_from_points(points: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -512,21 +404,6 @@ def _update_robot_scene(
         return
     if handles.urdf is not None:
         _update_urdf_robot(robot, handles.urdf, frame)
-        return
-    if frame.robot_points is not None:
-        for handle, position in zip(handles.primitive_links, frame.robot_points, strict=False):
-            _set_if_present(handle, "position", position)
-    for handle, first, second in handles.primitive_segments:
-        if frame.robot_points is None:
-            continue
-        midpoint, wxyz, length = _segment_pose(frame.robot_points[first], frame.robot_points[second])
-        _set_if_present(handle, "position", midpoint)
-        _set_if_present(handle, "wxyz", wxyz)
-        _set_if_present(handle, "dimensions", (0.045, 0.045, max(length, 0.01)))
-    if frame.robot_points is not None:
-        _set_if_present(handles.diagnostic_points, "points", frame.robot_points)
-    if frame.robot_segments is not None:
-        _set_if_present(handles.diagnostic_segments, "points", frame.robot_segments)
 
 
 def _update_object_scene(

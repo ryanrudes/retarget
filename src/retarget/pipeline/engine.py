@@ -355,7 +355,6 @@ def _robot_playback_metadata(problem: RetargetingProblem) -> dict[str, Any]:
     return {
         "name": problem.robot.name,
         "link_names": list(names),
-        "edges": [list(edge) for edge in _humanoid_link_edges(names)],
         "joint_names": list(problem.robot.joint_names),
         "joint_start": problem.robot.qpos_layout.joint_start,
         "urdf_path": str(problem.robot.urdf_path) if problem.robot.urdf_path is not None else None,
@@ -406,41 +405,6 @@ def _playback_link_names(problem: RetargetingProblem, robot_point_names: tuple[s
     if problem.robot.contact_links:
         return tuple(problem.robot.contact_links)
     return tuple(dict.fromkeys(robot_point_names))
-
-
-def _humanoid_link_edges(link_names: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
-    names = set(link_names)
-
-    def first_present(*candidates: str) -> str | None:
-        return next((name for name in candidates if name in names), None)
-
-    pelvis = first_present("pelvis", "torso", "root")
-    torso = first_present("torso", "spine", "chest")
-    head = first_present("head")
-    left_foot = first_present("left_foot", "left_toe")
-    right_foot = first_present("right_foot", "right_toe")
-    left_hand = first_present("left_hand", "left_wrist")
-    right_hand = first_present("right_hand", "right_wrist")
-
-    candidate_edges = (
-        (pelvis, torso),
-        (torso or pelvis, head),
-        (pelvis, left_foot),
-        (pelvis, right_foot),
-        (torso or pelvis, left_hand),
-        (torso or pelvis, right_hand),
-    )
-    edges: list[tuple[str, str]] = []
-    for first, second in candidate_edges:
-        if first is None or second is None or first == second:
-            continue
-        edge = (first, second)
-        if edge not in edges:
-            edges.append(edge)
-    if not edges and len(link_names) > 1:
-        anchor = link_names[0]
-        edges.extend((anchor, name) for name in link_names[1:])
-    return tuple(edges)
 
 
 def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:

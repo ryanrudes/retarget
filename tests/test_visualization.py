@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from rich.console import Console
 
 from retarget.core.enums import RunStatus
@@ -83,7 +84,6 @@ def test_build_playback_data_uses_robot_link_positions():
                 "robot": {
                     "name": "humanoid",
                     "link_names": ["pelvis", "head", "left_foot"],
-                    "edges": [["pelvis", "head"], ["pelvis", "left_foot"]],
                 }
             }
         },
@@ -95,11 +95,8 @@ def test_build_playback_data_uses_robot_link_positions():
     assert playback.robot is not None
     assert playback.robot.name == "humanoid"
     assert playback.robot.link_count == 3
-    assert playback.robot.edge_count == 2
     assert frame.robot_points is not None
     assert np.allclose(frame.robot_points[:, 0], [0.1, 0.1, 0.2])
-    assert frame.robot_segments is not None
-    assert frame.robot_segments.shape == (2, 2, 3)
 
 
 def test_build_playback_data_can_use_robot_spec_for_model_metadata(tmp_path):
@@ -152,23 +149,11 @@ def test_populate_viser_scene_uses_model_oriented_scene_methods_by_default():
     result = RetargetingResult(
         name="viser",
         status=RunStatus.SUCCESS,
-        qpos=np.zeros((2, 7), dtype=np.float64),
+        qpos=np.zeros((2, 14), dtype=np.float64),
         human_joints=np.zeros((2, 2, 3), dtype=np.float64),
-        robot_link_positions=np.asarray(
-            [
-                [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.1, 0.0, -0.8]],
-                [[0.1, 0.0, 0.0], [0.1, 0.0, 1.0], [0.2, 0.0, -0.8]],
-            ],
-            dtype=np.float64,
-        ),
         fps=10.0,
         metadata={
             "playback": {
-                "robot": {
-                    "name": "humanoid",
-                    "link_names": ["pelvis", "head", "left_foot"],
-                    "edges": [["pelvis", "head"], ["pelvis", "left_foot"]],
-                },
                 "object": {
                     "name": "skateboard",
                     "sample_points": [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]],
@@ -183,14 +168,26 @@ def test_populate_viser_scene_uses_model_oriented_scene_methods_by_default():
     _populate_viser_scene(server, playback)
 
     assert ("grid", "/retarget/floor") in server.scene.calls
-    assert ("frame", "/retarget/robot") in server.scene.calls
-    assert ("icosphere", "/retarget/robot_primitive/pelvis") in server.scene.calls
-    assert ("box", "/retarget/robot_primitive/limb_00") in server.scene.calls
     assert ("frame", "/retarget/object/skateboard") in server.scene.calls
     assert ("box", "/retarget/object/skateboard/body") in server.scene.calls
+    assert all(call[1] != "/retarget/robot" for call in server.scene.calls)
     assert all(call[0] != "point_cloud" for call in server.scene.calls)
-    assert all(call[0] != "line_segments" for call in server.scene.calls)
     assert server.gui.slider_value == 0
+
+
+def test_populate_viser_scene_requires_urdf_for_robot_playback():
+    result = RetargetingResult(
+        name="viser_robot_requires_urdf",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((2, 7), dtype=np.float64),
+        robot_link_positions=np.zeros((2, 1, 3), dtype=np.float64),
+        fps=10.0,
+        metadata={"playback": {"robot": {"name": "humanoid", "link_names": ["pelvis"]}}},
+    )
+    playback = build_playback_data(result)
+
+    with pytest.raises(RuntimeError, match="URDF-backed"):
+        _populate_viser_scene(_FakeViserServer(), playback)
 
 
 def test_populate_viser_scene_can_show_diagnostics():
@@ -199,23 +196,7 @@ def test_populate_viser_scene_can_show_diagnostics():
         status=RunStatus.SUCCESS,
         qpos=np.zeros((2, 7), dtype=np.float64),
         human_joints=np.zeros((2, 2, 3), dtype=np.float64),
-        robot_link_positions=np.asarray(
-            [
-                [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-                [[0.1, 0.0, 0.0], [0.1, 0.0, 1.0]],
-            ],
-            dtype=np.float64,
-        ),
         fps=10.0,
-        metadata={
-            "playback": {
-                "robot": {
-                    "name": "humanoid",
-                    "link_names": ["pelvis", "head"],
-                    "edges": [["pelvis", "head"]],
-                }
-            }
-        },
     )
     playback = build_playback_data(result)
     server = _FakeViserServer()
@@ -224,8 +205,6 @@ def test_populate_viser_scene_can_show_diagnostics():
 
     assert ("point_cloud", "/retarget/diagnostics/root_path") in server.scene.calls
     assert ("point_cloud", "/retarget/diagnostics/human_points") in server.scene.calls
-    assert ("point_cloud", "/retarget/diagnostics/robot_links") in server.scene.calls
-    assert ("line_segments", "/retarget/diagnostics/robot_segments") in server.scene.calls
 
 
 class _FakeViserServer:
@@ -250,20 +229,8 @@ class _FakeScene:
         self.calls.append(("frame", name))
         return _FakeHandle()
 
-    def add_icosphere(self, name: str, **_kwargs: object) -> object:
-        self.calls.append(("icosphere", name))
-        return _FakeHandle()
-
     def add_box(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("box", name))
-        return _FakeHandle()
-
-    def add_line_segments(self, name: str, **_kwargs: object) -> object:
-        colors = np.asarray(_kwargs["colors"])
-        points = np.asarray(_kwargs["points"])
-        assert points.ndim == 3
-        assert colors.shape in {points.shape, (3,)}
-        self.calls.append(("line_segments", name))
         return _FakeHandle()
 
 

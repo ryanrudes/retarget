@@ -13,6 +13,14 @@ extra_javascript:
   - javascripts/toc-scrollspy.js
   - javascripts/shiki-loader.js
   - javascripts/live-code-loader.js
+  - javascripts/api-navigation-loader.js
+  - javascripts/sync-toc-labels-loader.js
+
+hooks:
+  - docs/hooks/linkify_api_refs.py
+  - docs/hooks/api_symbols.py
+  - docs/hooks/sync_toc_labels.py
+  - docs/hooks/jupyter_serve.py
 
 theme:
   name: material
@@ -33,20 +41,9 @@ theme:
       example: material/flask-outline
       quote: material/format-quote-close
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+    scheme: slate
+    primary: custom
+    accent: custom
   font:
     code: JetBrains Mono
   features:
@@ -55,12 +52,14 @@ theme:
     - navigation.sections
     - navigation.path
     - navigation.top
-    - navigation.tracking
+    # Replaced by docs/javascripts/toc-scrollspy.js (handles nested TOC + long API pages).
+    # - navigation.tracking
     - navigation.prune
     - navigation.indexes
     - navigation.instant
     - navigation.instant.prefetch
-    - toc.follow
+    # toc.follow also toggles md-nav__link--active and fights docs/javascripts/toc-scrollspy.js.
+    # - toc.follow
     # Content — richer reading & code UX
     - content.code.copy
     - content.code.select
@@ -76,6 +75,16 @@ theme:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Introduction: introduction.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+      - Your first retarget: tutorials/your-first-retarget.md
+      - Run configs: tutorials/run-configs.md
+      - Motion input: tutorials/motion-input.md
+      - Scenes and task kinds: tutorials/scene-tasks.md
+      - Python API: tutorials/python-api.md
+      - Batch and metrics: tutorials/batch-and-metrics.md
+      - Export and view: tutorials/export-and-view.md
   - Architecture: architecture.md
   - Coordinate Conventions: coordinate-conventions.md
   - Interaction Mesh: interaction-mesh.md
@@ -122,6 +131,9 @@ plugins:
             line_length: 88
             show_overloads: true
             # Navigation & structure
+            show_root_heading: true
+            show_root_full_path: false
+            show_object_full_path: false
             show_symbol_type_heading: true
             show_symbol_type_toc: true
             group_by_category: true
@@ -130,6 +142,8 @@ plugins:
             heading_level: 2
             show_source: false
             show_submodules: false
+            # Default false drops members with no docstring (enum members, most Pydantic fields).
+            show_if_no_docstring: true
             filters:
               - "!^_"
               - "!^__all__$"

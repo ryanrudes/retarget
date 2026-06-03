@@ -40,6 +40,8 @@ Typed specs and results passed through the pipeline.
 
 ::: retarget.motion.loaders.load_motion
 
+::: retarget.motion.contact.infer_contact_by_velocity
+
 ## Robots
 
 ::: retarget.robots.spec.RobotSpec

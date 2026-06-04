@@ -43,6 +43,42 @@ constraints:
     assert problem.scene.ground_size == 3
 
 
+def test_run_config_upgrades_motion_contacts_to_typed_contact_plan(tmp_path):
+    np.savez(
+        tmp_path / "motion.npz",
+        joint_positions=np.zeros((2, 3, 3), dtype=np.float64),
+        joint_names=np.asarray(("Pelvis", "L_Toe", "R_Toe"), dtype=object),
+        fps=np.asarray(30.0),
+        contact_states=np.asarray([[True, False], [False, True]], dtype=bool),
+        contact_names=np.asarray(("L_Foot", "R_Foot"), dtype=object),
+        support_plane_normal=np.asarray([0.0, 0.0, 1.0], dtype=np.float64),
+        support_plane_origin=np.asarray([0.0, 0.0, 0.2], dtype=np.float64),
+        contact_source=np.asarray("motion_sync:foot_support", dtype=object),
+        contact_model_fingerprint=np.asarray("model123", dtype=object),
+        contact_timeline_fingerprint=np.asarray("clip123", dtype=object),
+    )
+    config_path = tmp_path / "run.toml"
+    config_path.write_text(
+        """
+name = "typed_contacts"
+motion = "motion.npz"
+format = "minimal"
+robot = "synthetic_humanoid"
+output = "result.npz"
+""".strip()
+    )
+
+    problem = RetargetingRunConfig.load(config_path).build_problem()
+
+    assert problem.contacts is not None
+    assert problem.contacts.frame(0).active_link_names == ("left_toe",)
+    assert problem.contacts.frame(1).active_link_names == ("right_toe",)
+    assert problem.contacts.support is not None
+    assert np.allclose(problem.contacts.support.origin, [0.0, 0.0, 0.2])
+    assert problem.contacts.provenance["contact_source"] == "motion_sync:foot_support"
+    assert problem.contacts.provenance["contact_model_fingerprint"] == "model123"
+
+
 def test_run_config_resolves_relative_import_paths(tmp_path):
     config_path = tmp_path / "run.toml"
     config_path.write_text(

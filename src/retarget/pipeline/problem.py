@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from retarget.core.enums import TaskKind
 from retarget.mesh import InteractionMeshSpec
+from retarget.motion.contact import ContactPlan
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
 from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.robots.spec import RobotSpec
@@ -23,6 +24,7 @@ class RetargetingProblem(BaseModel):
         robot (RobotSpec): Target robot model, limits, and default mappings.
         motion (MotionSequence): Source human joint trajectory in world space.
         scene (SceneSpec): Ground, terrain, and optional manipulated object.
+        contacts (ContactPlan | None): Optional typed contact states and support geometry.
         motion_format (MotionFormatSpec | None): Format metadata for contact inference and scaling.
         joint_mapping (dict[str, str] | None): Motion-joint to robot-joint map; ``None`` uses robot defaults.
         mesh (InteractionMeshSpec): Interaction-mesh topology for Laplacian objectives.
@@ -44,6 +46,7 @@ class RetargetingProblem(BaseModel):
     robot: RobotSpec
     motion: MotionSequence
     scene: SceneSpec
+    contacts: ContactPlan | None = None
     motion_format: MotionFormatSpec | None = None
     joint_mapping: dict[str, str] | None = None
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
@@ -83,6 +86,8 @@ class RetargetingProblem(BaseModel):
             trajectory = self.scene.object.trajectory if self.scene.object else None
             if trajectory is not None and trajectory.poses.frame_count != self.motion.frame_count:
                 raise ValueError("object trajectory frame count must match motion")
+        if self.contacts is not None and self.contacts.frame_count != self.motion.frame_count:
+            raise ValueError("contacts frame count must match motion")
         return self
 
     def resolved_joint_mapping(self) -> dict[str, str]:
@@ -128,6 +133,7 @@ class RetargetingProblem(BaseModel):
             robot=self.robot,
             motion=self.motion,
             scene=self.scene,
+            contacts=self.contacts,
             motion_format=self.motion_format,
             joint_mapping=self.joint_mapping,
             mesh=self.mesh,
@@ -162,6 +168,7 @@ class RetargetingProblem(BaseModel):
             robot=self.robot,
             motion=self.motion.resampled(fps),
             scene=self.scene.resampled(fps),
+            contacts=self.contacts.resampled(self.motion.fps, fps) if self.contacts is not None else None,
             motion_format=self.motion_format,
             joint_mapping=self.joint_mapping,
             mesh=self.mesh,

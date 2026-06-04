@@ -20,6 +20,7 @@ from retarget.core.pose import PoseSequence, convert_points_frame
 from retarget.core.registry import Registry
 from retarget.mesh import InteractionMeshSpec, sample_mesh_points
 from retarget.motion import load_motion, motion_formats
+from retarget.motion.contact import ContactPlan, SupportPlane
 from retarget.optimization import validate_optimization_references
 from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
 from retarget.pipeline import RetargetingProblem
@@ -273,11 +274,13 @@ class RetargetingRunConfig(BaseModel):
         motion = load_motion(self.motion, self.format_name, name=self.name)
         robot_spec = robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
         scene = self._build_scene(frame_count=motion.frame_count, fps=motion.fps)
+        contacts = _contact_plan_from_motion(motion, robot_spec.contact_links)
         return RetargetingProblem(
             name=self.name or motion.name,
             task_kind=self.task_kind,
             robot=robot_spec,
             motion=motion,
+            contacts=contacts,
             scene=scene,
             motion_format=motion_formats.get(self.format_name),
             joint_mapping=self.joint_mapping,
@@ -433,6 +436,54 @@ def _resolve_robot_options(options: dict[str, Any], base_dir: Path) -> dict[str,
             continue
         resolved[key] = _resolve_relative(Path(str(value)), base_dir)
     return resolved
+
+
+def _contact_plan_from_motion(motion: Any, contact_links: tuple[str, ...]) -> ContactPlan | None:
+    if not motion.contacts:
+        return None
+    subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
+    link_mapping = {subject: _links_for_contact_subject(subject, contact_links) for subject in subjects}
+    metadata_provenance = motion.metadata.get("contact_provenance", {})
+    return ContactPlan.from_binary_contacts(
+        motion.contacts,
+        link_mapping=link_mapping,
+        support=_support_plane_from_metadata(motion.metadata),
+        provenance={
+            "source": "motion_sequence.contacts",
+            "motion": motion.name,
+            **(dict(metadata_provenance) if isinstance(metadata_provenance, dict) else {}),
+        },
+    )
+
+
+def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
+    lower = subject.lower()
+    if "left" in lower or lower.startswith(("l_", "l-")):
+        return tuple(link for link in contact_links if "left" in link.lower() or link.lower().startswith(("l_", "l-")))
+    if "right" in lower or lower.startswith(("r_", "r-")):
+        return tuple(
+            link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
+        )
+    return contact_links
+
+
+def _support_plane_from_metadata(metadata: dict[str, Any]) -> SupportPlane | None:
+    raw = metadata.get("support_plane")
+    if isinstance(raw, dict):
+        normal = raw.get("normal")
+        origin = raw.get("origin")
+        up_axis = int(raw.get("up_axis", 2))
+    else:
+        normal = metadata.get("support_plane_normal")
+        origin = metadata.get("support_plane_origin")
+        up_axis = int(metadata.get("support_plane_up_axis", 2))
+    if normal is None or origin is None:
+        return None
+    return SupportPlane(
+        normal=np.asarray(normal, dtype=np.float64),
+        origin=np.asarray(origin, dtype=np.float64),
+        up_axis=up_axis,
+    )
 
 
 def _default_objectives() -> tuple[ObjectiveSpec, ...]:

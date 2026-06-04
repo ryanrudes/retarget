@@ -31,7 +31,7 @@ sample_points_path = "generated/pushoff5_twoshoes/deck_samples.npy"
 trajectory_path = "generated/pushoff5_twoshoes/board_trajectory.npz"
 
 [solver]
-backend = "numpy_least_squares"
+backend = "cvxpy_clarabel"
 max_iterations = 6
 trust_radius = 0.12
 

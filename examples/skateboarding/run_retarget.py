@@ -14,6 +14,7 @@ from rich.console import Console
 from retarget import (
     Constraint,
     ConstraintSpec,
+    ContactPlan,
     Objective,
     ObjectiveSpec,
     ObjectSpec,
@@ -24,6 +25,7 @@ from retarget import (
     SceneSpec,
     SolverBackend,
     SolverSpec,
+    SupportPlane,
     TaskKind,
     motion_formats,
 )
@@ -64,6 +66,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, help="Optional frame cap for smoke runs.")
     parser.add_argument("--download-assets", action="store_true", help="Bootstrap missing robot assets automatically.")
     parser.add_argument("--force-prepare", action="store_true", help="Rebuild prepared clip assets.")
+    parser.add_argument(
+        "--force-contacts",
+        action="store_true",
+        help="Re-run foot-support detection during preparation.",
+    )
+    parser.add_argument("--height-m", type=float, help="Source human height in meters forwarded to preparation.")
+    parser.add_argument("--scale-to-robot", action="store_true", help="Scale source motion to the robot height.")
     parser.add_argument("--output", type=Path, help="Result path. Defaults to <work-dir>/<demo>/<demo>_retarget.npz.")
     parser.add_argument("--live", action="store_true", help="Open the URDF-backed live visualizer after solving.")
     parser.add_argument("--dry-run", action="store_true", help="Print the result summary after solving.")
@@ -83,7 +92,6 @@ def main() -> None:
         args,
         output_dir,
         robot,
-        use_hard_scene_constraints=isinstance(backend, MuJoCoKinematicsBackend),
     )
     result = Retargeter(engine=InteractionMeshRetargetingEngine(kinematics=backend)).run(problem)
     result.save_npz(output)
@@ -107,6 +115,8 @@ def _prepare_if_needed(args: argparse.Namespace, output_dir: Path, console: Cons
         output_dir,
         name=args.demo,
         max_frames=args.max_frames,
+        height_m=args.height_m,
+        force_contacts=args.force_contacts,
     )
 
 
@@ -154,63 +164,107 @@ def _build_problem(
     args: argparse.Namespace,
     output_dir: Path,
     robot: RobotSpec,
-    *,
-    use_hard_scene_constraints: bool,
 ) -> RetargetingProblem:
     motion = load_motion(output_dir / "skate_motion.npz", "smplx", name=args.demo)
-    # board = np.load(output_dir / "board_trajectory.npz", allow_pickle=True)
-    # deck_samples = np.asarray(np.load(output_dir / "deck_samples.npy"), dtype=np.float64)
-    # object_trajectory = ObjectTrajectory(
-    #     name="skateboard",
-    #     poses=PoseSequence.from_arrays(
-    #         np.asarray(board["positions"], dtype=np.float64),
-    #         np.asarray(board["quaternions"], dtype=np.float64),
-    #         fps=float(np.asarray(board["fps"]).reshape(())),
-    #     ),
-    # )
+    contacts = _contact_plan_from_motion(motion, robot)
+    board = np.load(output_dir / "board_trajectory.npz", allow_pickle=True)
+    deck_samples = np.asarray(np.load(output_dir / "deck_samples.npy"), dtype=np.float64)
+    object_trajectory = ObjectTrajectory(
+        name="skateboard",
+        poses=PoseSequence.from_arrays(
+            np.asarray(board["positions"], dtype=np.float64),
+            np.asarray(board["quaternions"], dtype=np.float64),
+            fps=float(np.asarray(board["fps"]).reshape(())),
+        ),
+    )
     scene = SceneSpec(
-        task_kind=TaskKind.ROBOT_ONLY, # TaskKind.OBJECT_INTERACTION,
-        #object=ObjectSpec(name="skateboard", sample_points=deck_samples, trajectory=object_trajectory),
+        task_kind=TaskKind.OBJECT_INTERACTION,
+        object=ObjectSpec(name="skateboard", sample_points=deck_samples, trajectory=object_trajectory),
         ground_range=(-3.0, 3.0),
         ground_size=15,
     )
     constraints = [
-        #ConstraintSpec(name=Constraint.JOINT_LIMITS),
-        #ConstraintSpec(name=Constraint.TRUST_REGION),
+        ConstraintSpec(name=Constraint.JOINT_LIMITS),
+        ConstraintSpec(name=Constraint.TRUST_REGION),
     ]
-    # if use_hard_scene_constraints:
-    #     constraints.extend(
-    #         [
-    #             ConstraintSpec(name=Constraint.FOOT_CONTACT, parameters={"tolerance": 2e-3}),
-    #             ConstraintSpec(
-    #                 name=Constraint.NON_PENETRATION,
-    #                 parameters={
-    #                     "links": list(robot.contact_links),
-    #                     "scene_clearance": 0.015,
-    #                     "activation_distance": 0.05,
-    #                 },
-    #             ),
-    #         ]
-    #     )
+    constraints.extend(
+        [
+            ConstraintSpec(name=Constraint.FOOT_CONTACT, parameters={"tolerance": 2e-3}),
+            ConstraintSpec(
+                name=Constraint.NON_PENETRATION,
+                parameters={
+                    "links": list(robot.contact_links),
+                    "scene_clearance": 0.015,
+                    "activation_distance": 0.05,
+                },
+            ),
+        ]
+    )
     return RetargetingProblem(
         name=args.demo,
-        task_kind=TaskKind.ROBOT_ONLY, # TaskKind.OBJECT_INTERACTION,
+        task_kind=TaskKind.OBJECT_INTERACTION,
         robot=robot,
         motion=motion,
+        contacts=contacts,
         motion_format=motion_formats.get("smplx"),
         scene=scene,
         solver=SolverSpec(backend=SolverBackend.CVXPY_CLARABEL, max_iterations=6, trust_radius=0.12),
         objectives=(
             ObjectiveSpec(name=Objective.LINK_TRACKING, weight=1.0),
-            # ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.12),
-            # ObjectiveSpec(name=Objective.NOMINAL_TRACKING, weight=0.05),
+            ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.12),
+            ObjectiveSpec(name=Objective.NOMINAL_TRACKING, weight=0.05),
         ),
         constraints=tuple(constraints),
-        scale_to_robot=True,
+        scale_to_robot=args.scale_to_robot,
         output_fps=motion.fps,
         show_progress=args.progress,
         metadata={"example": "skateboarding", "prepared_dir": str(output_dir)},
     )
+
+
+def _contact_plan_from_motion(motion: object, robot: RobotSpec) -> ContactPlan | None:
+    contacts = getattr(motion, "contacts", ())
+    if not contacts:
+        return None
+    support = _support_plane_from_motion(motion)
+    subjects = tuple(dict.fromkeys(name for frame in contacts for name in frame))
+    link_mapping = {subject: _links_for_subject(subject, robot.contact_links) for subject in subjects}
+    metadata = getattr(motion, "metadata", {})
+    provenance = metadata.get("contact_provenance", {}) if isinstance(metadata, dict) else {}
+    return ContactPlan.from_binary_contacts(
+        contacts,
+        link_mapping=link_mapping,
+        support=support,
+        provenance={
+            "source": "prepared_skate_motion",
+            **(dict(provenance) if isinstance(provenance, dict) else {}),
+        },
+    )
+
+
+def _support_plane_from_motion(motion: object) -> SupportPlane | None:
+    metadata = getattr(motion, "metadata", {})
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get("support_plane")
+    if not isinstance(raw, dict):
+        return None
+    return SupportPlane(
+        normal=np.asarray(raw["normal"], dtype=np.float64),
+        origin=np.asarray(raw["origin"], dtype=np.float64),
+        up_axis=int(raw.get("up_axis", 2)),
+    )
+
+
+def _links_for_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
+    lower = subject.lower()
+    if "left" in lower or lower.startswith(("l_", "l-")):
+        return tuple(link for link in contact_links if "left" in link.lower() or link.lower().startswith(("l_", "l-")))
+    if "right" in lower or lower.startswith(("r_", "r-")):
+        return tuple(
+            link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
+        )
+    return contact_links
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -15,13 +15,13 @@ from retarget.core.pose import Pose
 from retarget.core.protocols import KinematicsBackend
 from retarget.kinematics.backends import SimpleKinematicsBackend
 from retarget.mesh.interaction import InteractionMeshBuilder, InteractionMeshSpec
-from retarget.motion.contact import infer_contact_by_velocity
+from retarget.motion.contact import ContactFrame, ContactPlan, infer_contact_by_velocity
 from retarget.motion.spec import MotionSequence
 from retarget.optimization.problem import ConstraintContribution, LinearConstraint, QuadraticProblem, TermContext
 from retarget.optimization.registry import constraint_terms, objective_terms
 from retarget.optimization.solvers import create_solver, resolve_solver_backend_name
-from retarget.pipeline.progress import frame_progress
 from retarget.pipeline.problem import RetargetingProblem
+from retarget.pipeline.progress import frame_progress
 from retarget.results.spec import RetargetingResult
 from retarget.robots.spec import RobotSpec
 
@@ -86,11 +86,8 @@ class InteractionMeshRetargetingEngine:
         mapping = problem.resolved_link_mapping()
         human_names = tuple(mapping)
         robot_point_names = tuple(mapping.values())
-        contacts = infer_contact_by_velocity(
-            motion,
-            problem.motion_format,
-            velocity_threshold=_constraint_parameter(problem, "foot_contact", "velocity_threshold", 0.01),
-        )
+        legacy_contacts = _legacy_contact_frames(problem, motion)
+        contact_plan = _scaled_contact_plan(problem)
         joint_slice = problem.robot.qpos_layout.joint_slice(problem.robot.dof)
         lower_values, upper_values = _joint_limit_arrays(problem.robot, backend)
         joint_lower = np.asarray(lower_values, dtype=np.float64)
@@ -141,7 +138,8 @@ class InteractionMeshRetargetingEngine:
                         reference_pose=reference_pose,
                         joint_lower=joint_lower,
                         joint_upper=joint_upper,
-                        frame_contacts=contacts[frame_idx] if frame_idx < len(contacts) else {},
+                        contact_frame=contact_plan.frame(frame_idx) if contact_plan is not None else None,
+                        frame_contacts=legacy_contacts[frame_idx] if frame_idx < len(legacy_contacts) else {},
                         frame_idx=frame_idx,
                     )
                     solved = solver.solve(quadratic)
@@ -194,6 +192,7 @@ class InteractionMeshRetargetingEngine:
         joint_lower: FloatArray,
         joint_upper: FloatArray,
         frame_contacts: dict[str, bool],
+        contact_frame: ContactFrame | None,
         frame_idx: int,
     ) -> QuadraticProblem:
         robot_points_world, robot_jacobians_world = backend.point_jacobians(q_current, robot_point_names)
@@ -212,6 +211,7 @@ class InteractionMeshRetargetingEngine:
             q_current=q_current,
             q_previous=q_previous,
             frame_idx=frame_idx,
+            contact_frame=contact_frame,
             frame_contacts=frame_contacts,
             robot_point_names=robot_point_names,
             robot_points=robot_points,
@@ -281,6 +281,28 @@ def _scale_motion_to_robot(problem: RetargetingProblem) -> MotionSequence:
     return problem.motion.scaled(factor)
 
 
+def _scaled_contact_plan(problem: RetargetingProblem) -> ContactPlan | None:
+    if problem.contacts is None:
+        return None
+    factor = _motion_scale_factor(problem)
+    if factor is None:
+        return problem.contacts
+    return problem.contacts.scaled(factor)
+
+
+def _legacy_contact_frames(
+    problem: RetargetingProblem,
+    motion: MotionSequence,
+) -> tuple[dict[str, bool], ...]:
+    if problem.contacts is not None or not motion.contacts:
+        return tuple({} for _ in range(motion.frame_count))
+    return infer_contact_by_velocity(
+        motion,
+        problem.motion_format,
+        velocity_threshold=_constraint_parameter(problem, "foot_contact", "velocity_threshold", 0.01),
+    )
+
+
 def _source_height_m(problem: RetargetingProblem) -> float | None:
     """Return a positive source actor height in meters, if one is available."""
 
@@ -331,6 +353,7 @@ def _result_metadata(problem: RetargetingProblem, output: EngineOutput, *, runti
         "solver_statuses": output.solver_statuses,
         "mesh": _mesh_metadata(output),
         "playback": _playback_metadata(problem),
+        "contacts": _contact_metadata(problem),
         "algorithm": "interaction_mesh_sqp",
         "joint_mapping": problem.resolved_joint_mapping(),
         "link_mapping": problem.resolved_link_mapping(),
@@ -350,6 +373,7 @@ def _run_provenance(problem: RetargetingProblem, output: EngineOutput) -> dict[s
         "scale_to_robot": problem.scale_to_robot,
         "motion_scale_factor": _motion_scale_factor(problem),
         "motion": _motion_provenance(problem),
+        "contacts": _contact_metadata(problem),
         "robot": _robot_provenance(problem),
         "scene": _scene_provenance(problem),
         "mesh": _mesh_metadata(output),
@@ -453,7 +477,8 @@ def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:
         "fps": problem.motion.fps,
         "frame": problem.motion.frame.value,
         "has_root_poses": problem.motion.root_poses is not None,
-        "has_contacts": bool(problem.motion.contacts),
+        "has_legacy_contacts": bool(problem.motion.contacts),
+        "has_typed_contacts": problem.contacts is not None,
         "metadata": _jsonable(problem.motion.metadata),
     }
 
@@ -507,6 +532,40 @@ def _scene_provenance(problem: RetargetingProblem) -> dict[str, Any]:
         "ground_range": list(problem.scene.ground_range),
         "ground_size": problem.scene.ground_size,
         "metadata": _jsonable(problem.scene.metadata),
+    }
+
+
+def _contact_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    if problem.contacts is None:
+        return {
+            "source": "legacy_motion_contacts" if problem.motion.contacts else "velocity_inference",
+            "track_count": 0,
+            "subjects": [],
+            "has_support": False,
+            "provenance": {},
+        }
+    support = problem.contacts.support
+    support_info = None
+    if support is not None:
+        support_info = {
+            "normal": support.normal.tolist(),
+            "origin": support.origin.tolist(),
+            "up_axis": support.up_axis,
+        }
+    frame_count = cast(int, problem.contacts.frame_count)
+    return {
+        "source": "typed_contact_plan",
+        "frame_count": frame_count,
+        "track_count": len(problem.contacts.tracks),
+        "subjects": [track.subject for track in problem.contacts.tracks],
+        "link_names": {
+            track.subject: list(track.link_names)
+            for track in problem.contacts.tracks
+            if track.link_names
+        },
+        "has_support": support is not None,
+        "support": support_info,
+        "provenance": _jsonable(problem.contacts.provenance),
     }
 
 

@@ -51,8 +51,10 @@ def test_build_mujoco_body_name_map_resolves_g1_aliases(tmp_path: Path) -> None:
 <mujoco model="test">
   <worldbody>
     <body name="pelvis">
+      <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
       <freejoint name="root"/>
       <body name="torso_link">
+        <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
         <joint name="waist" type="hinge" axis="0 0 1"/>
       </body>
     </body>

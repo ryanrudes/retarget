@@ -12,6 +12,7 @@ from scipy import sparse
 from retarget.core.array import FloatArray
 from retarget.core.enums import Constraint, Objective
 from retarget.mesh.interaction import laplacian_matrix
+from retarget.motion.contact import SupportPlane
 from retarget.optimization.problem import (
     ConstraintContribution,
     LinearConstraint,
@@ -257,27 +258,26 @@ class SelfCollisionConstraint:
 def foot_contact_constraints(*, context: TermContext, spec: ConstraintSpec) -> list[LinearConstraint]:
     """Build stance-contact constraints from explicit or inferred frame contacts."""
 
-    if not context.frame_contacts or not context.problem.robot.contact_links:
-        return []
-    tolerance = _parameter(spec, "tolerance", 1e-3)
-    active_links = tuple(
-        link
-        for motion_joint, active in context.frame_contacts.items()
-        if active
-        for link in _contact_links(context, motion_joint)
-    )
+    active_links = _active_contact_links(context)
     if not active_links:
         return []
+    tolerance = _parameter(spec, "tolerance", 1e-3)
     current_positions, current_jacobians = context.backend.point_jacobians(context.q_current, active_links)
     previous_positions = context.backend.link_positions(context.q_previous, active_links)
     constraints: list[LinearConstraint] = []
+    tangent_basis = _support_tangent_basis(context.contact_frame.support if context.contact_frame is not None else None)
     for idx in range(len(active_links)):
-        delta_xy = previous_positions[idx, :2] - current_positions[idx, :2]
+        if tangent_basis is None:
+            matrix = current_jacobians[idx, :2, :]
+            delta = previous_positions[idx, :2] - current_positions[idx, :2]
+        else:
+            matrix = tangent_basis @ current_jacobians[idx]
+            delta = tangent_basis @ (previous_positions[idx] - current_positions[idx])
         constraints.append(
             LinearConstraint(
-                matrix=current_jacobians[idx, :2, :],
-                lower=delta_xy - tolerance,
-                upper=delta_xy + tolerance,
+                matrix=matrix,
+                lower=delta - tolerance,
+                upper=delta + tolerance,
             )
         )
     return constraints
@@ -286,17 +286,31 @@ def foot_contact_constraints(*, context: TermContext, spec: ConstraintSpec) -> l
 def foot_lock_constraints(*, context: TermContext, spec: ConstraintSpec) -> list[LinearConstraint]:
     """Build floor-height constraints for configured lock windows."""
 
-    windows = _windows(spec)
-    if not windows:
-        return []
-    z_floor = _parameter(spec, "z_floor", 0.0)
-    tolerance = _parameter(spec, "tolerance", 5e-3)
-    active_links = tuple(
-        link for link in context.problem.robot.contact_links if _link_locked(link, windows, context.frame_idx)
-    )
+    active_links = _support_contact_links(context)
+    if not active_links:
+        windows = _windows(spec)
+        if not windows:
+            return []
+        active_links = tuple(
+            link for link in context.problem.robot.contact_links if _link_locked(link, windows, context.frame_idx)
+        )
     if not active_links:
         return []
+    tolerance = _parameter(spec, "tolerance", 5e-3)
     current_positions, current_jacobians = context.backend.point_jacobians(context.q_current, active_links)
+    support = context.contact_frame.support if context.contact_frame is not None else None
+    if support is not None:
+        return [
+            _support_plane_constraint(
+                support=support,
+                position=current_positions[idx],
+                jacobian=current_jacobians[idx],
+                lower=-tolerance,
+                upper=tolerance,
+            )
+            for idx in range(len(active_links))
+        ]
+    z_floor = _parameter(spec, "z_floor", 0.0)
     return [
         LinearConstraint(
             matrix=current_jacobians[idx, 2:3, :],
@@ -310,18 +324,31 @@ def foot_lock_constraints(*, context: TermContext, spec: ConstraintSpec) -> list
 def ground_non_penetration_constraints(*, context: TermContext, spec: ConstraintSpec) -> list[LinearConstraint]:
     """Build floor non-penetration constraints for contact links."""
 
-    if not context.problem.robot.contact_links:
+    link_names = _non_penetration_links(context, spec)
+    if not link_names:
         return []
     tolerance = _parameter(spec, "tolerance", 1e-3)
+    positions, jacobians = context.backend.point_jacobians(context.q_current, link_names)
+    support = context.contact_frame.support if context.contact_frame is not None else None
+    if support is not None:
+        return [
+            _support_plane_constraint(
+                support=support,
+                position=positions[idx],
+                jacobian=jacobians[idx],
+                lower=tolerance,
+                upper=None,
+            )
+            for idx in range(len(link_names))
+        ]
     floor_z = _parameter(spec, "floor_z", 0.0)
-    positions, jacobians = context.backend.point_jacobians(context.q_current, context.problem.robot.contact_links)
     return [
         LinearConstraint(
             matrix=jacobians[idx, 2:3, :],
             lower=np.asarray([floor_z + tolerance - positions[idx, 2]], dtype=np.float64),
             upper=None,
         )
-        for idx in range(len(context.problem.robot.contact_links))
+        for idx in range(len(link_names))
     ]
 
 
@@ -473,6 +500,58 @@ def _link_target_masks(value: Any, shape: tuple[int, int]) -> NDArray[np.bool_]:
 
 def _parameter(spec: ConstraintSpec, name: str, default: float) -> float:
     return float(spec.parameters.get(name, default))
+
+
+def _active_contact_links(context: TermContext) -> tuple[str, ...]:
+    if context.contact_frame is not None:
+        return context.contact_frame.active_link_names
+    if not context.frame_contacts or not context.problem.robot.contact_links:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            link
+            for motion_joint, active in context.frame_contacts.items()
+            if active
+            for link in _contact_links(context, motion_joint)
+        )
+    )
+
+
+def _support_contact_links(context: TermContext) -> tuple[str, ...]:
+    if context.contact_frame is None:
+        return ()
+    return context.contact_frame.support_link_names
+
+
+def _support_plane_constraint(
+    *,
+    support: SupportPlane,
+    position: FloatArray,
+    jacobian: FloatArray,
+    lower: float | None,
+    upper: float | None,
+) -> LinearConstraint:
+    clearance = float(support.clearance(position))
+    row = (support.normal @ jacobian).reshape(1, -1)
+    return LinearConstraint(
+        matrix=row,
+        lower=None if lower is None else np.asarray([lower - clearance], dtype=np.float64),
+        upper=None if upper is None else np.asarray([upper - clearance], dtype=np.float64),
+    )
+
+
+def _support_tangent_basis(support: SupportPlane | None) -> FloatArray | None:
+    if support is None:
+        return None
+    normal = support.normal
+    seed = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    if abs(float(np.dot(seed, normal))) > 0.9:
+        seed = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    tangent_a = seed - float(np.dot(seed, normal)) * normal
+    tangent_a /= float(np.linalg.norm(tangent_a))
+    tangent_b = np.cross(normal, tangent_a)
+    tangent_b /= float(np.linalg.norm(tangent_b))
+    return np.stack([tangent_a, tangent_b], axis=0)
 
 
 def _contact_links(context: TermContext, motion_joint: str) -> tuple[str, ...]:

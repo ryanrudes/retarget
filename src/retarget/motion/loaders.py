@@ -113,6 +113,12 @@ class NpzMotionLoader:
         link_targets = _link_targets_from_npz(data, frame_count=positions.shape[0])
         if link_targets is not None:
             metadata["link_targets"] = link_targets
+        support_plane = _support_plane_from_npz(data)
+        if support_plane is not None:
+            metadata["support_plane"] = support_plane
+        contact_provenance = _contact_provenance_from_npz(data)
+        if contact_provenance:
+            metadata["contact_provenance"] = contact_provenance
         fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
@@ -246,6 +252,32 @@ def _link_targets_from_npz(data: Any, *, frame_count: int) -> dict[str, Any] | N
     if "link_target_source" in data:
         out["source"] = _scalar_string(data["link_target_source"])
     return out
+
+
+def _support_plane_from_npz(data: Any) -> dict[str, Any] | None:
+    if "support_plane_normal" not in data and "support_plane_origin" not in data:
+        return None
+    if "support_plane_normal" not in data or "support_plane_origin" not in data:
+        raise KeyError("support plane requires support_plane_normal and support_plane_origin")
+    normal = np.asarray(data["support_plane_normal"], dtype=np.float64).reshape(3)
+    origin = np.asarray(data["support_plane_origin"], dtype=np.float64).reshape(3)
+    up_axis = int(np.asarray(data["support_plane_up_axis"]).reshape(())) if "support_plane_up_axis" in data else 2
+    return {"normal": normal, "origin": origin, "up_axis": up_axis}
+
+
+def _contact_provenance_from_npz(data: Any) -> dict[str, Any]:
+    provenance: dict[str, Any] = {}
+    for key in (
+        "contact_source",
+        "contact_model_fingerprint",
+        "contact_timeline_fingerprint",
+        "contact_detector_timeline_fingerprint",
+    ):
+        if key in data:
+            provenance[key] = _scalar_string(data[key])
+    if "contact_source_frame_count" in data:
+        provenance["source_frame_count"] = int(np.asarray(data["contact_source_frame_count"]).reshape(()))
+    return provenance
 
 
 def _validate_link_target_weights(value: Any, frames: int, links: int) -> np.ndarray:

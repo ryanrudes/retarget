@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -216,17 +217,17 @@ class SimpleKinematicsBackend:
         return tuple((first, second) for idx, first in enumerate(names) for second in names[idx + 1 :])
 
 
-def _load_mujoco_model(mujoco: object, path: Path) -> object:
-    """Load a MuJoCo model, stripping Holosoma foot–floor pairs when needed."""
+def _load_mujoco_model(mujoco: Any, path: Path) -> Any:
+    """Load a MuJoCo model, stripping Holosoma foot-floor pairs when needed."""
 
     try:
-        return mujoco.MjModel.from_xml_path(str(path))  # type: ignore[attr-defined]
+        return mujoco.MjModel.from_xml_path(str(path))
     except ValueError as exc:
         if "floor" not in str(exc):
             raise
         if not strip_floor_contact_pairs(path):
             raise
-        return mujoco.MjModel.from_xml_path(str(path))  # type: ignore[attr-defined]
+        return mujoco.MjModel.from_xml_path(str(path))
 
 
 class MuJoCoKinematicsBackend:
@@ -248,8 +249,8 @@ class MuJoCoKinematicsBackend:
             raise ValueError("A MuJoCo XML path is required")
         self._mujoco = mujoco
         self.robot = robot
-        self.model = _load_mujoco_model(mujoco, path)
-        self.data = mujoco.MjData(self.model)
+        self.model: Any = _load_mujoco_model(mujoco, path)
+        self.data: Any = mujoco.MjData(self.model)
         link_names = set(self.robot.link_names) | set(self.robot.contact_links)
         link_names.update(self.robot.default_link_mapping.values())
         metadata_aliases = self.robot.metadata.get("mujoco_body_names")

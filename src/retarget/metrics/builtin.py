@@ -81,7 +81,7 @@ class FootSlidingMetric:
             return 0.0
         if problem is not None and problem.robot.contact_links:
             positions = _contact_link_positions(result, problem)
-            contacts = _robot_contact_mask(problem)
+            contacts = _human_contact_mask(problem)
             sliding: list[float] = []
             frame_count = min(result.frame_count, positions.shape[0], contacts.shape[0])
             for frame_idx in range(1, frame_count):
@@ -140,8 +140,7 @@ class PenetrationMetric:
 
         if problem is not None and problem.robot.contact_links:
             positions = _contact_link_positions(result, problem)
-            floor_z = _constraint_parameter(problem, "non_penetration", "floor_z", 0.0)
-            ground_penetration = float(max(0.0, floor_z - np.min(positions[:, :, 2])))
+            ground_penetration = _ground_penetration_depth(positions, problem)
             scene_penetration = _scene_penetration_depth(positions, problem)
             return max(ground_penetration, scene_penetration)
         return 0.0
@@ -241,6 +240,7 @@ def _evaluation_details(
             "motion_format": problem.motion_format.name if problem.motion_format is not None else None,
             "motion_frame_count": problem.motion.frame_count,
             "contact_links": list(problem.robot.contact_links),
+            "contacts": _contact_plan_details(problem),
             "objectives": [objective.name for objective in problem.objectives],
             "constraints": [constraint.name for constraint in problem.constraints if constraint.enabled],
             "solver_backend": problem.solver.backend_name,
@@ -278,6 +278,14 @@ def _scene_penetration_depth(link_positions: np.ndarray, problem: RetargetingPro
     return max_violation
 
 
+def _ground_penetration_depth(link_positions: np.ndarray, problem: RetargetingProblem) -> float:
+    if problem.contacts is not None and problem.contacts.support is not None:
+        clearance = problem.contacts.support.clearance(link_positions)
+        return float(max(0.0, -float(np.min(clearance))))
+    floor_z = _constraint_parameter(problem, "non_penetration", "floor_z", 0.0)
+    return float(max(0.0, floor_z - np.min(link_positions[:, :, 2])))
+
+
 def _scene_frame_available(problem: RetargetingProblem, frame_idx: int) -> bool:
     if problem.scene.object is None or problem.scene.object.trajectory is None:
         return True
@@ -309,6 +317,10 @@ def _scene_points(problem: RetargetingProblem) -> np.ndarray | None:
 
 
 def _human_contact_mask(problem: RetargetingProblem) -> np.ndarray:
+    if problem.contacts is not None:
+        return _contact_plan_to_mask(problem)
+    if not problem.motion.contacts:
+        return np.zeros((problem.motion.frame_count, len(problem.robot.contact_links)), dtype=bool)
     contacts = infer_contact_by_velocity(problem.motion, problem.motion_format)
     return _contact_dicts_to_mask(contacts, problem)
 
@@ -335,6 +347,42 @@ def _contact_dicts_to_mask(contact_dicts: tuple[dict[str, bool], ...], problem: 
                 if _same_side(motion_joint, link_name):
                     mask[frame_idx, link_idx] = True
     return mask
+
+
+def _contact_plan_to_mask(problem: RetargetingProblem) -> np.ndarray:
+    assert problem.contacts is not None
+    frame_count = cast(int, problem.contacts.frame_count)
+    mask = np.zeros((frame_count, len(problem.robot.contact_links)), dtype=np.bool_)
+    link_index = {name: idx for idx, name in enumerate(problem.robot.contact_links)}
+    for track in problem.contacts.tracks:
+        mapped_indices = tuple(
+            link_index[link_name]
+            for link_name in track.link_names
+            if link_name in link_index
+        )
+        if mapped_indices:
+            indices = mapped_indices
+        else:
+            indices = tuple(
+                idx for idx, link_name in enumerate(problem.robot.contact_links) if _same_side(track.subject, link_name)
+            )
+        if not indices:
+            continue
+        columns = list(indices)
+        mask[:, columns] = mask[:, columns] | track.active_mask[:, None]
+    return mask
+
+
+def _contact_plan_details(problem: RetargetingProblem) -> dict[str, object] | None:
+    if problem.contacts is None:
+        return None
+    frame_count = cast(int, problem.contacts.frame_count)
+    return {
+        "frame_count": frame_count,
+        "subjects": [track.subject for track in problem.contacts.tracks],
+        "track_count": len(problem.contacts.tracks),
+        "has_support": problem.contacts.support is not None,
+    }
 
 
 def _same_side(motion_joint: str, link_name: str) -> bool:

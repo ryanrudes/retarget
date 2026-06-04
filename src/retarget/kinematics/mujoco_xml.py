@@ -14,7 +14,7 @@ G1_BODY_ALIASES: dict[str, str] = {
 
 
 def strip_floor_contact_pairs(xml_path: Path) -> bool:
-    """Remove foot–floor contact pairs when the floor geom is defined in a scene file.
+    """Remove foot-floor contact pairs when the floor geom is defined in a scene file.
 
     Holosoma ships ``g1_29dof.xml`` with ``<pair geom2="floor" .../>`` entries, but the
     ``floor`` geom only exists in ``scenes/scene_g1_29dof_wbt_plane.xml``. Kinematics-only

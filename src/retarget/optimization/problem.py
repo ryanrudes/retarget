@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from retarget.core.pose import Pose
     from retarget.core.protocols import KinematicsBackend
+    from retarget.motion.contact import ContactFrame
     from retarget.pipeline.problem import RetargetingProblem
 
 FloatArray = NDArray[np.float64]
@@ -93,6 +94,7 @@ class TermContext:
         q_current (FloatArray): Full ``qpos`` vector for the frame being optimized.
         q_previous (FloatArray): ``qpos`` from the prior frame (warm start for smoothness).
         frame_idx (int): Zero-based index into the motion sequence.
+        contact_frame (ContactFrame | None): Typed contact view for the current frame, when configured.
         frame_contacts (Mapping[str, bool]): Inferred stance contacts keyed by motion joint.
         robot_point_names (tuple[str, ...]): Link or joint names used for mesh matching.
         robot_points (FloatArray): Robot match points in the task-local frame, shape ``(P, 3)``.
@@ -111,6 +113,7 @@ class TermContext:
     q_current: FloatArray
     q_previous: FloatArray
     frame_idx: int
+    contact_frame: ContactFrame | None
     frame_contacts: Mapping[str, bool]
     robot_point_names: tuple[str, ...]
     robot_points: FloatArray

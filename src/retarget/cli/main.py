@@ -12,14 +12,22 @@ from rich.table import Table
 
 from retarget.assets import AssetInstallManifest, AssetStore
 from retarget.cli.config import RetargetingRunConfig
-from retarget.core.enums import AssetKind, RunStatus, TaskKind
+from retarget.core.enums import AssetKind, KinematicsBackendName, RunStatus, TaskKind
 from retarget.core.protocols import KinematicsBackend
 from retarget.export import ExportSpec, export_tracking, exporters
 from retarget.kinematics import kinematics_backends
 from retarget.metrics import evaluate_result, metrics
 from retarget.motion import motion_formats, motion_loaders
 from retarget.optimization import constraint_terms, objective_terms, solver_factories
-from retarget.pipeline import BatchJob, BatchManifest, BatchRunner, BatchRunRecord, Retargeter, RetargetingProblem
+from retarget.pipeline import (
+    BatchJob,
+    BatchManifest,
+    BatchRunner,
+    BatchRunRecord,
+    InteractionMeshRetargetingEngine,
+    Retargeter,
+    RetargetingProblem,
+)
 from retarget.results import EvaluationManifest, EvaluationRecord, RetargetingResult
 from retarget.robots import RobotSpec, robots
 from retarget.visualization import view_result, visualizers
@@ -478,9 +486,25 @@ def _run_config_from_inputs(
 
 def _run_from_config(config: RetargetingRunConfig) -> RetargetingResult:
     problem = _problem_from_config(config)
-    result = Retargeter().run(problem)
+    backend = _preferred_config_kinematics(problem)
+    retargeter = (
+        Retargeter(engine=InteractionMeshRetargetingEngine(kinematics=backend))
+        if backend is not None
+        else Retargeter()
+    )
+    result = retargeter.run(problem)
     result.save_npz(config.output)
     return result
+
+
+def _preferred_config_kinematics(problem: RetargetingProblem) -> KinematicsBackend | None:
+    xml_path = problem.robot.mujoco_xml_path
+    if xml_path is None or not xml_path.exists():
+        return None
+    try:
+        return kinematics_backends.get(KinematicsBackendName.MUJOCO)(problem.robot)
+    except (ImportError, KeyError, RuntimeError, ValueError):
+        return None
 
 
 def _problem_from_config(config: RetargetingRunConfig) -> RetargetingProblem:

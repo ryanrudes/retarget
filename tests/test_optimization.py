@@ -3,7 +3,7 @@ import numpy as np
 import retarget.optimization.solvers as solver_module
 from retarget import RetargetingProblem, SceneSpec, TaskKind
 from retarget.kinematics.backends import SimpleKinematicsBackend
-from retarget.motion import MotionSequence
+from retarget.motion import ContactPlan, ContactTrack, MotionSequence, SupportPlane
 from retarget.optimization import (
     ConstraintSpec,
     CvxpyClarabelSolver,
@@ -17,7 +17,7 @@ from retarget.optimization import (
     create_solver,
     resolve_solver_backend_name,
 )
-from retarget.optimization.terms import LinkTrackingObjective
+from retarget.optimization.terms import LinkTrackingObjective, foot_lock_constraints, ground_non_penetration_constraints
 from retarget.robots import robots
 
 
@@ -143,6 +143,7 @@ def test_link_tracking_objective_builds_active_weighted_rows():
         q_current=qpos,
         q_previous=qpos,
         frame_idx=0,
+        contact_frame=None,
         frame_contacts={},
         robot_point_names=("left_toe",),
         robot_points=current,
@@ -162,3 +163,65 @@ def test_link_tracking_objective_builds_active_weighted_rows():
     contribution = contributions[0]
     assert contribution.matrix.shape == (3, robot.dof)
     assert np.allclose(contribution.target, [0.0, 0.0, 0.2])
+
+
+def test_contact_constraints_use_typed_support_plane_normal():
+    robot = robots.get("synthetic_humanoid")
+    backend = SimpleKinematicsBackend(robot)
+    qpos = np.zeros(robot.qpos_size(), dtype=np.float64)
+    qpos[3] = 1.0
+    positions, jacobians = backend.point_jacobians(qpos, ("left_toe",))
+    support = SupportPlane(normal=np.array([0.0, 1.0, 1.0]), origin=np.zeros(3))
+    contacts = ContactPlan(
+        tracks=(ContactTrack("left_foot", np.array([1]), link_names=("left_toe",)),),
+        support=support,
+    )
+    motion = MotionSequence(
+        name="contact",
+        joint_names=("left_foot",),
+        joint_positions=np.zeros((1, 1, 3), dtype=np.float64),
+    )
+    problem = RetargetingProblem(
+        name="contact_terms",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        contacts=contacts,
+        scene=SceneSpec.robot_only(),
+    )
+    context = TermContext(
+        problem=problem,
+        backend=backend,
+        q_current=qpos,
+        q_previous=qpos,
+        frame_idx=0,
+        contact_frame=contacts.frame(0),
+        frame_contacts={},
+        robot_point_names=("left_toe",),
+        robot_points=positions,
+        robot_jacobians=jacobians,
+        environment_points=np.zeros((0, 3), dtype=np.float64),
+        adjacency=((),),
+        target_laplacian=np.zeros((1, 3), dtype=np.float64),
+        reference_pose=None,
+        joint_lower=np.full(robot.dof, -1.0, dtype=np.float64),
+        joint_upper=np.full(robot.dof, 1.0, dtype=np.float64),
+        current_joints=np.zeros(robot.dof, dtype=np.float64),
+    )
+
+    non_penetration = ground_non_penetration_constraints(
+        context=context,
+        spec=ConstraintSpec(name="non_penetration", parameters={"links": ("left_toe",), "tolerance": 0.01}),
+    )
+    foot_lock = foot_lock_constraints(
+        context=context,
+        spec=ConstraintSpec(name="foot_lock", parameters={"tolerance": 0.02}),
+    )
+
+    expected_row = (support.normal @ jacobians[0]).reshape(1, -1)
+    assert len(non_penetration) == 1
+    assert np.allclose(non_penetration[0].matrix, expected_row)
+    assert len(foot_lock) == 1
+    assert np.allclose(foot_lock[0].matrix, expected_row)
+    assert foot_lock[0].lower is not None
+    assert foot_lock[0].upper is not None

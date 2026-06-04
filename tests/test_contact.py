@@ -1,6 +1,13 @@
 import numpy as np
 
-from retarget.motion import MotionFormatSpec, MotionSequence, infer_contact_by_velocity
+from retarget.motion import (
+    ContactPlan,
+    ContactTrack,
+    MotionFormatSpec,
+    MotionSequence,
+    SupportPlane,
+    infer_contact_by_velocity,
+)
 
 
 def test_infer_contact_by_velocity_marks_stationary_toe():
@@ -115,3 +122,51 @@ def test_motion_contacts_resample_with_nearest_neighbor_states():
     resampled = motion.resampled(2.0)
 
     assert resampled.contacts == ({"toe": True}, {"toe": True}, {"toe": False})
+
+
+def test_contact_plan_validates_tracks_and_exposes_frame_view():
+    support = SupportPlane(normal=np.array([0.0, 0.0, 2.0]), origin=np.array([0.0, 0.0, 0.1]))
+    plan = ContactPlan(
+        tracks=(
+            ContactTrack("left_foot", np.array([0, 1, 2]), link_names=("left_toe",), labels=("air", "ground", "board")),
+            ContactTrack("right_foot", np.array([1, 0, 0]), link_names=("right_toe",)),
+        ),
+        support=support,
+        provenance={"source": "test"},
+    )
+
+    frame = plan.frame(1)
+
+    assert plan.frame_count == 3
+    assert frame.active_link_names == ("left_toe",)
+    assert frame.support_link_names == ("left_toe",)
+    assert frame.support is support
+    assert frame.as_contact_dict() == {"left_foot": True, "right_foot": False}
+
+
+def test_contact_plan_resamples_and_scales_support_plane():
+    plan = ContactPlan(
+        tracks=(ContactTrack("toe", np.array([0, 1]), link_names=("left_toe",)),),
+        support=SupportPlane(normal=np.array([0.0, 0.0, 1.0]), origin=np.array([0.0, 0.0, 0.5])),
+    )
+
+    resampled = plan.resampled(1.0, 2.0)
+    scaled = resampled.scaled(2.0)
+
+    assert resampled.frame_count == 3
+    assert resampled.tracks[0].states.tolist() == [0, 0, 1]
+    assert np.allclose(scaled.support.origin, [0.0, 0.0, 1.0])
+
+
+def test_contact_plan_from_binary_contacts_maps_links():
+    plan = ContactPlan.from_binary_contacts(
+        ({"L_Foot": True, "R_Foot": False}, {"L_Foot": False, "R_Foot": True}),
+        link_mapping={"L_Foot": "left_toe", "R_Foot": ("right_toe",)},
+        support=SupportPlane(normal=np.array([0.0, 0.0, 1.0]), origin=np.zeros(3)),
+        provenance={"source": "legacy"},
+    )
+
+    assert tuple(track.subject for track in plan.tracks) == ("L_Foot", "R_Foot")
+    assert plan.tracks[0].link_names == ("left_toe",)
+    assert plan.frame(0).active_link_names == ("left_toe",)
+    assert plan.frame(1).active_link_names == ("right_toe",)

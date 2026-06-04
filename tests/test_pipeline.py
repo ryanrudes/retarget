@@ -666,6 +666,7 @@ def _term_context(
         q_current=qpos,
         q_previous=qpos.copy(),
         frame_idx=0,
+        contact_frame=None,
         frame_contacts={},
         robot_point_names=(),
         robot_points=np.zeros((0, 3), dtype=np.float64),

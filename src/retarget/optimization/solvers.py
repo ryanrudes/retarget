@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -74,10 +74,11 @@ class CvxpyClarabelSolver:
         """
         try:
             import clarabel  # noqa: F401
-            import cvxpy as cp
+            import cvxpy as cvxpy_module
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise RuntimeError("Install retarget[optimize] to use the CVXPY Clarabel solver") from exc
 
+        cp = cast(Any, cvxpy_module)
         x = cp.Variable(problem.matrix.shape[1])
         constraints = []
         if problem.lower is not None:

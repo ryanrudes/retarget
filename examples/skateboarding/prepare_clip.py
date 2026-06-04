@@ -11,6 +11,7 @@ writes the three assets used by the retargeting example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from rich.console import Console
 
 from retarget.core.enums import FrameConvention, QuaternionOrder
 from retarget.core.pose import convert_points_frame, reorder_quaternion
+from retarget.integrations.motion_sync import contact_plan_from_sync_clip
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DEMO = "pushoff5_twoshoes"
@@ -53,8 +55,6 @@ DECK_SAMPLE_POINTS = np.asarray(
     dtype=np.float64,
 )
 
-HUMAN_HEIGHT_M = 1.8034 # 5'11"
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", default=DEFAULT_DEMO, help="Demo id under --synced-root.")
@@ -71,6 +71,7 @@ def parse_args() -> argparse.Namespace:
         help="Output directory. Defaults to examples/skateboarding/generated/<demo>.",
     )
     parser.add_argument("--max-frames", type=int, help="Optional frame cap for smoke runs.")
+    parser.add_argument("--height-m", type=float, help="Source human height in meters for scale-to-robot runs.")
     parser.add_argument("--force-contacts", action="store_true", help="Re-run foot-support detection.")
     parser.add_argument(
         "--save-contact-layer",
@@ -89,6 +90,7 @@ def main() -> None:
         output_dir,
         name=args.demo,
         max_frames=args.max_frames,
+        height_m=args.height_m,
         force_contacts=args.force_contacts,
         save_contact_layer=args.save_contact_layer,
     )
@@ -104,6 +106,7 @@ def prepare_clip(
     *,
     name: str = "",
     max_frames: int | None = None,
+    height_m: float | None = None,
     force_contacts: bool = False,
     save_contact_layer: bool = False,
 ) -> dict[str, Any]:
@@ -121,12 +124,21 @@ def prepare_clip(
         clip = clip.detect(foot_support, force=force_contacts)
         if save_contact_layer:
             clip.save(synced_path)
+    foot_contact_data = clip.contact(foot_support)
+    contact_plan = contact_plan_from_sync_clip(
+        clip,
+        contact_type=foot_support,
+        contact_link_mapping={
+            ecosystem["Bodies"].LEFT_SHOE.value: FOOT_TARGET_LINKS[0],
+            ecosystem["Bodies"].RIGHT_SHOE.value: FOOT_TARGET_LINKS[1],
+        },
+    )
 
     fps = _estimate_fps(np.asarray(clip.time_s, dtype=np.float64))
     clip_name = name or clip.name or (synced_path.parent.name if synced_path.name == "synced.npz" else synced_path.stem)
     joint_names = tuple(member.value for member in ecosystem["SmplxCoreJoints"])
     joint_positions = _aligned_smplx_joints(clip, ecosystem)
-    stance = np.asarray(clip.contact(foot_support).stance_matrix(), dtype=bool)
+    stance = np.asarray(foot_contact_data.stance_matrix(), dtype=bool)
     board_positions, board_quaternions = _board_trajectory(clip, ecosystem)
     link_target_names, link_target_positions, link_target_weights, link_target_masks = _link_targets(
         joint_positions,
@@ -152,25 +164,46 @@ def prepare_clip(
     root_positions = joint_positions[:, _joint_index(joint_names, "Pelvis"), :]
     root_quaternions = np.zeros((joint_positions.shape[0], 4), dtype=np.float64)
     root_quaternions[:, 0] = 1.0
-    np.savez(
-        output_dir / "skate_motion.npz",
-        joint_positions=joint_positions,
-        joint_names=np.asarray(joint_names, dtype=object),
-        fps=np.asarray(fps, dtype=np.float64),
-        frame_convention=np.asarray(FrameConvention.Z_UP_RIGHT_HANDED.value),
-        root_positions=root_positions,
-        root_quaternions=root_quaternions,
-        root_quaternion_order=np.asarray(QuaternionOrder.WXYZ.value),
-        contact_states=stance,
-        contact_names=np.asarray(CONTACT_JOINTS, dtype=object),
-        link_target_names=np.asarray(link_target_names, dtype=object),
-        link_target_positions=link_target_positions,
-        link_target_weights=link_target_weights,
-        link_target_masks=link_target_masks,
-        link_target_source=np.asarray("motion_sync:skate_foot_support+video_core_joints", dtype=object),
-        height_m=np.asarray(HUMAN_HEIGHT_M, dtype=np.float64),
-        name=np.asarray(clip_name, dtype=object),
-    )
+    payload: dict[str, Any] = {
+        "joint_positions": joint_positions,
+        "joint_names": np.asarray(joint_names, dtype=object),
+        "fps": np.asarray(fps, dtype=np.float64),
+        "frame_convention": np.asarray(FrameConvention.Z_UP_RIGHT_HANDED.value),
+        "root_positions": root_positions,
+        "root_quaternions": root_quaternions,
+        "root_quaternion_order": np.asarray(QuaternionOrder.WXYZ.value),
+        "contact_states": stance,
+        "contact_names": np.asarray(CONTACT_JOINTS, dtype=object),
+        "link_target_names": np.asarray(link_target_names, dtype=object),
+        "link_target_positions": link_target_positions,
+        "link_target_weights": link_target_weights,
+        "link_target_masks": link_target_masks,
+        "link_target_source": np.asarray("motion_sync:foot_support+video_core_joints", dtype=object),
+        "contact_source": np.asarray("motion_sync:foot_support", dtype=object),
+        "contact_source_frame_count": np.asarray(joint_positions.shape[0], dtype=np.int32),
+        "contact_timeline_fingerprint": np.asarray(
+            _timeline_fingerprint(clip.time_s[: joint_positions.shape[0]]),
+            dtype=object,
+        ),
+        "name": np.asarray(clip_name, dtype=object),
+    }
+    if height_m is not None:
+        if height_m <= 0:
+            raise ValueError("height_m must be positive")
+        payload["height_m"] = np.asarray(height_m, dtype=np.float64)
+    if contact_plan is not None and contact_plan.support is not None:
+        payload["support_plane_normal"] = contact_plan.support.normal
+        payload["support_plane_origin"] = contact_plan.support.origin
+        payload["support_plane_up_axis"] = np.asarray(contact_plan.support.up_axis, dtype=np.int32)
+    for key, out_key in (("config_hash", "contact_model_fingerprint"),):
+        if contact_plan is not None and key in contact_plan.provenance:
+            payload[out_key] = np.asarray(str(contact_plan.provenance[key]), dtype=object)
+    if contact_plan is not None and "time_fingerprint" in contact_plan.provenance:
+        payload["contact_detector_timeline_fingerprint"] = np.asarray(
+            str(contact_plan.provenance["time_fingerprint"]),
+            dtype=object,
+        )
+    np.savez(output_dir / "skate_motion.npz", **payload)
     np.save(output_dir / "deck_samples.npy", DECK_SAMPLE_POINTS)
     np.savez(
         output_dir / "board_trajectory.npz",
@@ -225,6 +258,14 @@ def _estimate_fps(time_s: np.ndarray) -> float:
     if positive.size == 0:
         return 30.0
     return float(1.0 / np.mean(positive))
+
+
+def _timeline_fingerprint(time_s: np.ndarray) -> str:
+    arr = np.asarray(time_s, dtype=np.float64)
+    digest = hashlib.sha1()
+    digest.update(np.asarray(arr.shape, dtype=np.int64).tobytes())
+    digest.update(np.asarray(arr[[0, -1]] if arr.size else [], dtype=np.float64).tobytes())
+    return digest.hexdigest()[:16]
 
 
 def _aligned_smplx_joints(clip: Any, ecosystem: dict[str, Any]) -> np.ndarray:

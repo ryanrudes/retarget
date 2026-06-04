@@ -37,7 +37,7 @@ from retarget.export import ExportResult, ExportSpec, exporters
 from retarget.kinematics import GeometryDistance, kinematics_backends
 from retarget.mesh import InteractionMeshBuilder, InteractionMeshSpec, MeshTopology, sample_mesh_points
 from retarget.metrics import metrics
-from retarget.motion import motion_formats, motion_loaders
+from retarget.motion import ContactFrame, ContactPlan, ContactTrack, SupportPlane, motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
 from retarget.optimization import (
     ConstraintContribution,
@@ -72,7 +72,10 @@ __all__ = [
     "ConstraintContribution",
     "ConstraintSpec",
     "ConstraintTerm",
+    "ContactFrame",
     "ContactMode",
+    "ContactPlan",
+    "ContactTrack",
     "EvaluationManifest",
     "EvaluationRecord",
     "EvaluationReport",
@@ -119,6 +122,7 @@ __all__ = [
     "Solver",
     "SolverBackend",
     "SolverSpec",
+    "SupportPlane",
     "TaskKind",
     "TermContext",
     "TerrainSpec",

@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from retarget.assets import AssetInstallManifest, AssetStore
-from retarget.cli.config import RetargetingRunConfig
+from retarget.cli.config import MotionFileSourceConfig, RetargetingRunConfig
 from retarget.core.enums import AssetKind, KinematicsBackendName, RunStatus, TaskKind
 from retarget.core.protocols import KinematicsBackend
 from retarget.export import ExportSpec, export_tracking, exporters
@@ -439,9 +439,8 @@ def _run_one(
     return _run_from_config(
         RetargetingRunConfig(
             name=name,
-            motion=motion_path,
+            source=MotionFileSourceConfig(path=motion_path, format_name=format_name),
             output=output,
-            format_name=format_name,
             robot=robot_name,
             task_kind=task_kind,
         )
@@ -475,9 +474,8 @@ def _run_config_from_inputs(
         raise typer.BadParameter("--output is required when --config is not provided")
     return RetargetingRunConfig(
         name=name,
-        motion=motion,
+        source=MotionFileSourceConfig(path=motion, format_name=format_name or "minimal"),
         output=output,
-        format_name=format_name or "minimal",
         robot=robot_name or "synthetic_humanoid",
         task_kind=task_kind or TaskKind.ROBOT_ONLY,
         show_progress=show_progress if show_progress is not None else False,

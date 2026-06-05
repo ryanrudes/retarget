@@ -4,9 +4,8 @@ import numpy as np
 import pytest
 
 from retarget.assets import AssetStore
-from retarget.cli.config import RetargetingRunConfig
+from retarget.cli.config import MotionFileSourceConfig, RetargetingRunConfig
 from retarget.core.enums import AssetKind, TaskKind
-from retarget.optimization import ObjectiveSpec
 
 
 def test_run_config_resolves_paths_and_builds_problem(tmp_path):
@@ -15,24 +14,30 @@ def test_run_config_resolves_paths_and_builds_problem(tmp_path):
     config_path.write_text(
         """
 name: yaml_config
-motion: motion.json
-format: minimal
 robot: synthetic_humanoid
 task_kind: robot_only
 output: result.npz
+source:
+  kind: motion_file
+  path: motion.json
+  format: minimal
 mesh:
   topology: k_nearest
   k_neighbors: 2
+variables:
+  kind: qpos_slice
+  actuated_start_offset: -7
 scene:
   ground_size: 3
 constraints:
-  - name: joint_limits
-  - name: trust_region
+  - kind: joint_limits
+  - kind: trust_region
 """.strip()
     )
 
     config = RetargetingRunConfig.load(config_path)
-    assert config.motion == tmp_path / "motion.json"
+    assert isinstance(config.source, MotionFileSourceConfig)
+    assert config.source.path == tmp_path / "motion.json"
     assert config.output == tmp_path / "result.npz"
     assert config.task_kind == TaskKind.ROBOT_ONLY
 
@@ -40,7 +45,58 @@ constraints:
     assert problem.name == "yaml_config"
     assert problem.mesh.topology == "k_nearest"
     assert problem.mesh.k_neighbors == 2
+    assert problem.variables.kind == "qpos_slice"
+    assert problem.variables.actuated_start_offset == -7
+    resolved_variables = problem.variables.resolve(problem.robot, qpos_size=problem.robot.qpos_size())
+    assert resolved_variables.indices[0] == 0
     assert problem.scene.ground_size == 3
+
+
+def test_run_config_rejects_legacy_top_level_motion_fields(tmp_path):
+    config_path = tmp_path / "legacy.toml"
+    config_path.write_text(
+        """
+name = "legacy"
+motion = "motion.json"
+format = "minimal"
+robot = "synthetic_humanoid"
+output = "result.npz"
+""".strip()
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        RetargetingRunConfig.load(config_path)
+
+    message = str(exc_info.value)
+    assert "source" in message
+    assert "motion" in message
+    assert "format" in message
+
+
+def test_run_config_rejects_legacy_objective_parameter_blocks(tmp_path):
+    config_path = tmp_path / "legacy_parameters.toml"
+    config_path.write_text(
+        """
+robot = "synthetic_humanoid"
+output = "result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
+
+[[objectives]]
+kind = "smoothness"
+parameters = { weight = 0.2 }
+""".strip()
+    )
+
+    config = RetargetingRunConfig.load(config_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        config.resolved_objectives()
+
+    assert "parameters" in str(exc_info.value)
 
 
 def test_run_config_upgrades_motion_contacts_to_typed_contact_plan(tmp_path):
@@ -61,10 +117,13 @@ def test_run_config_upgrades_motion_contacts_to_typed_contact_plan(tmp_path):
     config_path.write_text(
         """
 name = "typed_contacts"
-motion = "motion.npz"
-format = "minimal"
 robot = "synthetic_humanoid"
 output = "result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.npz"
+format = "minimal"
 """.strip()
     )
 
@@ -83,11 +142,14 @@ def test_run_config_resolves_relative_import_paths(tmp_path):
     config_path = tmp_path / "run.toml"
     config_path.write_text(
         """
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 output = "result.npz"
 imports = ["extensions/custom_terms.py", "retarget.motion"]
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 """.strip()
     )
 
@@ -105,18 +167,25 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from retarget.optimization import ObjectiveContribution, ObjectiveSpec, TermContext, objective_terms
+from typing import Literal
+
+from retarget.optimization import ObjectiveConfig, ObjectiveContribution, TermContext, objective_terms
+
+
+class UnitPluginEnergyConfig(ObjectiveConfig):
+    kind: Literal["unit_plugin_energy"] = "unit_plugin_energy"
 
 
 @objective_terms.register("unit_plugin_energy", replace=True)
 @dataclass(frozen=True)
 class UnitPluginEnergy:
     name: str = "unit_plugin_energy"
+    config_type: type[UnitPluginEnergyConfig] = UnitPluginEnergyConfig
 
     def describe(self) -> str:
         return "A unit-test extension objective."
 
-    def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+    def build(self, context: TermContext, _config: UnitPluginEnergyConfig) -> tuple[ObjectiveContribution, ...]:
         return (
             ObjectiveContribution(
                 matrix=np.eye(context.dof, dtype=np.float64),
@@ -127,10 +196,10 @@ class UnitPluginEnergy:
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     config = RetargetingRunConfig(
-        motion=tmp_path / "missing_motion.json",
+        source=MotionFileSourceConfig(path=tmp_path / "missing_motion.json", format_name="minimal"),
         output=tmp_path / "result.npz",
         imports=("unit_plugin",),
-        objectives=(ObjectiveSpec(name="unit_plugin_energy"),),
+        objectives=({"kind": "unit_plugin_energy"},),
     )
 
     config.validate_registry_references()
@@ -154,11 +223,14 @@ joint = [-1.0, 1.0]
     config_path.write_text(
         """
 name = "file_robot_config"
-motion = "motion.json"
-format = "minimal"
 robot = "file_bot"
 robot_provider = "file"
 output = "result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [robot_options]
 path = "robot.toml"
@@ -194,11 +266,14 @@ joint = [-1.0, 1.0]
     config_path.write_text(
         """
 name = "asset_robot_config"
-motion = "motion.json"
-format = "minimal"
 robot = "asset_bot"
 robot_provider = "asset_store"
 output = "result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [robot_options]
 store = "store"
@@ -214,9 +289,8 @@ store = "store"
 
 def test_run_config_preflights_registry_references_before_loading_files(tmp_path):
     config = RetargetingRunConfig(
-        motion=tmp_path / "missing_motion.json",
+        source=MotionFileSourceConfig(path=tmp_path / "missing_motion.json", format_name="missing_format"),
         output=tmp_path / "result.npz",
-        format_name="missing_format",
         robot="missing_robot",
     )
 
@@ -232,9 +306,9 @@ def test_run_config_preflights_registry_references_before_loading_files(tmp_path
 
 def test_run_config_preflights_optimization_references_before_loading_files(tmp_path):
     config = RetargetingRunConfig(
-        motion=tmp_path / "missing_motion.json",
+        source=MotionFileSourceConfig(path=tmp_path / "missing_motion.json", format_name="minimal"),
         output=tmp_path / "result.npz",
-        objectives=(ObjectiveSpec(name="missing_cli_objective"),),
+        objectives=({"kind": "missing_cli_objective"},),
     )
 
     with pytest.raises(KeyError) as exc_info:
@@ -258,11 +332,14 @@ def test_run_config_loads_object_trajectory_and_sample_points(tmp_path):
     config_path.write_text(
         """
 name = "object_config"
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "object_interaction"
 output = "object_result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [scene.object]
 name = "box"
@@ -288,11 +365,13 @@ def test_run_config_loads_terrain_sample_points_from_json(tmp_path):
     config_path.write_text(
         """
 name: climbing_config
-motion: motion.json
-format: minimal
 robot: synthetic_humanoid
 task_kind: climbing
 output: climbing_result.npz
+source:
+  kind: motion_file
+  path: motion.json
+  format: minimal
 scene:
   terrain:
     name: holds
@@ -322,11 +401,14 @@ f 1 2 3
     config_path.write_text(
         """
 name = "object_mesh_config"
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "object_interaction"
 output = "object_mesh_result.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [scene.object]
 name = "box"

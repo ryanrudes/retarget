@@ -35,7 +35,6 @@ def test_example_script_executes(example_name: str, tmp_path: Path):
 @pytest.mark.parametrize(
     "script_name",
     (
-        "skateboarding/prepare_clip.py",
         "skateboarding/run_retarget.py",
         "../scripts/bootstrap_robot_assets.py",
     ),

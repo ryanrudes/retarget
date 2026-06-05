@@ -9,8 +9,9 @@ import importlib.util
 import json
 import sys
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Self
+from typing import Annotated, Any, Literal, Self, TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -19,36 +20,119 @@ from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
 from retarget.core.pose import PoseSequence, convert_points_frame
 from retarget.core.registry import Registry
 from retarget.mesh import InteractionMeshSpec, sample_mesh_points
-from retarget.motion import load_motion, motion_formats
+from retarget.motion import LinkTargetPlan, NominalQposPlan, load_motion, motion_formats
 from retarget.motion.contact import ContactPlan, SupportPlane
-from retarget.optimization import validate_optimization_references
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, OptimizationProfile, SolverSpec
+from retarget.optimization import constraint_terms, objective_terms, validate_optimization_references
+from retarget.optimization.spec import (
+    ConstraintConfig,
+    ConstraintConfigUnion,
+    ObjectiveConfig,
+    ObjectiveConfigUnion,
+    OptimizationProfile,
+    SolverSpec,
+)
+from retarget.optimization.variables import QposVariableSpec
 from retarget.pipeline import RetargetingProblem
 from retarget.robots import robot_providers, robots
+from retarget.robots.spec import RobotSpec
 from retarget.scene import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
 
 
-class ObjectConfig(BaseModel):
-    """Serializable object-scene options for CLI run specs.
+@dataclass(frozen=True)
+class _PreparedInputs:
+    motion: Any
+    scene: SceneSpec
+    contacts: ContactPlan | None = None
+    targets: LinkTargetPlan | None = None
+    nominal_qpos: NominalQposPlan | None = None
+    motion_format_name: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    Attributes:
-        name (str): Object identifier (default ``"object"``).
-        mesh_path (Path | None): Mesh file used to sample interaction points.
-        urdf_path (Path | None): Optional URDF for object geometry.
-        sample_points (tuple[tuple[float, float, float], ...] | None): Inline object sample points.
-        sample_points_path (Path | None): File containing sample points (``.npy``, ``.npz``, etc.).
-        mesh_sample_count (int): Number of points to sample from ``mesh_path`` when inline/path
-            points are omitted (default ``128``).
-        sample_points_frame (FrameConvention): Frame convention of inline/path sample points.
-        identity_trajectory (bool): Use a fixed identity object pose for every frame.
-        trajectory_path (Path | None): File with object pose trajectory.
-        trajectory_positions (tuple[tuple[float, float, float], ...] | None): Inline positions.
-        trajectory_quaternions (tuple[tuple[float, float, float, float], ...] | None): Inline
-            orientations paired with positions.
-        trajectory_quaternion_order (QuaternionOrder): Storage order of inline quaternions.
-        trajectory_frame (FrameConvention): Frame convention of inline trajectory data.
-        metadata (dict[str, Any]): Free-form object metadata passed to :class:`~retarget.scene.ObjectSpec`.
-    """
+
+class MotionFileSourceConfig(BaseModel):
+    """Load a motion file through a registered motion format."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    kind: Literal["motion_file"] = "motion_file"
+    path: Path
+    format_name: str = Field(default="minimal", alias="format")
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def _coerce_path(cls, value: Any) -> Path:
+        return Path(value)
+
+    def resolve_paths(self, base_dir: Path) -> MotionFileSourceConfig:
+        """Return a copy with relative paths resolved."""
+
+        return self.model_copy(update={"path": _resolve_relative(self.path, base_dir)})
+
+
+class MotionSyncSkateboardingSourceConfig(BaseModel):
+    """Prepare a skateboarding ``motion_sync`` clip directly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["motion_sync_skateboarding"] = "motion_sync_skateboarding"
+    demo: str = "pushoff5_twoshoes"
+    synced: Path | None = None
+    synced_root: Path = Path("motion_sync_output/synced")
+    max_frames: int | None = None
+    height_m: float | None = None
+    force_contacts: bool = False
+    save_contact_layer: bool = False
+
+    @field_validator("synced", "synced_root", mode="before")
+    @classmethod
+    def _coerce_optional_path(cls, value: Any) -> Path | None:
+        return None if value in (None, "") else Path(value)
+
+    @field_validator("max_frames")
+    @classmethod
+    def _positive_max_frames(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("max_frames must be positive")
+        return value
+
+    @field_validator("height_m")
+    @classmethod
+    def _positive_height(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("height_m must be positive")
+        return None if value is None else float(value)
+
+    def resolve_paths(self, base_dir: Path) -> MotionSyncSkateboardingSourceConfig:
+        """Return a copy with relative paths resolved."""
+
+        return self.model_copy(
+            update={
+                "synced": _resolve_relative(self.synced, base_dir),
+                "synced_root": _resolve_relative(self.synced_root, base_dir),
+            }
+        )
+
+    @property
+    def synced_path(self) -> Path:
+        """Resolved synced clip path."""
+
+        if self.synced is not None:
+            return self.synced
+        return self.synced_root / self.demo
+
+
+RunSourceConfig: TypeAlias = Annotated[
+    MotionFileSourceConfig | MotionSyncSkateboardingSourceConfig,
+    Field(discriminator="kind"),
+]
+ObjectiveConfigInput: TypeAlias = ObjectiveConfigUnion | dict[str, Any]
+ConstraintConfigInput: TypeAlias = ConstraintConfigUnion | dict[str, Any]
+
+
+class ObjectConfig(BaseModel):
+    """Serializable object-scene options for CLI run specs."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = "object"
     mesh_path: Path | None = None
@@ -86,17 +170,9 @@ class ObjectConfig(BaseModel):
 
 
 class TerrainConfig(BaseModel):
-    """Serializable terrain-scene options for CLI run specs.
+    """Serializable terrain-scene options for CLI run specs."""
 
-    Attributes:
-        name (str): Terrain identifier (default ``"terrain"``).
-        mesh_path (Path | None): Terrain mesh file.
-        sample_points (tuple[tuple[float, float, float], ...] | None): Inline terrain sample points.
-        sample_points_path (Path | None): File containing terrain sample points.
-        mesh_sample_count (int): Points to sample from ``mesh_path`` when others are omitted.
-        sample_points_frame (FrameConvention): Frame convention of sample points.
-        metadata (dict[str, Any]): Free-form terrain metadata passed to :class:`~retarget.scene.TerrainSpec`.
-    """
+    model_config = ConfigDict(extra="forbid")
 
     name: str = "terrain"
     mesh_path: Path | None = None
@@ -125,15 +201,9 @@ class TerrainConfig(BaseModel):
 
 
 class SceneConfig(BaseModel):
-    """Serializable scene options for CLI run specs.
+    """Serializable scene options for CLI run specs."""
 
-    Attributes:
-        object (ObjectConfig | None): Manipulated object configuration for interaction tasks.
-        terrain (TerrainConfig | None): Terrain mesh or samples for climbing tasks.
-        ground_range (tuple[float, float]): Horizontal ground sampling range for support meshes.
-        ground_size (int): Grid resolution for ground support sampling.
-        metadata (dict[str, Any]): Free-form scene metadata passed to :class:`~retarget.scene.SceneSpec`.
-    """
+    model_config = ConfigDict(extra="forbid")
 
     object: ObjectConfig | None = None
     terrain: TerrainConfig | None = None
@@ -142,7 +212,7 @@ class SceneConfig(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def resolve_paths(self, base_dir: Path) -> SceneConfig:
-        """Return a copy with relative asset paths resolved against `base_dir`."""
+        """Return a copy with relative file paths resolved against `base_dir`."""
 
         return self.model_copy(
             update={
@@ -153,35 +223,12 @@ class SceneConfig(BaseModel):
 
 
 class RetargetingRunConfig(BaseModel):
-    """Human-editable run spec used by the CLI.
+    """Human-editable run spec used by the CLI."""
 
-    Attributes:
-        name (str | None): Optional run or result name; defaults to the motion clip name.
-        motion (Path): Source motion file path.
-        format_name (str): Registered motion format key (TOML alias ``format``; default ``"minimal"``).
-        robot (str): Robot name passed to the selected provider.
-        robot_provider (str): Registered provider key (default ``"registry"``).
-        robot_options (dict[str, Any]): Provider-specific options (``path``, ``store``, etc.).
-        task_kind (TaskKind): Retargeting workflow kind.
-        output (Path): Destination ``.npz`` result path.
-        imports (tuple[str, ...]): Extension modules or ``.py`` plugins to import before validation.
-        scale_to_robot (bool): Scale source motion to the target robot height.
-        output_fps (float | None): Optional result frame rate override.
-        show_progress (bool): Show a Rich per-frame progress bar during optimization.
-        joint_mapping (dict[str, str] | None): Source-to-robot joint name overrides.
-        mesh (InteractionMeshSpec): Interaction mesh construction settings.
-        solver (SolverSpec): Optimization solver configuration.
-        objectives (tuple[ObjectiveSpec, ...] | None): Objective terms; defaults when omitted.
-        constraints (tuple[ConstraintSpec, ...] | None): Constraint terms; defaults when omitted.
-        scene (SceneConfig): Scene object, terrain, and ground options.
-        metadata (dict[str, Any]): Free-form run metadata stored on the result.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = None
-    motion: Path
-    format_name: str = Field(default="minimal", alias="format")
+    source: RunSourceConfig
     robot: str = "synthetic_humanoid"
     robot_provider: str = "registry"
     robot_options: dict[str, Any] = Field(default_factory=dict)
@@ -194,12 +241,13 @@ class RetargetingRunConfig(BaseModel):
     joint_mapping: dict[str, str] | None = None
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
     solver: SolverSpec = Field(default_factory=SolverSpec)
-    objectives: tuple[ObjectiveSpec, ...] | None = None
-    constraints: tuple[ConstraintSpec, ...] | None = None
+    variables: QposVariableSpec = Field(default_factory=QposVariableSpec.actuated)
+    objectives: tuple[ObjectiveConfigInput, ...] | None = None
+    constraints: tuple[ConstraintConfigInput, ...] | None = None
     scene: SceneConfig = Field(default_factory=SceneConfig)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("motion", "output", mode="before")
+    @field_validator("output", mode="before")
     @classmethod
     def _coerce_path(cls, value: Any) -> Path:
         return Path(value)
@@ -227,7 +275,7 @@ class RetargetingRunConfig(BaseModel):
 
         return self.model_copy(
             update={
-                "motion": _resolve_relative(self.motion, base_dir),
+                "source": self.source.resolve_paths(base_dir),
                 "output": _resolve_relative(self.output, base_dir),
                 "imports": _resolve_import_refs(self.imports, base_dir),
                 "robot_options": _resolve_robot_options(self.robot_options, base_dir),
@@ -250,11 +298,14 @@ class RetargetingRunConfig(BaseModel):
 
         updates: dict[str, Any] = {}
         if motion is not None:
-            updates["motion"] = motion
+            current_format = self.source.format_name if isinstance(self.source, MotionFileSourceConfig) else "minimal"
+            updates["source"] = MotionFileSourceConfig(path=motion, format_name=format_name or current_format)
+        elif format_name is not None:
+            if not isinstance(self.source, MotionFileSourceConfig):
+                raise ValueError("--format can only override motion_file sources")
+            updates["source"] = self.source.model_copy(update={"format_name": format_name})
         if output is not None:
             updates["output"] = output
-        if format_name is not None:
-            updates["format_name"] = format_name
         if robot is not None:
             updates["robot"] = robot
             updates["robot_provider"] = "registry"
@@ -271,29 +322,29 @@ class RetargetingRunConfig(BaseModel):
         """Resolve registries and build a `RetargetingProblem`."""
 
         self.validate_registry_references()
-        motion = load_motion(self.motion, self.format_name, name=self.name)
         robot_spec = robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
-        scene = self._build_scene(frame_count=motion.frame_count, fps=motion.fps)
-        contacts = _contact_plan_from_motion(motion, robot_spec.contact_links)
+        prepared = self._build_inputs(robot_spec)
+        motion_format = motion_formats.get(prepared.motion_format_name) if prepared.motion_format_name else None
         return RetargetingProblem(
-            name=self.name or motion.name,
+            name=self.name or prepared.motion.name,
             task_kind=self.task_kind,
             robot=robot_spec,
-            motion=motion,
-            contacts=contacts,
-            scene=scene,
-            motion_format=motion_formats.get(self.format_name),
+            motion=prepared.motion,
+            scene=prepared.scene,
+            contacts=prepared.contacts,
+            targets=prepared.targets,
+            nominal_qpos=prepared.nominal_qpos,
+            motion_format=motion_format,
             joint_mapping=self.joint_mapping,
             mesh=self.mesh,
             solver=self.solver,
-            objectives=self.objectives if self.objectives is not None else _default_objectives(),
-            constraints=(
-                self.constraints if self.constraints is not None else _default_constraints()
-            ),
+            variables=self.variables,
+            objectives=self.resolved_objectives(),
+            constraints=self.resolved_constraints(),
             scale_to_robot=self.scale_to_robot,
             output_fps=self.output_fps,
             show_progress=self.show_progress,
-            metadata=self.metadata,
+            metadata={**self.metadata, **prepared.metadata},
         )
 
     def import_extensions(self) -> None:
@@ -302,21 +353,70 @@ class RetargetingRunConfig(BaseModel):
         for reference in self.imports:
             _import_extension(reference)
 
+    def resolved_objectives(self) -> tuple[ObjectiveConfig, ...]:
+        """Return config entries validated through registered objective terms."""
+
+        return _resolve_objective_configs(self.objectives if self.objectives is not None else _default_objectives())
+
+    def resolved_constraints(self) -> tuple[ConstraintConfig, ...]:
+        """Return config entries validated through registered constraint terms."""
+
+        return _resolve_constraint_configs(self.constraints if self.constraints is not None else _default_constraints())
+
     def validate_registry_references(self) -> None:
         """Validate named extension references before loading files or assets."""
 
         self.import_extensions()
         messages: list[str] = []
-        _append_missing_registry_messages(messages, motion_formats, (self.format_name,))
+        if isinstance(self.source, MotionFileSourceConfig):
+            _append_missing_registry_messages(messages, motion_formats, (self.source.format_name,))
         _append_missing_registry_messages(messages, robot_providers, (self.robot_provider,))
         if self.robot_provider == "registry":
             _append_missing_registry_messages(messages, robots, (self.robot,))
+        objective_inputs = self.objectives if self.objectives is not None else _default_objectives()
+        constraint_inputs = self.constraints if self.constraints is not None else _default_constraints()
+        _append_missing_registry_messages(messages, objective_terms, _config_kinds(objective_inputs, label="objective"))
+        _append_missing_registry_messages(
+            messages,
+            constraint_terms,
+            _config_kinds(constraint_inputs, label="constraint"),
+        )
         if messages:
             raise KeyError("Unknown run-config registry references: " + "; ".join(messages))
         validate_optimization_references(
             solver=self.solver,
-            objectives=self.objectives if self.objectives is not None else _default_objectives(),
-            constraints=self.constraints if self.constraints is not None else _default_constraints(),
+            objectives=self.resolved_objectives(),
+            constraints=self.resolved_constraints(),
+        )
+
+    def _build_inputs(self, robot: RobotSpec) -> _PreparedInputs:
+        if isinstance(self.source, MotionFileSourceConfig):
+            motion = load_motion(self.source.path, self.source.format_name, name=self.name)
+            return _PreparedInputs(
+                motion=motion,
+                scene=self._build_scene(frame_count=motion.frame_count, fps=motion.fps),
+                contacts=_contact_plan_from_motion(motion, robot.contact_links),
+                motion_format_name=self.source.format_name,
+            )
+        from retarget.integrations.motion_sync.skateboarding import from_skateboarding_clip
+
+        prepared = from_skateboarding_clip(
+            self.source.synced_path,
+            name=self.name or self.source.demo,
+            max_frames=self.source.max_frames,
+            height_m=self.source.height_m,
+            force_contacts=self.source.force_contacts,
+            save_contact_layer=self.source.save_contact_layer,
+            contact_links=robot.contact_links,
+        )
+        return _PreparedInputs(
+            motion=prepared.motion,
+            scene=prepared.scene,
+            contacts=prepared.contacts,
+            targets=prepared.targets,
+            nominal_qpos=prepared.nominal_qpos,
+            motion_format_name="smplx",
+            metadata=dict(prepared.metadata),
         )
 
     def _build_scene(self, *, frame_count: int, fps: float) -> SceneSpec:
@@ -428,6 +528,53 @@ def _append_missing_registry_messages(messages: list[str], registry: Registry[An
     messages.append(f"{registry.name}: {', '.join(missing)} (available: {available})")
 
 
+def _config_kinds(items: tuple[Any, ...], *, label: str) -> tuple[str, ...]:
+    kinds: list[str] = []
+    for item in items:
+        if isinstance(item, (ObjectiveConfig, ConstraintConfig)):
+            kinds.append(item.kind)
+            continue
+        if not isinstance(item, dict):
+            raise TypeError(f"{label} config entries must be typed configs or mappings")
+        kind = item.get("kind")
+        if not isinstance(kind, str) or not kind:
+            raise ValueError(f"{label} config entries must include a non-empty kind")
+        kinds.append(kind)
+    return tuple(kinds)
+
+
+def _resolve_objective_configs(items: tuple[Any, ...]) -> tuple[ObjectiveConfig, ...]:
+    configs: list[ObjectiveConfig] = []
+    for item in items:
+        if isinstance(item, ObjectiveConfig):
+            configs.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise TypeError("objective config entries must be typed configs or mappings")
+        kind = item.get("kind")
+        if not isinstance(kind, str) or not kind:
+            raise ValueError("objective config entries must include a non-empty kind")
+        term = objective_terms.get(kind)
+        configs.append(term.config_type.model_validate(item))
+    return tuple(configs)
+
+
+def _resolve_constraint_configs(items: tuple[Any, ...]) -> tuple[ConstraintConfig, ...]:
+    configs: list[ConstraintConfig] = []
+    for item in items:
+        if isinstance(item, ConstraintConfig):
+            configs.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise TypeError("constraint config entries must be typed configs or mappings")
+        kind = item.get("kind")
+        if not isinstance(kind, str) or not kind:
+            raise ValueError("constraint config entries must include a non-empty kind")
+        term = constraint_terms.get(kind)
+        configs.append(term.config_type.model_validate(item))
+    return tuple(configs)
+
+
 def _resolve_robot_options(options: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     resolved = dict(options)
     for key in ("path", "store"):
@@ -486,11 +633,11 @@ def _support_plane_from_metadata(metadata: dict[str, Any]) -> SupportPlane | Non
     )
 
 
-def _default_objectives() -> tuple[ObjectiveSpec, ...]:
+def _default_objectives() -> tuple[ObjectiveConfig, ...]:
     return OptimizationProfile.defaults().objectives
 
 
-def _default_constraints() -> tuple[ConstraintSpec, ...]:
+def _default_constraints() -> tuple[ConstraintConfig, ...]:
     return OptimizationProfile.defaults().constraints
 
 

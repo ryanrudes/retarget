@@ -1,16 +1,11 @@
-# Real skateboarding clip config. Prepare inputs first:
-#   uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
+# Real skateboarding clip config:
 #   uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
-#
-# Programmatic MuJoCo-aware run:
 #   uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
 #
 # CLI run from the repository root:
 #   uv run retarget run --config examples/skateboarding/run_config.toml
 
 name = "pushoff5_twoshoes"
-motion = "generated/pushoff5_twoshoes/skate_motion.npz"
-format = "smplx"
 robot = "g1"
 robot_provider = "asset_store"
 task_kind = "object_interaction"
@@ -18,45 +13,43 @@ output = "generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz"
 scale_to_robot = false
 output_fps = 30
 
+[source]
+kind = "motion_sync_skateboarding"
+demo = "pushoff5_twoshoes"
+synced_root = "../../motion_sync_output/synced"
+
 [robot_options]
 store = "../../.retarget_assets"
 
-[scene]
-ground_size = 15
-ground_range = [-3.0, 3.0]
-
-[scene.object]
-name = "skateboard"
-sample_points_path = "generated/pushoff5_twoshoes/deck_samples.npy"
-trajectory_path = "generated/pushoff5_twoshoes/board_trajectory.npz"
-
 [solver]
 backend = "cvxpy_clarabel"
-max_iterations = 6
-trust_radius = 0.12
+max_iterations = 10
+trust_radius = 0.2
 
 [[objectives]]
-name = "link_tracking"
+kind = "link_tracking"
 weight = 1.0
 
 [[objectives]]
-name = "smoothness"
-weight = 0.12
+kind = "smoothness"
+weight = 0.2
 
 [[objectives]]
-name = "nominal_tracking"
-weight = 0.05
+kind = "nominal_tracking"
+weight = 5.0
 
 [[constraints]]
-name = "joint_limits"
+kind = "joint_limits"
 
 [[constraints]]
-name = "trust_region"
+kind = "trust_region"
 
 [[constraints]]
-name = "foot_contact"
-parameters = { tolerance = 0.002 }
+kind = "foot_sticking"
+tolerance = 0.001
 
 [[constraints]]
-name = "non_penetration"
-parameters = { links = ["left_ankle_roll_link", "right_ankle_roll_link"], scene_clearance = 0.015, activation_distance = 0.05 }
+kind = "non_penetration"
+sources = ["support", "scene_points"]
+scene_clearance = 0.015
+activation_distance = 0.05

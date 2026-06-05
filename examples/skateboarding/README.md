@@ -5,14 +5,12 @@ Runnable code for the research skateboarding walkthrough. This example starts fr
 retargeter hints, and renders the retargeted humanoid with a real URDF-backed G1
 model.
 
-Generated inputs and results are written under `examples/skateboarding/generated/`
-and are ignored by git.
+Results are written under `examples/skateboarding/generated/` and are ignored by git.
 
 | Script | Purpose |
 |--------|---------|
-| `prepare_clip.py` | Convert `motion_sync_output/synced/<demo>/synced.npz` into retarget inputs and link-target hints |
-| `run_retarget.py` | Prepare if needed, load the G1 asset, solve the retargeting problem, and save the result |
-| `run_config.toml` | CLI equivalent once generated inputs and robot assets exist |
+| `run_retarget.py` | Load a synced `motion_sync` clip, build typed contacts and link targets, solve, and save the result |
+| `run_config.toml` | CLI equivalent using the same `motion_sync_skateboarding` source |
 
 ## Setup
 
@@ -26,10 +24,9 @@ The bootstrap script copies Holosoma's G1 URDF/MJCF assets into
 `.retarget_assets/robot/g1`, writes `.retarget_assets/robot/g1/robot.toml`, and
 registers the asset-store manifest.
 
-## Prepare and Run
+## Run
 
 ```bash
-uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
 uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
 ```
 

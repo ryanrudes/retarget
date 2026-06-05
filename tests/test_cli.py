@@ -73,12 +73,15 @@ def test_cli_run_from_toml_config(tmp_path):
     config.write_text(
         """
 name = "configured"
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "robot_only"
 output = "configured.npz"
 output_fps = 60.0
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [mesh]
 topology = "k_nearest"
@@ -89,11 +92,11 @@ max_iterations = 4
 trust_radius = 0.2
 
 [[objectives]]
-name = "laplacian"
+kind = "laplacian"
 weight = 8.0
 
 [[objectives]]
-name = "smoothness"
+kind = "smoothness"
 weight = 0.1
 """.strip()
     )
@@ -102,7 +105,13 @@ weight = 0.1
     assert result.exists()
     result_data = np.load(result, allow_pickle=False)
     result_metadata = json.loads(result_data["metadata_json"].reshape(()).item())
-    assert result_metadata["mesh"] == {"topology": "k_nearest", "k_neighbors": 2, "source": "problem"}
+    assert result_metadata["mesh"] == {
+        "topology": "k_nearest",
+        "k_neighbors": 2,
+        "laplacian_weighting": "uniform",
+        "laplacian_epsilon": 1e-06,
+        "source": "problem",
+    }
     run_cli("evaluate", "--result", str(result), "--config", str(config), "--output", str(report))
     report_data = json.loads(report.read_text())
     assert report_data["status"] == "success"
@@ -120,18 +129,25 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from retarget.optimization import ObjectiveContribution, ObjectiveSpec, TermContext, objective_terms
+from typing import Literal
+
+from retarget.optimization import ObjectiveConfig, ObjectiveContribution, TermContext, objective_terms
+
+
+class CliZeroEnergyConfig(ObjectiveConfig):
+    kind: Literal["cli_zero_energy"] = "cli_zero_energy"
 
 
 @objective_terms.register("cli_zero_energy", replace=True)
 @dataclass(frozen=True)
 class CliZeroEnergy:
     name: str = "cli_zero_energy"
+    config_type: type[CliZeroEnergyConfig] = CliZeroEnergyConfig
 
     def describe(self) -> str:
         return "A CLI-loaded objective."
 
-    def build(self, context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+    def build(self, context: TermContext, _config: CliZeroEnergyConfig) -> tuple[ObjectiveContribution, ...]:
         return (
             ObjectiveContribution(
                 matrix=np.eye(context.dof, dtype=np.float64),
@@ -145,17 +161,20 @@ class CliZeroEnergy:
         """
 name = "imported_objective"
 imports = ["custom_terms.py"]
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "robot_only"
 output = "imported.npz"
+
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
 
 [solver]
 max_iterations = 1
 
 [[objectives]]
-name = "cli_zero_energy"
+kind = "cli_zero_energy"
 weight = 0.01
 """.strip()
     )
@@ -166,7 +185,7 @@ weight = 0.01
     assert result.exists()
     result_data = np.load(result, allow_pickle=False)
     result_metadata = json.loads(result_data["metadata_json"].reshape(()).item())
-    assert [objective["name"] for objective in result_metadata["provenance"]["objectives"]] == [
+    assert [objective["kind"] for objective in result_metadata["provenance"]["objectives"]] == [
         "cli_zero_energy"
     ]
 
@@ -178,14 +197,17 @@ def test_cli_run_reports_registry_preflight_errors_without_traceback(tmp_path):
     config.write_text(
         """
 name = "bad_extension_config"
-motion = "motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "robot_only"
 output = "bad.npz"
 
+[source]
+kind = "motion_file"
+path = "motion.json"
+format = "minimal"
+
 [[objectives]]
-name = "missing_cli_objective"
+kind = "missing_cli_objective"
 """.strip()
     )
 

@@ -1,30 +1,31 @@
-"""Optimization configuration models."""
+"""Typed optimization configuration models."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Self, TypeVar
+from collections.abc import Iterable
+from typing import Annotated, Literal, Self, TypeAlias, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.enums import Constraint, Objective, SolverBackend
 
+ConvergenceMode: TypeAlias = Literal["step_norm", "cost_plateau", "none"]
+NonPenetrationSource: TypeAlias = Literal["support", "scene_points", "geometry"]
+
 
 class SolverSpec(BaseModel):
-    """Solver selection and common options.
+    """Solver selection and common options."""
 
-    Attributes:
-        backend (SolverBackend | str): Registry key or enum; ``auto`` picks CVXPY when installed.
-        max_iterations (int): Outer SQP iterations budget per frame (scaled for the first frame).
-        trust_radius (float): Default trust-region radius for subproblem steps (meters/radians in joint space).
-        tolerance (float): Stop an inner solve when the joint increment norm falls below this value.
-        verbose (bool): Enable verbose logging for backends that support it (for example CVXPY).
-    """
+    model_config = ConfigDict(extra="forbid")
 
     backend: SolverBackend | str = SolverBackend.AUTO
     max_iterations: int = 10
+    first_frame_iterations: int | None = None
     trust_radius: float = 0.2
     tolerance: float = 1e-6
+    convergence: ConvergenceMode = "step_norm"
+    cost_atol: float = 1e-8
+    cost_rtol: float = 1e-5
     verbose: bool = False
 
     @property
@@ -38,38 +39,48 @@ class SolverSpec(BaseModel):
     def _positive_iterations(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("max_iterations must be positive")
-        return value
+        return int(value)
 
-    @field_validator("trust_radius", "tolerance")
+    @field_validator("first_frame_iterations")
+    @classmethod
+    def _positive_optional_iterations(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("first_frame_iterations must be positive")
+        return None if value is None else int(value)
+
+    @field_validator("trust_radius", "tolerance", "cost_atol")
     @classmethod
     def _positive_float(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("value must be positive")
         return float(value)
 
+    @field_validator("cost_rtol")
+    @classmethod
+    def _non_negative_float(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("cost_rtol must be non-negative")
+        return float(value)
 
-class ObjectiveSpec(BaseModel):
-    """Declarative objective term configuration.
 
-    Attributes:
-        name (str): Registered objective term key (see ``Objective`` enum values).
-        weight (float): Non-negative scalar multiplier on the term's least-squares residual.
-        parameters (dict[str, Any]): Term-specific options passed to the registered builder.
-    """
+class ObjectiveConfig(BaseModel):
+    """Base class for weighted objective term configs."""
 
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
     weight: float = 1.0
-    parameters: dict[str, Any] = Field(default_factory=dict)
 
-    def with_weight(self, weight: float) -> ObjectiveSpec:
+    @property
+    def name(self) -> str:
+        """Registry key for this objective config."""
+
+        return self.kind
+
+    def with_weight(self, weight: float) -> Self:
         """Return a copy with a different objective weight."""
 
-        return ObjectiveSpec(name=self.name, weight=weight, parameters=dict(self.parameters))
-
-    def with_parameters(self, **parameters: Any) -> ObjectiveSpec:
-        """Return a copy with merged term parameters."""
-
-        return ObjectiveSpec(name=self.name, weight=self.weight, parameters={**self.parameters, **parameters})
+        return self.model_copy(update={"weight": weight})
 
     @field_validator("weight")
     @classmethod
@@ -79,51 +90,411 @@ class ObjectiveSpec(BaseModel):
         return float(value)
 
 
-class ConstraintSpec(BaseModel):
-    """Declarative constraint term configuration.
+class LaplacianObjectiveConfig(ObjectiveConfig):
+    """Interaction-mesh Laplacian deformation objective."""
 
-    Attributes:
-        name (str): Registered constraint term key (see ``Constraint`` enum values).
-        enabled (bool): When ``False``, the term is skipped when assembling subproblems.
-        parameters (dict[str, Any]): Term-specific options (clearances, link lists, lock windows).
-    """
+    kind: Literal["laplacian"] = Objective.LAPLACIAN.value
 
-    name: str
+
+class LinkTrackingObjectiveConfig(ObjectiveConfig):
+    """Track robot links to a typed target plan."""
+
+    kind: Literal["link_tracking"] = Objective.LINK_TRACKING.value
+    weight_scale: float = 1.0
+
+    @field_validator("weight_scale")
+    @classmethod
+    def _positive_weight_scale(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("weight_scale must be positive")
+        return float(value)
+
+
+class SmoothnessObjectiveConfig(ObjectiveConfig):
+    """Penalize changes from the previous frame."""
+
+    kind: Literal["smoothness"] = Objective.SMOOTHNESS.value
+
+
+class NominalTrackingObjectiveConfig(ObjectiveConfig):
+    """Track the robot's nominal posture for selected joints."""
+
+    kind: Literal["nominal_tracking"] = Objective.NOMINAL_TRACKING.value
+    weight: float = 5.0
+    joint_names: tuple[str, ...] = ()
+    qpos_indices: tuple[int, ...] = ()
+    fallback: Literal["zero", "current"] = "zero"
+
+    @field_validator("joint_names", mode="before")
+    @classmethod
+    def _coerce_joint_names(cls, value: object) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, Iterable):
+            raise ValueError("joint_names must be a string or iterable of strings")
+        return tuple(str(item) for item in value)
+
+    @field_validator("qpos_indices", mode="before")
+    @classmethod
+    def _coerce_qpos_indices(cls, value: object) -> tuple[int, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, int):
+            return (int(value),)
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("qpos_indices must be an integer or iterable of integers")
+        return tuple(int(item) for item in value)
+
+    @field_validator("qpos_indices")
+    @classmethod
+    def _non_negative_qpos_indices(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(index < 0 for index in value):
+            raise ValueError("qpos_indices entries must be non-negative")
+        if len(set(value)) != len(value):
+            raise ValueError("qpos_indices entries must be unique")
+        return value
+
+
+class DiagonalRegularizationObjectiveConfig(ObjectiveConfig):
+    """Penalize selected qpos variables toward zero with diagonal weights."""
+
+    kind: Literal["diagonal_regularization"] = Objective.DIAGONAL_REGULARIZATION.value
+    qpos_weights: tuple[float, ...] = ()
+    variable_weights: tuple[float, ...] = ()
+    qpos_weight_overrides: dict[int, float] = Field(default_factory=dict)
+
+    @field_validator("qpos_weights", "variable_weights", mode="before")
+    @classmethod
+    def _coerce_weight_tuple(cls, value: object) -> tuple[float, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, int | float):
+            return (float(value),)
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("weights must be a number or iterable of numbers")
+        return tuple(float(item) for item in value)
+
+    @field_validator("qpos_weights", "variable_weights")
+    @classmethod
+    def _non_negative_weights(cls, value: tuple[float, ...]) -> tuple[float, ...]:
+        if any(item < 0.0 for item in value):
+            raise ValueError("diagonal weights must be non-negative")
+        return value
+
+    @field_validator("qpos_weight_overrides", mode="before")
+    @classmethod
+    def _coerce_qpos_weight_overrides(cls, value: object) -> dict[int, float]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("qpos_weight_overrides must be a mapping from qpos index to weight")
+        out: dict[int, float] = {}
+        for key, weight in value.items():
+            index = int(key)
+            if index < 0:
+                raise ValueError("qpos_weight_overrides keys must be non-negative")
+            out[index] = float(weight)
+        return out
+
+    @field_validator("qpos_weight_overrides")
+    @classmethod
+    def _non_negative_weight_overrides(cls, value: dict[int, float]) -> dict[int, float]:
+        if any(weight < 0.0 for weight in value.values()):
+            raise ValueError("qpos_weight_overrides values must be non-negative")
+        return value
+
+
+class ConstraintConfig(BaseModel):
+    """Base class for constraint term configs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
     enabled: bool = True
-    parameters: dict[str, Any] = Field(default_factory=dict)
 
-    def with_parameters(self, **parameters: Any) -> ConstraintSpec:
-        """Return a copy with merged term parameters."""
+    @property
+    def name(self) -> str:
+        """Registry key for this constraint config."""
 
-        return ConstraintSpec(name=self.name, enabled=self.enabled, parameters={**self.parameters, **parameters})
+        return self.kind
 
-    def with_enabled(self, enabled: bool = True) -> ConstraintSpec:
-        """Return a copy with the enabled flag changed."""
+    def with_enabled(self, enabled: bool = True) -> Self:
+        """Return a copy with a different enabled state."""
 
-        return ConstraintSpec(name=self.name, enabled=enabled, parameters=dict(self.parameters))
+        return self.model_copy(update={"enabled": enabled})
 
-    def disabled(self) -> ConstraintSpec:
-        """Return a disabled copy of this constraint."""
+    def disabled(self) -> Self:
+        """Return a disabled copy."""
 
         return self.with_enabled(False)
 
 
-class OptimizationProfile(BaseModel):
-    """Reusable objective/constraint composition for retargeting experiments.
+ConfigT = TypeVar("ConfigT", bound=ObjectiveConfig | ConstraintConfig)
 
-    Attributes:
-        name (str): Profile label stored in problem metadata when applied.
-        objectives (tuple[ObjectiveSpec, ...]): Ordered objective terms for a run.
-        constraints (tuple[ConstraintSpec, ...]): Ordered constraint terms for a run.
-        metadata (dict[str, Any]): Opaque tags describing the profile or experiment.
-    """
+
+class JointLimitsConstraintConfig(ConstraintConfig):
+    """Box limits on actuated joints."""
+
+    kind: Literal["joint_limits"] = Constraint.JOINT_LIMITS.value
+
+
+class TrustRegionConstraintConfig(ConstraintConfig):
+    """Cap the Euclidean norm of each SQP update."""
+
+    kind: Literal["trust_region"] = Constraint.TRUST_REGION.value
+    radius: float | None = None
+
+    @field_validator("radius")
+    @classmethod
+    def _positive_radius(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("radius must be positive")
+        return None if value is None else float(value)
+
+
+class FootStickingConstraintConfig(ConstraintConfig):
+    """Constrain active support links near their previous tangent-plane position."""
+
+    kind: Literal["foot_sticking"] = Constraint.FOOT_STICKING.value
+    tolerance: float = 1e-3
+
+    @field_validator("tolerance")
+    @classmethod
+    def _positive_tolerance(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("tolerance must be positive")
+        return float(value)
+
+
+class FootLockConstraintConfig(ConstraintConfig):
+    """Pin support links to a support plane or explicit frame windows."""
+
+    kind: Literal["foot_lock"] = Constraint.FOOT_LOCK.value
+    windows: dict[str, tuple[tuple[int, int], ...]] = Field(default_factory=dict)
+    z_floor: float = 0.0
+    tolerance: float = 5e-3
+
+    @field_validator("tolerance")
+    @classmethod
+    def _positive_tolerance(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("tolerance must be positive")
+        return float(value)
+
+    @field_validator("windows", mode="before")
+    @classmethod
+    def _coerce_windows(cls, value: object) -> dict[str, tuple[tuple[int, int], ...]]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("windows must be a mapping from subject/link to frame ranges")
+        out: dict[str, tuple[tuple[int, int], ...]] = {}
+        for key, ranges in value.items():
+            if not isinstance(ranges, Iterable) or isinstance(ranges, (str, bytes)):
+                raise ValueError("foot lock windows must contain iterable frame ranges")
+            normalized: list[tuple[int, int]] = []
+            for item in ranges:
+                if not isinstance(item, (list, tuple)) or len(item) != 2:
+                    raise ValueError("foot lock windows must contain (start, end) pairs")
+                start, end = int(item[0]), int(item[1])
+                if end < start:
+                    raise ValueError("foot lock window end must be >= start")
+                normalized.append((start, end))
+            out[str(key)] = tuple(normalized)
+        return out
+
+
+class NonPenetrationConstraintConfig(ConstraintConfig):
+    """Separate robot links from support and scene geometry."""
+
+    kind: Literal["non_penetration"] = Constraint.NON_PENETRATION.value
+    links: tuple[str, ...] = ()
+    sources: tuple[NonPenetrationSource, ...] = ("support", "scene_points", "geometry")
+    geometry_source: Literal["explicit", "backend_candidates"] = "explicit"
+    geometry_pairs: tuple[tuple[str, str], ...] = ()
+    scene_geometry_keywords: tuple[str, ...] = ()
+    excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...] = ()
+    tolerance: float = 1e-3
+    floor_z: float = 0.0
+    scene_clearance: float = 0.02
+    activation_distance: float | None = None
+
+    @field_validator("links", mode="before")
+    @classmethod
+    def _coerce_links(cls, value: object) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, Iterable):
+            raise ValueError("links must be a string or iterable of strings")
+        return tuple(str(item) for item in value)
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _coerce_sources(cls, value: object) -> tuple[NonPenetrationSource, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            value = (value,)
+        if not isinstance(value, Iterable):
+            raise ValueError("sources must be a string or iterable of strings")
+        valid = {"support", "scene_points", "geometry"}
+        normalized: list[NonPenetrationSource] = []
+        for item in value:
+            source = str(item)
+            if source not in valid:
+                raise ValueError(
+                    "non-penetration sources must be one of 'support', 'scene_points', or 'geometry'"
+                )
+            if source not in normalized:
+                if source == "support":
+                    normalized.append("support")
+                elif source == "scene_points":
+                    normalized.append("scene_points")
+                else:
+                    normalized.append("geometry")
+        return tuple(normalized)
+
+    @field_validator("geometry_pairs", mode="before")
+    @classmethod
+    def _coerce_geometry_pairs(cls, value: object) -> tuple[tuple[str, str], ...]:
+        if value in (None, ""):
+            return ()
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("geometry_pairs must be iterable")
+        pairs: list[tuple[str, str]] = []
+        for item in value:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("geometry_pairs entries must contain exactly two names")
+            pairs.append((str(item[0]), str(item[1])))
+        return tuple(pairs)
+
+    @field_validator("scene_geometry_keywords", mode="before")
+    @classmethod
+    def _coerce_scene_geometry_keywords(cls, value: object) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, Iterable):
+            raise ValueError("scene_geometry_keywords must be a string or iterable of strings")
+        return tuple(str(item) for item in value)
+
+    @field_validator("excluded_geometry_keyword_pairs", mode="before")
+    @classmethod
+    def _coerce_excluded_geometry_keyword_pairs(cls, value: object) -> tuple[tuple[str, str], ...]:
+        if value in (None, ""):
+            return ()
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("excluded_geometry_keyword_pairs must be iterable")
+        pairs: list[tuple[str, str]] = []
+        for item in value:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("excluded_geometry_keyword_pairs entries must contain exactly two names")
+            pairs.append((str(item[0]), str(item[1])))
+        return tuple(pairs)
+
+    @field_validator("tolerance", "scene_clearance")
+    @classmethod
+    def _positive_float(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("value must be positive")
+        return float(value)
+
+    @field_validator("activation_distance")
+    @classmethod
+    def _positive_optional_float(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("activation_distance must be positive")
+        return None if value is None else float(value)
+
+
+class SelfCollisionConstraintConfig(ConstraintConfig):
+    """Maintain minimum separation between configured robot geometry pairs."""
+
+    kind: Literal["self_collision"] = Constraint.SELF_COLLISION.value
+    pairs: tuple[tuple[str, str], ...] = ()
+    minimum_distance: float = 0.02
+    margin: float | None = None
+    windows: tuple[tuple[int, int], ...] | None = None
+
+    @field_validator("pairs", mode="before")
+    @classmethod
+    def _coerce_pairs(cls, value: object) -> tuple[tuple[str, str], ...]:
+        if value in (None, ""):
+            return ()
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("self-collision pairs must be iterable")
+        pairs: list[tuple[str, str]] = []
+        for item in value:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("self-collision pairs must contain exactly two names")
+            pairs.append((str(item[0]), str(item[1])))
+        return tuple(pairs)
+
+    @field_validator("minimum_distance")
+    @classmethod
+    def _positive_distance(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("minimum_distance must be positive")
+        return float(value)
+
+    @field_validator("margin")
+    @classmethod
+    def _positive_margin(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("margin must be positive")
+        return None if value is None else float(value)
+
+    @field_validator("windows", mode="before")
+    @classmethod
+    def _coerce_windows(cls, value: object) -> tuple[tuple[int, int], ...] | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+            raise ValueError("self-collision windows must be iterable")
+        out: list[tuple[int, int]] = []
+        for item in value:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("self-collision windows must contain (start, end) pairs")
+            start, end = int(item[0]), int(item[1])
+            if end < start:
+                raise ValueError("self-collision window end must be >= start")
+            out.append((start, end))
+        return tuple(out)
+
+
+ObjectiveConfigUnion: TypeAlias = Annotated[
+    LaplacianObjectiveConfig
+    | LinkTrackingObjectiveConfig
+    | SmoothnessObjectiveConfig
+    | NominalTrackingObjectiveConfig
+    | DiagonalRegularizationObjectiveConfig,
+    Field(discriminator="kind"),
+]
+ConstraintConfigUnion: TypeAlias = Annotated[
+    JointLimitsConstraintConfig
+    | TrustRegionConstraintConfig
+    | FootStickingConstraintConfig
+    | FootLockConstraintConfig
+    | NonPenetrationConstraintConfig
+    | SelfCollisionConstraintConfig,
+    Field(discriminator="kind"),
+]
+
+
+class OptimizationProfile(BaseModel):
+    """Reusable typed objective/constraint composition."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = "custom"
-    objectives: tuple[ObjectiveSpec, ...] = ()
-    constraints: tuple[ConstraintSpec, ...] = ()
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    objectives: tuple[ObjectiveConfig, ...] = ()
+    constraints: tuple[ConstraintConfig, ...] = ()
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_profile(self) -> OptimizationProfile:
@@ -138,16 +509,13 @@ class OptimizationProfile(BaseModel):
         return cls(
             name=name,
             objectives=(
-                ObjectiveSpec(name=Objective.LAPLACIAN, weight=10.0),
-                ObjectiveSpec(name=Objective.SMOOTHNESS, weight=0.2),
+                LaplacianObjectiveConfig(weight=10.0),
+                SmoothnessObjectiveConfig(weight=0.2),
             ),
             constraints=(
-                ConstraintSpec(name=Constraint.JOINT_LIMITS),
-                ConstraintSpec(name=Constraint.TRUST_REGION),
-                ConstraintSpec(
-                    name=Constraint.FOOT_CONTACT,
-                    parameters={"velocity_threshold": 0.02, "tolerance": 1e-3},
-                ),
+                JointLimitsConstraintConfig(),
+                TrustRegionConstraintConfig(),
+                FootStickingConstraintConfig(tolerance=1e-3),
             ),
         )
 
@@ -156,14 +524,17 @@ class OptimizationProfile(BaseModel):
         cls,
         *,
         scene_clearance: float = 0.03,
-        links: tuple[str, ...] = ("left_toe", "right_toe", "left_hand", "right_hand"),
+        links: tuple[str, ...] = (),
         floor_z: float = 0.0,
     ) -> OptimizationProfile:
         """Return a default profile with scene non-penetration enabled."""
 
         return cls.defaults(name="object_interaction").with_constraint(
-            Constraint.NON_PENETRATION,
-            parameters={"floor_z": floor_z, "scene_clearance": scene_clearance, "links": links},
+            NonPenetrationConstraintConfig(
+                links=links,
+                floor_z=floor_z,
+                scene_clearance=scene_clearance,
+            )
         )
 
     @classmethod
@@ -176,69 +547,87 @@ class OptimizationProfile(BaseModel):
         """Return a default profile for terrain/climbing experiments."""
 
         return cls.defaults(name="climbing").with_constraint(
-            Constraint.NON_PENETRATION,
-            parameters={"floor_z": floor_z, "scene_clearance": scene_clearance},
+            NonPenetrationConstraintConfig(floor_z=floor_z, scene_clearance=scene_clearance)
+        )
+
+    @classmethod
+    def holosoma_compatible(
+        cls,
+        *,
+        geometry_pairs: tuple[tuple[str, str], ...] = (),
+        qpos_weights: tuple[float, ...] = (),
+        variable_weights: tuple[float, ...] = (),
+    ) -> OptimizationProfile:
+        """Return Holosoma-aligned objective and constraint defaults."""
+
+        return cls(
+            name="holosoma_compatible",
+            objectives=(
+                LaplacianObjectiveConfig(weight=10.0),
+                SmoothnessObjectiveConfig(weight=0.2),
+                NominalTrackingObjectiveConfig(weight=5.0, fallback="current"),
+                DiagonalRegularizationObjectiveConfig(
+                    weight=1.0,
+                    qpos_weights=qpos_weights,
+                    variable_weights=variable_weights,
+                ),
+            ),
+            constraints=(
+                JointLimitsConstraintConfig(),
+                TrustRegionConstraintConfig(radius=0.2),
+                FootStickingConstraintConfig(tolerance=1e-3),
+                NonPenetrationConstraintConfig(
+                    sources=("geometry",),
+                    tolerance=1e-3,
+                    scene_clearance=1e-3,
+                    geometry_pairs=geometry_pairs,
+                ),
+            ),
         )
 
     @property
     def objective_names(self) -> tuple[str, ...]:
         """Objective names in profile order."""
 
-        return tuple(objective.name for objective in self.objectives)
+        return tuple(objective.kind for objective in self.objectives)
 
     @property
     def constraint_names(self) -> tuple[str, ...]:
         """Constraint names in profile order."""
 
-        return tuple(constraint.name for constraint in self.constraints)
+        return tuple(constraint.kind for constraint in self.constraints)
 
-    def objective(self, name: str) -> ObjectiveSpec | None:
-        """Return the last objective matching `name`, if present."""
+    def objective(self, kind: str) -> ObjectiveConfig | None:
+        """Return the last objective matching `kind`, if present."""
 
-        return _last_named(self.objectives, name)
+        return _last_kind(self.objectives, kind)
 
-    def constraint(self, name: str) -> ConstraintSpec | None:
-        """Return the last constraint matching `name`, if present."""
+    def constraint(self, kind: str) -> ConstraintConfig | None:
+        """Return the last constraint matching `kind`, if present."""
 
-        return _last_named(self.constraints, name)
+        return _last_kind(self.constraints, kind)
 
-    def with_objective(
-        self,
-        objective: ObjectiveSpec | str,
-        *,
-        weight: float | None = None,
-        parameters: Mapping[str, Any] | None = None,
-        replace: bool = True,
-    ) -> Self:
-        """Return a copy with an objective appended or replaced by name."""
+    def with_objective(self, objective: ObjectiveConfig, *, replace: bool = True) -> Self:
+        """Return a copy with an objective appended or replaced by kind."""
 
-        spec = _objective_spec(objective, weight=weight, parameters=parameters)
-        objectives = _replace_named(self.objectives, spec) if replace else (*self.objectives, spec)
+        objectives = _replace_kind(self.objectives, objective) if replace else (*self.objectives, objective)
         return self.model_copy(update={"objectives": objectives})
 
-    def without_objective(self, *names: str) -> Self:
-        """Return a copy without objectives matching any supplied name."""
+    def without_objective(self, *kinds: str) -> Self:
+        """Return a copy without objectives matching any supplied kind."""
 
-        return self.model_copy(update={"objectives": _without_named(self.objectives, names)})
+        return self.model_copy(update={"objectives": _without_kind(self.objectives, kinds)})
 
-    def with_constraint(
-        self,
-        constraint: ConstraintSpec | str,
-        *,
-        enabled: bool | None = None,
-        parameters: Mapping[str, Any] | None = None,
-        replace: bool = True,
-    ) -> Self:
-        """Return a copy with a constraint appended or replaced by name."""
+    def with_constraint(self, constraint: ConstraintConfig, *, replace: bool = True) -> Self:
+        """Return a copy with a constraint appended or replaced by kind."""
 
-        spec = _constraint_spec(constraint, enabled=enabled, parameters=parameters)
-        constraints = _replace_named(self.constraints, spec) if replace else (*self.constraints, spec)
+        constraints = _replace_kind(self.constraints, constraint) if replace else (*self.constraints, constraint)
         return self.model_copy(update={"constraints": constraints})
 
-    def without_constraint(self, *names: str) -> Self:
-        """Return a copy without constraints matching any supplied name."""
+    def without_constraint(self, *kinds: str) -> Self:
+        """Return a copy without constraints matching any supplied kind."""
 
-        return self.model_copy(update={"constraints": _without_named(self.constraints, names)})
+        return self.model_copy(update={"constraints": _without_kind(self.constraints, kinds)})
 
     def validate_registry_references(self, solver: SolverSpec | None = None) -> None:
         """Validate this profile against registered optimization terms."""
@@ -252,73 +641,29 @@ class OptimizationProfile(BaseModel):
         )
 
 
-def _objective_spec(
-    objective: ObjectiveSpec | str,
-    *,
-    weight: float | None,
-    parameters: Mapping[str, Any] | None,
-) -> ObjectiveSpec:
-    if isinstance(objective, ObjectiveSpec):
-        spec = objective
-        if weight is not None:
-            spec = spec.with_weight(weight)
-        if parameters:
-            spec = spec.with_parameters(**dict(parameters))
-        return spec
-    return ObjectiveSpec(name=objective, weight=1.0 if weight is None else weight, parameters=dict(parameters or {}))
-
-
-def _constraint_spec(
-    constraint: ConstraintSpec | str,
-    *,
-    enabled: bool | None,
-    parameters: Mapping[str, Any] | None,
-) -> ConstraintSpec:
-    if isinstance(constraint, ConstraintSpec):
-        spec = constraint
-        if enabled is not None:
-            spec = spec.with_enabled(enabled)
-        if parameters:
-            spec = spec.with_parameters(**dict(parameters))
-        return spec
-    return ConstraintSpec(
-        name=constraint,
-        enabled=True if enabled is None else enabled,
-        parameters=dict(parameters or {}),
-    )
-
-
-NamedSpec = TypeVar("NamedSpec", ObjectiveSpec, ConstraintSpec)
-
-
-def _replace_named(items: tuple[NamedSpec, ...], item: NamedSpec) -> tuple[NamedSpec, ...]:
-    replaced = False
-    updated: list[NamedSpec] = []
-    for existing in items:
-        if existing.name != item.name:
-            updated.append(existing)
-            continue
-        if not replaced:
-            updated.append(item)
-            replaced = True
-    if not replaced:
-        updated.append(item)
-    return tuple(updated)
-
-
-def _without_named(
-    items: tuple[NamedSpec, ...],
-    names: tuple[str, ...],
-) -> tuple[NamedSpec, ...]:
-    remove = set(names)
-    return tuple(item for item in items if item.name not in remove)
-
-
-def _last_named(
-    items: tuple[NamedSpec, ...],
-    name: str,
-) -> NamedSpec | None:
+def _last_kind(items: tuple[ConfigT, ...], kind: str) -> ConfigT | None:
     for item in reversed(items):
-        if item.name == name:
+        if item.kind == kind:
             return item
     return None
+
+
+def _replace_kind(items: tuple[ConfigT, ...], new_item: ConfigT) -> tuple[ConfigT, ...]:
+    kind = new_item.kind
+    out: list[ConfigT] = []
+    replaced = False
+    for item in items:
+        if item.kind == kind:
+            if not replaced:
+                out.append(new_item)
+                replaced = True
+            continue
+        out.append(item)
+    if not replaced:
+        out.append(new_item)
+    return tuple(out)
+
+
+def _without_kind(items: tuple[ConfigT, ...], kinds: tuple[str, ...]) -> tuple[ConfigT, ...]:
+    blocked = set(kinds)
+    return tuple(item for item in items if item.kind not in blocked)

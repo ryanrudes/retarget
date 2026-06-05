@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pytest
 
@@ -21,10 +23,10 @@ from retarget.kinematics import kinematics_backends
 from retarget.metrics import metrics
 from retarget.motion import MotionFormatSpec, MotionSequence, motion_formats, motion_loaders
 from retarget.optimization import (
+    ConstraintConfig,
     ConstraintContribution,
-    ConstraintSpec,
+    ObjectiveConfig,
     ObjectiveContribution,
-    ObjectiveSpec,
     QuadraticProblem,
     SolverResult,
     SolverSpec,
@@ -140,24 +142,32 @@ def test_builtin_extension_registries_available():
 
 
 def test_objective_and_constraint_registries_accept_decorated_classes():
+    class DecoratedObjectiveConfig(ObjectiveConfig):
+        kind: Literal["unit_test_decorated_objective"] = "unit_test_decorated_objective"
+
+    class DecoratedConstraintConfig(ConstraintConfig):
+        kind: Literal["unit_test_decorated_constraint"] = "unit_test_decorated_constraint"
+
     @objective_terms.register("unit_test_decorated_objective", replace=True)
     class DecoratedObjective:
         name = "unit_test_decorated_objective"
+        config_type = DecoratedObjectiveConfig
 
         def describe(self) -> str:
             return "Decorated objective."
 
-        def build(self, _context: TermContext, _spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        def build(self, _context: TermContext, _config: DecoratedObjectiveConfig) -> tuple[ObjectiveContribution, ...]:
             return ()
 
     @constraint_terms.register("unit_test_decorated_constraint", replace=True)
     class DecoratedConstraint:
         name = "unit_test_decorated_constraint"
+        config_type = DecoratedConstraintConfig
 
         def describe(self) -> str:
             return "Decorated constraint."
 
-        def build(self, _context: TermContext, _spec: ConstraintSpec) -> ConstraintContribution:
+        def build(self, _context: TermContext, _config: DecoratedConstraintConfig) -> ConstraintContribution:
             return ConstraintContribution()
 
     assert objective_terms.get("unit_test_decorated_objective").describe() == "Decorated objective."

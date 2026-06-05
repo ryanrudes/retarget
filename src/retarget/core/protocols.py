@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from retarget.export.spec import ExportResult, ExportSpec
-    from retarget.kinematics.types import GeometryDistance
+    from retarget.kinematics.types import GeometryDistance, GeometryDistanceJacobian
     from retarget.motion.spec import MotionFormatSpec, MotionSequence
     from retarget.optimization.problem import (
         ConstraintContribution,
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         SolverResult,
         TermContext,
     )
-    from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec
+    from retarget.optimization.spec import ConstraintConfig, ObjectiveConfig
     from retarget.pipeline.problem import RetargetingProblem
     from retarget.results.spec import RetargetingResult
     from retarget.robots.spec import RobotSpec
@@ -60,8 +60,12 @@ class RobotProvider(Protocol):
         ...
 
 
+ObjectiveConfigT = TypeVar("ObjectiveConfigT", bound="ObjectiveConfig")
+ConstraintConfigT = TypeVar("ConstraintConfigT", bound="ConstraintConfig")
+
+
 @runtime_checkable
-class ObjectiveTerm(Protocol):
+class ObjectiveTerm(Protocol[ObjectiveConfigT]):
     """Optimization objective term."""
 
     @property
@@ -69,16 +73,21 @@ class ObjectiveTerm(Protocol):
         """Registry key for this objective term."""
         ...
 
+    @property
+    def config_type(self) -> type[ObjectiveConfigT]:
+        """Typed config model consumed by this term."""
+        ...
+
     def describe(self) -> str:
         """Return a short human-readable summary of the term."""
         ...
 
-    def build(self, context: TermContext, spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+    def build(self, context: TermContext, config: ObjectiveConfigT) -> tuple[ObjectiveContribution, ...]:
         """Build objective contributions for one optimization step.
 
         Args:
             context (TermContext): Shared kinematics and trajectory state.
-            spec (ObjectiveSpec): Term configuration from the problem spec.
+            config (ObjectiveConfig): Term configuration from the problem spec.
 
         Returns:
             tuple[ObjectiveContribution, ...]: One or more stacked objective blocks.
@@ -87,7 +96,7 @@ class ObjectiveTerm(Protocol):
 
 
 @runtime_checkable
-class ConstraintTerm(Protocol):
+class ConstraintTerm(Protocol[ConstraintConfigT]):
     """Optimization constraint term."""
 
     @property
@@ -95,16 +104,21 @@ class ConstraintTerm(Protocol):
         """Registry key for this constraint term."""
         ...
 
+    @property
+    def config_type(self) -> type[ConstraintConfigT]:
+        """Typed config model consumed by this term."""
+        ...
+
     def describe(self) -> str:
         """Return a short human-readable summary of the term."""
         ...
 
-    def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
+    def build(self, context: TermContext, config: ConstraintConfigT) -> ConstraintContribution:
         """Build a constraint contribution for one optimization step.
 
         Args:
             context (TermContext): Shared kinematics and trajectory state.
-            spec (ConstraintSpec): Term configuration from the problem spec.
+            config (ConstraintConfig): Term configuration from the problem spec.
 
         Returns:
             ConstraintContribution: Linearized inequality or equality block.
@@ -181,6 +195,25 @@ class KinematicsBackend(Protocol):
         """
         ...
 
+    def body_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        body_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return body Jacobians with columns selected by qpos indices.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            body_names (tuple[str, ...]): Bodies to differentiate.
+            qpos_indices (NDArray[np.int64]): Qpos coordinates used as optimizer variables.
+
+        Returns:
+            tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+                Positions, translational Jacobians, and rotational Jacobians.
+        """
+        ...
+
     def point_jacobians(
         self,
         qpos: NDArray[np.float64],
@@ -195,6 +228,24 @@ class KinematicsBackend(Protocol):
         Returns:
             tuple[NDArray[np.float64], NDArray[np.float64]]:
                 Position Jacobians and optional auxiliary Jacobians.
+        """
+        ...
+
+    def point_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        point_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return point Jacobians with columns selected by qpos indices.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            point_names (tuple[str, ...]): Named points on the model.
+            qpos_indices (NDArray[np.int64]): Qpos coordinates used as optimizer variables.
+
+        Returns:
+            tuple[NDArray[np.float64], NDArray[np.float64]]: Positions and qpos-index Jacobians.
         """
         ...
 
@@ -277,6 +328,27 @@ class KinematicsBackend(Protocol):
 
         Returns:
             tuple[GeometryDistance, ...]: Near-contact pairs suitable for constraints.
+        """
+        ...
+
+    def geom_distance_jacobians(
+        self,
+        qpos: NDArray[np.float64],
+        qpos_indices: NDArray[np.int64],
+        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        *,
+        max_distance: float = np.inf,
+    ) -> tuple[GeometryDistanceJacobian, ...]:
+        """Return linearized geometry distances for qpos-index variables.
+
+        Args:
+            qpos (NDArray[np.float64]): Generalized coordinates.
+            qpos_indices (NDArray[np.int64]): Qpos coordinates used as optimizer variables.
+            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to evaluate, or all pairs.
+            max_distance (float): Ignore pairs farther than this threshold.
+
+        Returns:
+            tuple[GeometryDistanceJacobian, ...]: Distance rows suitable for linear constraints.
         """
         ...
 

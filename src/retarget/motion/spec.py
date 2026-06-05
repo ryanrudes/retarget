@@ -203,7 +203,7 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=self.root_poses.scaled(factor) if self.root_poses is not None else None,
             contacts=tuple(dict(frame) for frame in self.contacts),
-            metadata=_scale_position_metadata(self.metadata, float(factor)),
+            metadata=dict(self.metadata),
         )
 
     def resampled(self, fps: float, *, name: str | None = None) -> MotionSequence:
@@ -221,7 +221,7 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=self.root_poses.resampled(fps) if self.root_poses is not None else None,
             contacts=_resample_contacts(self.contacts, self.fps, fps),
-            metadata=_resample_position_metadata(metadata, self.fps, fps),
+            metadata=metadata,
         )
 
     def to_frame(self, target: FrameConvention, *, name: str | None = None) -> MotionSequence:
@@ -250,7 +250,7 @@ class MotionSequence(BaseModel):
             frame=target,
             root_poses=self.root_poses.to_frame(target) if self.root_poses is not None else None,
             contacts=tuple(dict(frame) for frame in self.contacts),
-            metadata=_convert_position_metadata(metadata, self.frame, target),
+            metadata=metadata,
         )
 
     def centered_on_root(self, root_joint: str) -> MotionSequence:
@@ -320,71 +320,6 @@ def _coerce_bool(value: Any) -> bool:
         if normalized in {"0", "false", "f", "no", "n", "none", "off", ""}:
             return False
     return bool(value)
-
-
-def _scale_position_metadata(metadata: dict[str, Any], factor: float) -> dict[str, Any]:
-    out = dict(metadata)
-    link_targets = _copy_link_targets(out.get("link_targets"))
-    if link_targets is not None:
-        link_targets["positions"] = np.asarray(link_targets["positions"], dtype=np.float64) * factor
-        out["link_targets"] = link_targets
-    return out
-
-
-def _resample_position_metadata(metadata: dict[str, Any], source_fps: float, target_fps: float) -> dict[str, Any]:
-    out = dict(metadata)
-    link_targets = _copy_link_targets(out.get("link_targets"))
-    if link_targets is None:
-        return out
-    positions = np.asarray(link_targets["positions"], dtype=np.float64)
-    link_targets["positions"] = resample_linear(positions, source_fps, target_fps)
-    weights = link_targets.get("weights")
-    if weights is not None:
-        weight_array = np.asarray(weights, dtype=np.float64)
-        if weight_array.ndim >= 2 and weight_array.shape[0] == positions.shape[0]:
-            link_targets["weights"] = resample_linear(weight_array, source_fps, target_fps)
-    masks = link_targets.get("masks")
-    if masks is not None:
-        mask_array = np.asarray(masks, dtype=bool)
-        if mask_array.ndim >= 2 and mask_array.shape[0] == positions.shape[0]:
-            source_times, target_times = resampling_times(mask_array.shape[0], source_fps, target_fps)
-            indices = np.asarray(
-                [int(np.argmin(np.abs(source_times - target_time))) for target_time in target_times],
-                dtype=int,
-            )
-            link_targets["masks"] = mask_array[indices]
-    out["link_targets"] = link_targets
-    return out
-
-
-def _convert_position_metadata(
-    metadata: dict[str, Any],
-    source: FrameConvention,
-    target: FrameConvention,
-) -> dict[str, Any]:
-    out = dict(metadata)
-    link_targets = _copy_link_targets(out.get("link_targets"))
-    if link_targets is not None:
-        link_targets["positions"] = convert_points_frame(link_targets["positions"], source, target)
-        out["link_targets"] = link_targets
-    return out
-
-
-def _copy_link_targets(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, Mapping):
-        return None
-    out = dict(value)
-    for key in ("positions", "weights", "masks"):
-        if key in out:
-            out[key] = np.asarray(out[key]).copy()
-    if "names" in out:
-        names = np.asarray(out["names"])
-        out["names"] = (
-            (str(names.reshape(()).item()),)
-            if names.shape == ()
-            else tuple(str(name) for name in names.tolist())
-        )
-    return out
 
 
 def _resample_contacts(

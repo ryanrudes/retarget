@@ -99,7 +99,7 @@ def test_npz_motion_loader_reads_root_poses(tmp_path):
     assert np.allclose(motion.root_poses.positions[:, 0], [1.0, 2.0])
 
 
-def test_npz_motion_loader_reads_link_targets(tmp_path):
+def test_npz_motion_loader_rejects_legacy_link_target_arrays(tmp_path):
     spec = motion_formats.get("minimal")
     path = tmp_path / "motion_with_targets.npz"
     positions = np.zeros((2, len(spec.joint_names), 3), dtype=np.float64)
@@ -119,13 +119,8 @@ def test_npz_motion_loader_reads_link_targets(tmp_path):
         link_target_masks=np.asarray([[True, False], [True, True]], dtype=bool),
     )
 
-    motion = load_motion(path, "minimal")
-
-    targets = motion.metadata["link_targets"]
-    assert targets["names"] == ("left_foot", "right_foot")
-    assert targets["positions"].shape == (2, 2, 3)
-    assert np.allclose(targets["weights"], [[10.0, 1.0], [8.0, 2.0]])
-    assert np.array_equal(targets["masks"], [[True, False], [True, True]])
+    with pytest.raises(ValueError, match="link_target_"):
+        load_motion(path, "minimal")
 
 
 def test_csv_motion_loader_infers_fps_and_reorders_by_frame(tmp_path):

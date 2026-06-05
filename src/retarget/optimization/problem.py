@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -12,7 +11,10 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from retarget.core.pose import Pose
     from retarget.core.protocols import KinematicsBackend
+    from retarget.mesh import LaplacianWeighting
     from retarget.motion.contact import ContactFrame
+    from retarget.motion.qpos import NominalQposFrame
+    from retarget.motion.targets import TargetFrame
     from retarget.pipeline.problem import RetargetingProblem
 
 FloatArray = NDArray[np.float64]
@@ -95,17 +97,24 @@ class TermContext:
         q_previous (FloatArray): ``qpos`` from the prior frame (warm start for smoothness).
         frame_idx (int): Zero-based index into the motion sequence.
         contact_frame (ContactFrame | None): Typed contact view for the current frame, when configured.
-        frame_contacts (Mapping[str, bool]): Inferred stance contacts keyed by motion joint.
+        target_frame (TargetFrame | None): Typed link-target view for the current frame, when configured.
         robot_point_names (tuple[str, ...]): Link or joint names used for mesh matching.
         robot_points (FloatArray): Robot match points in the task-local frame, shape ``(P, 3)``.
-        robot_jacobians (FloatArray): Position Jacobians w.r.t. actuated joints, shape ``(P, 3, dof)``.
+        robot_jacobians (FloatArray): Position Jacobians w.r.t. active variables, shape ``(P, 3, dof)``.
         environment_points (FloatArray): Scene or object sample points, shape ``(E, 3)``.
         adjacency (tuple[tuple[int, ...], ...]): Mesh neighbor indices per vertex.
         target_laplacian (FloatArray): Desired Laplacian coordinates for the interaction mesh.
+        laplacian_weighting (LaplacianWeighting): Neighbor weighting used by the current mesh builder.
+        laplacian_epsilon (float): Epsilon used by distance-weighted Laplacians.
         reference_pose (Pose | None): Object pose for dynamic scenes; ``None`` in world frame.
         joint_lower (FloatArray): Actuated joint lower limits for the current robot.
         joint_upper (FloatArray): Actuated joint upper limits for the current robot.
         current_joints (FloatArray): Actuated joint values extracted from ``q_current``.
+        variable_indices (NDArray[np.int64] | None): Qpos indices for active optimization variables.
+        current_variables (FloatArray | None): Active qpos values extracted from ``q_current``.
+        variable_lower (FloatArray | None): Absolute lower bounds for active qpos variables.
+        variable_upper (FloatArray | None): Absolute upper bounds for active qpos variables.
+        nominal_qpos_frame (NominalQposFrame | None): Optional nominal qpos target view.
     """
 
     problem: RetargetingProblem
@@ -114,23 +123,63 @@ class TermContext:
     q_previous: FloatArray
     frame_idx: int
     contact_frame: ContactFrame | None
-    frame_contacts: Mapping[str, bool]
+    target_frame: TargetFrame | None
     robot_point_names: tuple[str, ...]
     robot_points: FloatArray
     robot_jacobians: FloatArray
     environment_points: FloatArray
     adjacency: tuple[tuple[int, ...], ...]
     target_laplacian: FloatArray
+    laplacian_weighting: LaplacianWeighting
+    laplacian_epsilon: float
     reference_pose: Pose | None
     joint_lower: FloatArray
     joint_upper: FloatArray
     current_joints: FloatArray
+    variable_indices: NDArray[np.int64] | None = None
+    current_variables: FloatArray | None = None
+    variable_lower: FloatArray | None = None
+    variable_upper: FloatArray | None = None
+    nominal_qpos_frame: NominalQposFrame | None = None
 
     @property
     def dof(self) -> int:
-        """Number of actuated robot joints in the subproblem variable."""
+        """Number of coordinates in the subproblem variable."""
 
-        return int(self.problem.robot.dof)
+        return int(self.current_variable_values.shape[0])
+
+    @property
+    def active_qpos_indices(self) -> NDArray[np.int64]:
+        """Qpos indices represented by the current subproblem variable."""
+
+        if self.variable_indices is not None:
+            return np.asarray(self.variable_indices, dtype=np.int64)
+        start = self.problem.robot.qpos_layout.joint_start
+        return np.arange(start, start + self.problem.robot.dof, dtype=np.int64)
+
+    @property
+    def current_variable_values(self) -> FloatArray:
+        """Current values of active qpos variables."""
+
+        if self.current_variables is not None:
+            return np.asarray(self.current_variables, dtype=np.float64)
+        return np.asarray(self.current_joints, dtype=np.float64)
+
+    @property
+    def variable_lower_bounds(self) -> FloatArray:
+        """Absolute lower bounds for active qpos variables."""
+
+        if self.variable_lower is not None:
+            return np.asarray(self.variable_lower, dtype=np.float64)
+        return np.asarray(self.joint_lower, dtype=np.float64)
+
+    @property
+    def variable_upper_bounds(self) -> FloatArray:
+        """Absolute upper bounds for active qpos variables."""
+
+        if self.variable_upper is not None:
+            return np.asarray(self.variable_upper, dtype=np.float64)
+        return np.asarray(self.joint_upper, dtype=np.float64)
 
 
 @dataclass(frozen=True)

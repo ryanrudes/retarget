@@ -127,12 +127,14 @@ class Objective(StrEnum):
         LINK_TRACKING (str): Track named robot links to per-frame world-space target points.
         SMOOTHNESS (str): Temporal smoothness on generalized coordinates.
         NOMINAL_TRACKING (str): Track a nominal pose trajectory.
+        DIAGONAL_REGULARIZATION (str): Penalize selected qpos coordinates toward zero.
     """
 
     LAPLACIAN = "laplacian"
     LINK_TRACKING = "link_tracking"
     SMOOTHNESS = "smoothness"
     NOMINAL_TRACKING = "nominal_tracking"
+    DIAGONAL_REGULARIZATION = "diagonal_regularization"
 
 
 class Constraint(StrEnum):
@@ -141,7 +143,7 @@ class Constraint(StrEnum):
     Attributes:
         JOINT_LIMITS (str): Enforce joint limits.
         TRUST_REGION (str): Limit per-step configuration change.
-        FOOT_CONTACT (str): Foot contact consistency constraints.
+        FOOT_STICKING (str): Foot support consistency constraints.
         FOOT_LOCK (str): Lock feet during planted phases.
         NON_PENETRATION (str): Prevent interpenetration with scene geometry.
         SELF_COLLISION (str): Self-collision avoidance.
@@ -149,7 +151,7 @@ class Constraint(StrEnum):
 
     JOINT_LIMITS = "joint_limits"
     TRUST_REGION = "trust_region"
-    FOOT_CONTACT = "foot_contact"
+    FOOT_STICKING = "foot_sticking"
     FOOT_LOCK = "foot_lock"
     NON_PENETRATION = "non_penetration"
     SELF_COLLISION = "self_collision"

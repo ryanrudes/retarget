@@ -8,14 +8,14 @@ from typing import Any
 from retarget.core.registry import Registry
 from retarget.optimization.registry import constraint_terms, objective_terms, solver_factories
 from retarget.optimization.solvers import resolve_solver_backend_name
-from retarget.optimization.spec import ConstraintSpec, ObjectiveSpec, SolverSpec
+from retarget.optimization.spec import ConstraintConfig, ObjectiveConfig, SolverSpec
 
 
 def validate_optimization_references(
     *,
     solver: SolverSpec,
-    objectives: tuple[ObjectiveSpec, ...],
-    constraints: tuple[ConstraintSpec, ...],
+    objectives: tuple[ObjectiveConfig, ...],
+    constraints: tuple[ConstraintConfig, ...],
 ) -> None:
     """Validate registered objective, constraint, and solver references."""
 
@@ -23,12 +23,12 @@ def validate_optimization_references(
     _append_missing(
         messages,
         objective_terms,
-        (objective.name for objective in objectives if objective.weight > 0),
+        (objective.kind for objective in objectives if objective.weight > 0),
     )
     _append_missing(
         messages,
         constraint_terms,
-        (constraint.name for constraint in constraints if constraint.enabled),
+        (constraint.kind for constraint in constraints if constraint.enabled),
     )
     _append_missing(messages, solver_factories, (resolve_solver_backend_name(solver),))
     if messages:

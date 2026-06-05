@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from inspect import isclass
-from typing import cast
+from typing import Any, cast
 
 from retarget.core.protocols import ConstraintTerm, ObjectiveTerm, Solver
 from retarget.core.registry import Registry
@@ -14,7 +14,7 @@ SolverFactory = Callable[[SolverSpec], Solver]
 """Build a :class:`~retarget.core.protocols.Solver` from a :class:`~retarget.optimization.spec.SolverSpec`."""
 
 
-def _objective_term_from_decorator(value: object) -> ObjectiveTerm:
+def _objective_term_from_decorator(value: object) -> ObjectiveTerm[Any]:
     candidate = value
     if isclass(value) or not isinstance(value, ObjectiveTerm):
         if not callable(value):
@@ -25,7 +25,7 @@ def _objective_term_from_decorator(value: object) -> ObjectiveTerm:
     return candidate
 
 
-def _constraint_term_from_decorator(value: object) -> ConstraintTerm:
+def _constraint_term_from_decorator(value: object) -> ConstraintTerm[Any]:
     candidate = value
     if isclass(value) or not isinstance(value, ConstraintTerm):
         if not callable(value):
@@ -36,13 +36,13 @@ def _constraint_term_from_decorator(value: object) -> ConstraintTerm:
     return candidate
 
 
-objective_terms: Registry[ObjectiveTerm] = Registry(
+objective_terms: Registry[ObjectiveTerm[Any]] = Registry(
     "objective term",
     decorator_transform=_objective_term_from_decorator,
 )
 """Registry of built-in and user-registered objective terms keyed by name."""
 
-constraint_terms: Registry[ConstraintTerm] = Registry(
+constraint_terms: Registry[ConstraintTerm[Any]] = Registry(
     "constraint term",
     decorator_transform=_constraint_term_from_decorator,
 )

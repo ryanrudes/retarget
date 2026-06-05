@@ -148,7 +148,13 @@ class _TwoDofVelocityBackend:
     def body_jacobians(self, qpos, body_names):
         raise AssertionError("not used")
 
+    def body_jacobians_for_qpos_indices(self, qpos, body_names, qpos_indices):
+        raise AssertionError("not used")
+
     def point_jacobians(self, qpos, point_names):
+        raise AssertionError("not used")
+
+    def point_jacobians_for_qpos_indices(self, qpos, point_names, qpos_indices):
         raise AssertionError("not used")
 
     def qpos_to_qvel(self, qpos, previous_qpos, dt):
@@ -164,4 +170,7 @@ class _TwoDofVelocityBackend:
         raise AssertionError("not used")
 
     def collision_candidates(self, qpos, *, margin=0.0, geom_pairs=None):
+        raise AssertionError("not used")
+
+    def geom_distance_jacobians(self, qpos, qpos_indices, geom_pairs=None, *, max_distance=np.inf):
         raise AssertionError("not used")

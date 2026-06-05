@@ -12,7 +12,7 @@ from retarget.core.enums import MetricName, RunStatus
 from retarget.core.protocols import Metric
 from retarget.core.registry import Registry
 from retarget.kinematics.backends import SimpleKinematicsBackend
-from retarget.motion.contact import infer_contact_by_velocity
+from retarget.optimization.spec import NonPenetrationConstraintConfig
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.results.spec import EvaluationReport, RetargetingResult
 
@@ -132,7 +132,7 @@ class PenetrationMetric:
 
         Args:
             result: Retargeted trajectory to score.
-            problem: Required for scene-aware clearance; uses ``non_penetration`` parameters.
+            problem: Required for scene-aware clearance; uses typed ``non_penetration`` config.
 
         Returns:
             Maximum violation depth in meters, or ``0.0`` without a problem.
@@ -241,8 +241,8 @@ def _evaluation_details(
             "motion_frame_count": problem.motion.frame_count,
             "contact_links": list(problem.robot.contact_links),
             "contacts": _contact_plan_details(problem),
-            "objectives": [objective.name for objective in problem.objectives],
-            "constraints": [constraint.name for constraint in problem.constraints if constraint.enabled],
+            "objectives": [objective.kind for objective in problem.objectives],
+            "constraints": [constraint.kind for constraint in problem.constraints if constraint.enabled],
             "solver_backend": problem.solver.backend_name,
             "aligned_to_result": _problem_was_aligned(original_problem, problem),
         }
@@ -265,7 +265,8 @@ def _scene_penetration_depth(link_positions: np.ndarray, problem: RetargetingPro
     scene_points = _scene_points(problem)
     if scene_points is None or scene_points.size == 0:
         return 0.0
-    clearance = _constraint_parameter(problem, "non_penetration", "scene_clearance", 0.0)
+    config = _non_penetration_config(problem)
+    clearance = config.scene_clearance if config is not None else 0.0
     if clearance <= 0:
         return 0.0
     max_violation = 0.0
@@ -282,7 +283,8 @@ def _ground_penetration_depth(link_positions: np.ndarray, problem: RetargetingPr
     if problem.contacts is not None and problem.contacts.support is not None:
         clearance = problem.contacts.support.clearance(link_positions)
         return float(max(0.0, -float(np.min(clearance))))
-    floor_z = _constraint_parameter(problem, "non_penetration", "floor_z", 0.0)
+    config = _non_penetration_config(problem)
+    floor_z = config.floor_z if config is not None else 0.0
     return float(max(0.0, floor_z - np.min(link_positions[:, :, 2])))
 
 
@@ -321,8 +323,7 @@ def _human_contact_mask(problem: RetargetingProblem) -> np.ndarray:
         return _contact_plan_to_mask(problem)
     if not problem.motion.contacts:
         return np.zeros((problem.motion.frame_count, len(problem.robot.contact_links)), dtype=bool)
-    contacts = infer_contact_by_velocity(problem.motion, problem.motion_format)
-    return _contact_dicts_to_mask(contacts, problem)
+    return _contact_dicts_to_mask(problem.motion.contacts, problem)
 
 
 def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult | None = None) -> np.ndarray:
@@ -333,7 +334,7 @@ def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult |
         speeds = np.zeros((1, len(problem.robot.contact_links)), dtype=np.float64)
     else:
         speeds = np.linalg.norm(np.gradient(positions, 1.0 / result.fps, axis=0), axis=2)
-    threshold = _constraint_parameter(problem, "foot_contact", "velocity_threshold", 0.01)
+    threshold = 0.01
     return speeds <= threshold
 
 
@@ -395,8 +396,8 @@ def _same_side(motion_joint: str, link_name: str) -> bool:
     return True
 
 
-def _constraint_parameter(problem: RetargetingProblem, constraint_name: str, parameter: str, default: float) -> float:
+def _non_penetration_config(problem: RetargetingProblem) -> NonPenetrationConstraintConfig | None:
     for constraint in problem.constraints:
-        if constraint.name == constraint_name:
-            return float(constraint.parameters.get(parameter, default))
-    return default
+        if isinstance(constraint, NonPenetrationConstraintConfig) and constraint.enabled:
+            return constraint
+    return None

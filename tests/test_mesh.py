@@ -4,6 +4,7 @@ import pytest
 from retarget.mesh import (
     InteractionMeshBuilder,
     InteractionMeshSpec,
+    LaplacianWeighting,
     MeshTopology,
     adjacency_from_simplices,
     laplacian_coordinates,
@@ -21,6 +22,41 @@ def test_adjacency_and_laplacian():
     coords = laplacian_coordinates(vertices, adjacency)
     assert matrix.shape == (3, 3)
     assert coords.shape == vertices.shape
+
+
+def test_laplacian_defaults_to_holosoma_uniform_neighbor_average():
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    adjacency = [[1, 2], [0, 2], [0, 1]]
+
+    matrix = laplacian_matrix(vertices, adjacency)
+    coords = laplacian_coordinates(vertices, adjacency)
+
+    assert np.allclose(matrix[0], [1.0, -0.5, -0.5])
+    assert np.allclose(coords, matrix @ vertices)
+
+
+def test_laplacian_keeps_explicit_inverse_distance_mode():
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    adjacency = [[1, 2], [0, 2], [0, 1]]
+
+    matrix = laplacian_matrix(vertices, adjacency, weighting=LaplacianWeighting.INVERSE_DISTANCE)
+
+    assert not np.allclose(matrix[0], [1.0, -0.5, -0.5])
+    assert np.allclose(matrix.sum(axis=1), 0.0)
 
 
 def test_interaction_mesh_builder_chain_fallback():

@@ -14,12 +14,16 @@ from retarget.core.enums import FrameConvention, QuaternionOrder, RunStatus
 from retarget.core.pose import Pose
 from retarget.core.protocols import KinematicsBackend
 from retarget.kinematics.backends import SimpleKinematicsBackend
-from retarget.mesh.interaction import InteractionMeshBuilder, InteractionMeshSpec
-from retarget.motion.contact import ContactFrame, ContactPlan, infer_contact_by_velocity
+from retarget.mesh.interaction import InteractionMeshBuilder, InteractionMeshSpec, LaplacianWeighting
+from retarget.motion.contact import ContactFrame, ContactPlan, SupportPlane
+from retarget.motion.qpos import NominalQposFrame, NominalQposPlan
 from retarget.motion.spec import MotionSequence
+from retarget.motion.targets import LinkTargetPlan, TargetFrame
 from retarget.optimization.problem import ConstraintContribution, LinearConstraint, QuadraticProblem, TermContext
 from retarget.optimization.registry import constraint_terms, objective_terms
 from retarget.optimization.solvers import create_solver, resolve_solver_backend_name
+from retarget.optimization.spec import SolverSpec
+from retarget.optimization.variables import ResolvedQposVariables
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.pipeline.progress import frame_progress
 from retarget.results.spec import RetargetingResult
@@ -83,12 +87,17 @@ class InteractionMeshRetargetingEngine:
         solver_backend = resolve_solver_backend_name(problem.solver)
         solver = create_solver(problem.solver)
         backend = self.kinematics or SimpleKinematicsBackend(problem.robot)
+        variable_set = problem.variables.resolve(
+            problem.robot,
+            qpos_size=qpos.shape[1],
+            joint_limits=backend.joint_limits(),
+        )
         mapping = problem.resolved_link_mapping()
         human_names = tuple(mapping)
         robot_point_names = tuple(mapping.values())
-        legacy_contacts = _legacy_contact_frames(problem, motion)
-        contact_plan = _scaled_contact_plan(problem)
-        joint_slice = problem.robot.qpos_layout.joint_slice(problem.robot.dof)
+        contact_plan = _contact_plan_for_problem(problem, motion)
+        target_plan = _scaled_target_plan(problem)
+        nominal_qpos_plan = _nominal_qpos_plan_for_problem(problem)
         lower_values, upper_values = _joint_limit_arrays(problem.robot, backend)
         joint_lower = np.asarray(lower_values, dtype=np.float64)
         joint_upper = np.asarray(upper_values, dtype=np.float64)
@@ -108,7 +117,7 @@ class InteractionMeshRetargetingEngine:
         ) as advance_frame:
             for frame_idx in range(motion.frame_count):
                 if frame_idx > 0:
-                    qpos[frame_idx, joint_slice] = qpos[frame_idx - 1, joint_slice]
+                    qpos[frame_idx, variable_set.indices] = qpos[frame_idx - 1, variable_set.indices]
                 q_current = qpos[frame_idx].copy()
                 reference_pose = _object_reference_pose(problem, frame_idx)
                 environment_points = _environment_points(problem, reference_pose)
@@ -121,34 +130,46 @@ class InteractionMeshRetargetingEngine:
                 frame_cost = np.inf
                 frame_status = "not_run"
                 used_iterations = 0
-                iteration_count = problem.solver.max_iterations * (5 if frame_idx == 0 else 1)
+                iteration_count = _iteration_count(problem.solver, frame_idx)
                 q_previous = qpos[max(frame_idx - 1, 0)]
+                last_iteration_cost = np.inf
 
                 for iteration_idx in range(iteration_count):
-                    q_joint_current = q_current[joint_slice].copy()
                     quadratic = self._build_subproblem(
                         problem=problem,
                         backend=backend,
+                        variable_set=variable_set,
                         q_current=q_current,
                         q_previous=q_previous,
                         robot_point_names=robot_point_names,
                         environment_points=environment_points,
                         adjacency=mesh.adjacency,
                         target_laplacian=target_laplacian,
+                        laplacian_weighting=mesh.laplacian_weighting,
+                        laplacian_epsilon=mesh.laplacian_epsilon,
                         reference_pose=reference_pose,
                         joint_lower=joint_lower,
                         joint_upper=joint_upper,
                         contact_frame=contact_plan.frame(frame_idx) if contact_plan is not None else None,
-                        frame_contacts=legacy_contacts[frame_idx] if frame_idx < len(legacy_contacts) else {},
+                        target_frame=target_plan.frame(frame_idx) if target_plan is not None else None,
+                        nominal_qpos_frame=(
+                            nominal_qpos_plan.frame(frame_idx) if nominal_qpos_plan is not None else None
+                        ),
                         frame_idx=frame_idx,
                     )
                     solved = solver.solve(quadratic)
-                    q_current[joint_slice] = q_joint_current + solved.solution
+                    q_current = variable_set.apply_delta(q_current, solved.solution)
                     frame_cost = solved.cost
                     frame_status = solved.status
                     used_iterations = iteration_idx + 1
-                    if float(np.linalg.norm(solved.solution)) <= problem.solver.tolerance:
+                    if _should_stop_solver_iteration(
+                        problem.solver,
+                        solution=solved.solution,
+                        cost=frame_cost,
+                        previous_cost=last_iteration_cost,
+                    ):
                         break
+                    last_iteration_cost = frame_cost
 
                 qpos[frame_idx] = q_current
                 costs[frame_idx] = frame_cost
@@ -182,20 +203,29 @@ class InteractionMeshRetargetingEngine:
         *,
         problem: RetargetingProblem,
         backend: KinematicsBackend,
+        variable_set: ResolvedQposVariables,
         q_current: FloatArray,
         q_previous: FloatArray,
         robot_point_names: tuple[str, ...],
         environment_points: FloatArray,
         adjacency: list[list[int]],
         target_laplacian: FloatArray,
+        laplacian_weighting: LaplacianWeighting,
+        laplacian_epsilon: float,
         reference_pose: Pose | None,
         joint_lower: FloatArray,
         joint_upper: FloatArray,
-        frame_contacts: dict[str, bool],
         contact_frame: ContactFrame | None,
+        target_frame: TargetFrame | None,
+        nominal_qpos_frame: NominalQposFrame | None,
         frame_idx: int,
     ) -> QuadraticProblem:
-        robot_points_world, robot_jacobians_world = backend.point_jacobians(q_current, robot_point_names)
+        robot_points_world, robot_jacobians_world = _point_jacobians_for_variables(
+            backend,
+            q_current,
+            robot_point_names,
+            variable_set,
+        )
         robot_points = robot_points_world
         robot_jacobians = robot_jacobians_world
         if reference_pose is not None:
@@ -212,17 +242,24 @@ class InteractionMeshRetargetingEngine:
             q_previous=q_previous,
             frame_idx=frame_idx,
             contact_frame=contact_frame,
-            frame_contacts=frame_contacts,
+            target_frame=target_frame,
             robot_point_names=robot_point_names,
             robot_points=robot_points,
             robot_jacobians=robot_jacobians,
             environment_points=environment_points,
             adjacency=tuple(tuple(neighbors) for neighbors in adjacency),
             target_laplacian=target_laplacian,
+            laplacian_weighting=laplacian_weighting,
+            laplacian_epsilon=laplacian_epsilon,
             reference_pose=reference_pose,
             joint_lower=joint_lower,
             joint_upper=joint_upper,
             current_joints=current_joints,
+            variable_indices=variable_set.indices,
+            current_variables=variable_set.values(q_current),
+            variable_lower=variable_set.lower,
+            variable_upper=variable_set.upper,
+            nominal_qpos_frame=nominal_qpos_frame,
         )
         matrices: list[FloatArray] = []
         targets: list[FloatArray] = []
@@ -239,7 +276,7 @@ class InteractionMeshRetargetingEngine:
                     objective.weight,
                 )
 
-        matrix = np.vstack(matrices) if matrices else np.zeros((1, problem.robot.dof), dtype=np.float64)
+        matrix = np.vstack(matrices) if matrices else np.zeros((1, context.dof), dtype=np.float64)
         target = np.concatenate(targets) if targets else np.zeros(1, dtype=np.float64)
         constraint_contribution = _build_constraint_contribution(context)
         return QuadraticProblem(
@@ -247,7 +284,7 @@ class InteractionMeshRetargetingEngine:
             target=target,
             lower=constraint_contribution.lower,
             upper=constraint_contribution.upper,
-            initial=np.zeros(problem.robot.dof, dtype=np.float64),
+            initial=np.zeros(context.dof, dtype=np.float64),
             trust_radius=constraint_contribution.trust_radius,
             linear_constraints=constraint_contribution.linear_constraints,
         )
@@ -274,6 +311,26 @@ def result_from_engine_output(
     )
 
 
+def _iteration_count(solver: SolverSpec, frame_idx: int) -> int:
+    if frame_idx == 0:
+        return int(solver.first_frame_iterations or (solver.max_iterations * 5))
+    return int(solver.max_iterations)
+
+
+def _should_stop_solver_iteration(
+    solver: SolverSpec,
+    *,
+    solution: FloatArray,
+    cost: float,
+    previous_cost: float,
+) -> bool:
+    if solver.convergence == "none":
+        return False
+    if solver.convergence == "cost_plateau":
+        return bool(np.isclose(cost, previous_cost, rtol=solver.cost_rtol, atol=solver.cost_atol))
+    return float(np.linalg.norm(solution)) <= solver.tolerance
+
+
 def _scale_motion_to_robot(problem: RetargetingProblem) -> MotionSequence:
     factor = _motion_scale_factor(problem)
     if factor is None:
@@ -290,16 +347,38 @@ def _scaled_contact_plan(problem: RetargetingProblem) -> ContactPlan | None:
     return problem.contacts.scaled(factor)
 
 
-def _legacy_contact_frames(
+def _scaled_target_plan(problem: RetargetingProblem) -> LinkTargetPlan | None:
+    if problem.targets is None:
+        return None
+    factor = _motion_scale_factor(problem)
+    if factor is None:
+        return problem.targets
+    return problem.targets.scaled(factor)
+
+
+def _nominal_qpos_plan_for_problem(problem: RetargetingProblem) -> NominalQposPlan | None:
+    return problem.nominal_qpos
+
+
+def _contact_plan_for_problem(
     problem: RetargetingProblem,
     motion: MotionSequence,
-) -> tuple[dict[str, bool], ...]:
-    if problem.contacts is not None or not motion.contacts:
-        return tuple({} for _ in range(motion.frame_count))
-    return infer_contact_by_velocity(
-        motion,
-        problem.motion_format,
-        velocity_threshold=_constraint_parameter(problem, "foot_contact", "velocity_threshold", 0.01),
+) -> ContactPlan | None:
+    if problem.contacts is not None:
+        return _scaled_contact_plan(problem)
+    if not motion.contacts:
+        return None
+    subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
+    link_mapping = {subject: _links_for_contact_subject(subject, problem.robot.contact_links) for subject in subjects}
+    support = _support_plane_from_motion_metadata(motion)
+    factor = _motion_scale_factor(problem)
+    if support is not None and factor is not None:
+        support = support.scaled(factor)
+    return ContactPlan.from_binary_contacts(
+        motion.contacts,
+        link_mapping=link_mapping,
+        support=support,
+        provenance={"source": "motion_sequence.contacts", "motion": motion.name},
     )
 
 
@@ -354,6 +433,10 @@ def _result_metadata(problem: RetargetingProblem, output: EngineOutput, *, runti
         "mesh": _mesh_metadata(output),
         "playback": _playback_metadata(problem),
         "contacts": _contact_metadata(problem),
+        "targets": _target_metadata(problem),
+        "initial_qpos": _initial_qpos_metadata(problem),
+        "nominal_qpos": _nominal_qpos_metadata(problem),
+        "variables": _variables_metadata(problem, output.qpos.shape[1]),
         "algorithm": "interaction_mesh_sqp",
         "joint_mapping": problem.resolved_joint_mapping(),
         "link_mapping": problem.resolved_link_mapping(),
@@ -374,6 +457,10 @@ def _run_provenance(problem: RetargetingProblem, output: EngineOutput) -> dict[s
         "motion_scale_factor": _motion_scale_factor(problem),
         "motion": _motion_provenance(problem),
         "contacts": _contact_metadata(problem),
+        "targets": _target_metadata(problem),
+        "initial_qpos": _initial_qpos_metadata(problem),
+        "nominal_qpos": _nominal_qpos_metadata(problem),
+        "variables": _variables_metadata(problem, output.qpos.shape[1]),
         "robot": _robot_provenance(problem),
         "scene": _scene_provenance(problem),
         "mesh": _mesh_metadata(output),
@@ -433,7 +520,8 @@ def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | N
         "name": object_spec.name,
         "mesh_path": str(object_spec.mesh_path) if object_spec.mesh_path is not None else None,
         "sample_points": _jsonable(sample_points),
-        "sample_points_space": "object" if problem.scene.has_dynamic_object() else "world",
+        "sample_points_space": "object" if object_spec.trajectory is not None else "world",
+        "qpos_mode": object_spec.qpos_mode,
         "frame_convention": FrameConvention.Z_UP_RIGHT_HANDED.value,
         "quaternion_order": QuaternionOrder.WXYZ.value,
     }
@@ -501,6 +589,7 @@ def _scene_provenance(problem: RetargetingProblem) -> dict[str, Any]:
             "name": problem.scene.object.name,
             "mesh_path": str(problem.scene.object.mesh_path) if problem.scene.object.mesh_path is not None else None,
             "urdf_path": str(problem.scene.object.urdf_path) if problem.scene.object.urdf_path is not None else None,
+            "qpos_mode": problem.scene.object.qpos_mode,
             "sample_point_count": (
                 int(problem.scene.object.sample_points.shape[0])
                 if problem.scene.object.sample_points is not None
@@ -538,7 +627,7 @@ def _scene_provenance(problem: RetargetingProblem) -> dict[str, Any]:
 def _contact_metadata(problem: RetargetingProblem) -> dict[str, Any]:
     if problem.contacts is None:
         return {
-            "source": "legacy_motion_contacts" if problem.motion.contacts else "velocity_inference",
+            "source": "legacy_motion_contacts" if problem.motion.contacts else None,
             "track_count": 0,
             "subjects": [],
             "has_support": False,
@@ -569,6 +658,65 @@ def _contact_metadata(problem: RetargetingProblem) -> dict[str, Any]:
     }
 
 
+def _target_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    if problem.targets is None:
+        return {
+            "source": None,
+            "track_count": 0,
+            "link_names": [],
+            "provenance": {},
+        }
+    frame_count = cast(int, problem.targets.frame_count)
+    return {
+        "source": "typed_link_target_plan",
+        "frame_count": frame_count,
+        "track_count": len(problem.targets.tracks),
+        "link_names": [track.link_name for track in problem.targets.tracks],
+        "provenance": _jsonable(problem.targets.provenance),
+    }
+
+
+def _initial_qpos_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    if problem.initial_qpos is None:
+        return {
+            "source": None,
+            "frame_count": 0,
+            "qpos_size": 0,
+            "provenance": {},
+        }
+    return {
+        "source": "typed_initial_qpos_plan",
+        "frame_count": problem.initial_qpos.frame_count,
+        "qpos_size": problem.initial_qpos.qpos_size,
+        "provenance": _jsonable(problem.initial_qpos.provenance),
+    }
+
+
+def _nominal_qpos_metadata(problem: RetargetingProblem) -> dict[str, Any]:
+    if problem.nominal_qpos is None:
+        return {
+            "source": None,
+            "frame_count": 0,
+            "qpos_size": 0,
+            "provenance": {},
+        }
+    return {
+        "source": "typed_nominal_qpos_plan",
+        "frame_count": problem.nominal_qpos.frame_count,
+        "qpos_size": problem.nominal_qpos.qpos_size,
+        "provenance": _jsonable(problem.nominal_qpos.provenance),
+    }
+
+
+def _variables_metadata(problem: RetargetingProblem, qpos_size: int) -> dict[str, Any]:
+    resolved = problem.variables.resolve(
+        problem.robot,
+        qpos_size=qpos_size,
+        joint_limits=problem.robot.joint_limits,
+    )
+    return resolved.metadata()
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
@@ -587,6 +735,9 @@ def _jsonable(value: Any) -> Any:
 
 def _initial_qpos(problem: RetargetingProblem, motion: MotionSequence) -> FloatArray:
     qpos = np.zeros((motion.frame_count, problem.robot.qpos_size(has_object=problem.scene.has_dynamic_object())))
+    if problem.initial_qpos is not None:
+        qpos[:] = problem.initial_qpos.qpos
+        return qpos
     root_position = slice(*problem.robot.qpos_layout.root_position)
     root_quaternion = slice(*problem.robot.qpos_layout.root_quaternion)
     root_name = problem.motion_format.root_joint if problem.motion_format else motion.joint_names[0]
@@ -648,6 +799,46 @@ def _human_points(motion: MotionSequence, human_names: tuple[str, ...], frame_id
     return np.asarray(motion.joint_positions[frame_idx, indices, :], dtype=np.float64)
 
 
+def _support_plane_from_motion_metadata(motion: MotionSequence) -> SupportPlane | None:
+    raw = motion.metadata.get("support_plane")
+    if not isinstance(raw, dict):
+        return None
+    return SupportPlane(
+        normal=np.asarray(raw["normal"], dtype=np.float64),
+        origin=np.asarray(raw["origin"], dtype=np.float64),
+        up_axis=int(raw.get("up_axis", 2)),
+    )
+
+
+def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
+    lower = subject.lower()
+    if "left" in lower or lower.startswith(("l_", "l-")):
+        return tuple(link for link in contact_links if "left" in link.lower() or link.lower().startswith(("l_", "l-")))
+    if "right" in lower or lower.startswith(("r_", "r-")):
+        return tuple(
+            link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
+        )
+    return contact_links
+
+
+def _point_jacobians_for_variables(
+    backend: KinematicsBackend,
+    qpos: FloatArray,
+    point_names: tuple[str, ...],
+    variable_set: ResolvedQposVariables,
+) -> tuple[FloatArray, FloatArray]:
+    method = getattr(backend, "point_jacobians_for_qpos_indices", None)
+    if callable(method):
+        result = method(qpos, point_names, variable_set.indices)
+        return cast(tuple[FloatArray, FloatArray], result)
+    if variable_set.spec.kind == "actuated":
+        return backend.point_jacobians(qpos, point_names)
+    raise TypeError(
+        f"{type(backend).__name__} must implement point_jacobians_for_qpos_indices "
+        "when RetargetingProblem.variables is not the default actuated policy"
+    )
+
+
 def _append_weighted_term(
     matrices: list[FloatArray],
     targets: list[FloatArray],
@@ -706,10 +897,3 @@ def _merge_upper(current: FloatArray | None, candidate: FloatArray | None) -> Fl
     if current.shape != candidate.shape:
         raise ValueError("constraint upper bounds must have matching shapes")
     return np.minimum(current, candidate)
-
-
-def _constraint_parameter(problem: RetargetingProblem, constraint_name: str, parameter: str, default: float) -> float:
-    for constraint in problem.constraints:
-        if constraint.name == constraint_name:
-            return float(constraint.parameters.get(parameter, default))
-    return default

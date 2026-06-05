@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from retarget.core.array import FloatArray, as_float_array
 from retarget.core.enums import TaskKind
 from retarget.core.pose import PoseSequence
+
+ObjectQposMode = Literal["appended", "external"]
 
 
 class ObjectTrajectory(BaseModel):
@@ -45,6 +47,7 @@ class ObjectSpec(BaseModel):
         urdf_path (Path | None): Optional URDF describing articulated object geometry.
         sample_points (FloatArray | None): Precomputed surface points with shape ``(N, 3)``.
         trajectory (ObjectTrajectory | None): Time-varying object pose track.
+        qpos_mode (ObjectQposMode): Whether the trajectory is appended to qpos or treated as an external scene pose.
         metadata (dict[str, Any]): Opaque sidecar fields (mass, scale, asset ids, …).
     """
 
@@ -55,6 +58,7 @@ class ObjectSpec(BaseModel):
     urdf_path: Path | None = None
     sample_points: FloatArray | None = None
     trajectory: ObjectTrajectory | None = None
+    qpos_mode: ObjectQposMode = "appended"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_path", "urdf_path", mode="before")
@@ -169,9 +173,13 @@ class SceneSpec(BaseModel):
         return cls(task_kind=TaskKind.CLIMBING, terrain=terrain, object=object_spec)
 
     def has_dynamic_object(self) -> bool:
-        """Whether qpos should include object poses."""
+        """Whether qpos should include appended object poses."""
 
-        return self.object is not None and self.object.trajectory is not None
+        return (
+            self.object is not None
+            and self.object.trajectory is not None
+            and self.object.qpos_mode == "appended"
+        )
 
     def resampled(self, fps: float) -> SceneSpec:
         """Return a scene with dynamic trajectories sampled on a new FPS grid."""

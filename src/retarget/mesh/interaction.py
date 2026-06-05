@@ -7,7 +7,7 @@ from enum import StrEnum
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from scipy.spatial import Delaunay
 
 from retarget.core.array import FloatArray, as_float_array
@@ -29,16 +29,34 @@ class MeshTopology(StrEnum):
     K_NEAREST = "k_nearest"
 
 
+class LaplacianWeighting(StrEnum):
+    """Neighbor weighting policy for Laplacian coordinates.
+
+    Attributes:
+        UNIFORM (str): Average all neighbors equally. This matches Holosoma's default.
+        INVERSE_DISTANCE (str): Weight closer neighbors more strongly.
+    """
+
+    UNIFORM = "uniform"
+    INVERSE_DISTANCE = "inverse_distance"
+
+
 class InteractionMeshSpec(BaseModel):
     """Configuration for interaction mesh construction.
 
     Attributes:
         topology (MeshTopology): Graph construction policy.
         k_neighbors (int): Neighbor count when ``topology`` is ``K_NEAREST`` or Delaunay fallback.
+        laplacian_weighting (LaplacianWeighting): Neighbor weighting used by Laplacian objectives.
+        laplacian_epsilon (float): Small positive value used by distance-weighted Laplacians.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     topology: MeshTopology = MeshTopology.DELAUNAY
     k_neighbors: int = 4
+    laplacian_weighting: LaplacianWeighting = LaplacianWeighting.UNIFORM
+    laplacian_epsilon: float = 1e-6
 
     @field_validator("k_neighbors")
     @classmethod
@@ -46,6 +64,13 @@ class InteractionMeshSpec(BaseModel):
         if value <= 0:
             raise ValueError("k_neighbors must be positive")
         return value
+
+    @field_validator("laplacian_epsilon")
+    @classmethod
+    def _positive_epsilon(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("laplacian_epsilon must be positive")
+        return float(value)
 
 
 @dataclass(frozen=True)
@@ -59,6 +84,8 @@ class InteractionMesh:
 
     vertices: FloatArray
     simplices: NDArray[np.int_]
+    laplacian_weighting: LaplacianWeighting = LaplacianWeighting.UNIFORM
+    laplacian_epsilon: float = 1e-6
 
     @property
     def adjacency(self) -> list[list[int]]:
@@ -70,12 +97,22 @@ class InteractionMesh:
     def laplacian(self) -> FloatArray:
         """Dense row-normalized Laplacian matrix."""
 
-        return laplacian_matrix(self.vertices, self.adjacency)
+        return laplacian_matrix(
+            self.vertices,
+            self.adjacency,
+            weighting=self.laplacian_weighting,
+            epsilon=self.laplacian_epsilon,
+        )
 
     def laplacian_coordinates(self) -> FloatArray:
         """Laplacian coordinates for all vertices."""
 
-        return laplacian_coordinates(self.vertices, self.adjacency)
+        return laplacian_coordinates(
+            self.vertices,
+            self.adjacency,
+            weighting=self.laplacian_weighting,
+            epsilon=self.laplacian_epsilon,
+        )
 
 
 class InteractionMeshBuilder:
@@ -139,7 +176,12 @@ class InteractionMeshBuilder:
             vertices = np.vstack([human, env])
 
         simplices = _simplices_for_topology(vertices, self.spec)
-        return InteractionMesh(vertices=vertices, simplices=simplices)
+        return InteractionMesh(
+            vertices=vertices,
+            simplices=simplices,
+            laplacian_weighting=self.spec.laplacian_weighting,
+            laplacian_epsilon=self.spec.laplacian_epsilon,
+        )
 
 
 def _chain_simplices(n_vertices: int) -> NDArray[np.int_]:
@@ -199,27 +241,45 @@ def adjacency_from_simplices(simplices: NDArray[np.int_], n_vertices: int) -> li
     return [sorted(values) for values in adjacency]
 
 
-def laplacian_matrix(vertices: FloatArray, adjacency: list[list[int]], *, epsilon: float = 1e-9) -> FloatArray:
+def laplacian_matrix(
+    vertices: FloatArray,
+    adjacency: list[list[int]],
+    *,
+    weighting: LaplacianWeighting | str = LaplacianWeighting.UNIFORM,
+    epsilon: float = 1e-6,
+) -> FloatArray:
     """Return a dense row-normalized Laplacian matrix."""
 
+    weighting_policy = LaplacianWeighting(weighting)
     n_vertices = len(vertices)
     if len(adjacency) != n_vertices:
         raise ValueError("adjacency length must match vertices")
+    if epsilon <= 0:
+        raise ValueError("epsilon must be positive")
     matrix = np.zeros((n_vertices, n_vertices), dtype=np.float64)
     for i, neighbors in enumerate(adjacency):
         if not neighbors:
             continue
         matrix[i, i] = 1.0
-        distances = np.linalg.norm(vertices[neighbors] - vertices[i], axis=1)
-        weights = 1.0 / np.maximum(distances, epsilon)
-        weights = weights / weights.sum()
+        if weighting_policy == LaplacianWeighting.UNIFORM:
+            weights = np.full(len(neighbors), 1.0 / len(neighbors), dtype=np.float64)
+        else:
+            distances = np.linalg.norm(vertices[neighbors] - vertices[i], axis=1)
+            weights = 1.0 / (distances + epsilon)
+            weights = weights / weights.sum()
         for neighbor, weight in zip(neighbors, weights, strict=True):
             matrix[i, neighbor] = -float(weight)
     return matrix
 
 
-def laplacian_coordinates(vertices: FloatArray, adjacency: list[list[int]]) -> FloatArray:
+def laplacian_coordinates(
+    vertices: FloatArray,
+    adjacency: list[list[int]],
+    *,
+    weighting: LaplacianWeighting | str = LaplacianWeighting.UNIFORM,
+    epsilon: float = 1e-6,
+) -> FloatArray:
     """Return Laplacian coordinates for vertices."""
 
-    matrix = laplacian_matrix(vertices, adjacency)
+    matrix = laplacian_matrix(vertices, adjacency, weighting=weighting, epsilon=epsilon)
     return matrix @ vertices

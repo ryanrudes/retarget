@@ -1,14 +1,16 @@
 import json
+from typing import Literal
 
 import numpy as np
 import pytest
 
 from retarget import (
-    ConstraintSpec,
+    ConstraintConfig,
     InteractionMeshBuilder,
     InteractionMeshRetargetingEngine,
     InteractionMeshSpec,
     MeshTopology,
+    ObjectiveConfig,
     ObjectSpec,
     ObjectTrajectory,
     OptimizationProfile,
@@ -24,17 +26,61 @@ from retarget.core.enums import QuaternionOrder
 from retarget.core.pose import PoseSequence
 from retarget.kinematics import SimpleKinematicsBackend
 from retarget.metrics import PenetrationMetric, evaluate_result, metrics
-from retarget.motion import MotionSequence, load_motion, motion_formats
+from retarget.motion import LinkTargetPlan, MotionSequence, load_motion, motion_formats
 from retarget.optimization import (
     ConstraintContribution,
+    JointLimitsConstraintConfig,
+    LinkTrackingObjectiveConfig,
+    NonPenetrationConstraintConfig,
     ObjectiveContribution,
-    ObjectiveSpec,
+    SelfCollisionConstraintConfig,
     TermContext,
+    TrustRegionConstraintConfig,
     constraint_terms,
     objective_terms,
 )
+from retarget.optimization.variables import QposVariableSpec
 from retarget.pipeline import engine as pipeline_engine
 from retarget.robots import robots
+
+
+def test_solver_iteration_count_supports_explicit_first_frame_count() -> None:
+    solver = SolverSpec(max_iterations=3, first_frame_iterations=7)
+
+    assert pipeline_engine._iteration_count(solver, 0) == 7
+    assert pipeline_engine._iteration_count(solver, 1) == 3
+    assert pipeline_engine._iteration_count(SolverSpec(max_iterations=3), 0) == 15
+
+
+def test_solver_convergence_modes_are_explicit() -> None:
+    cost_plateau = SolverSpec(convergence="cost_plateau", cost_atol=1e-8, cost_rtol=1e-5)
+    step_norm = SolverSpec(convergence="step_norm", tolerance=1e-6)
+    no_convergence = SolverSpec(convergence="none")
+
+    assert not pipeline_engine._should_stop_solver_iteration(
+        cost_plateau,
+        solution=np.ones(2, dtype=np.float64),
+        cost=1.0,
+        previous_cost=np.inf,
+    )
+    assert pipeline_engine._should_stop_solver_iteration(
+        cost_plateau,
+        solution=np.ones(2, dtype=np.float64),
+        cost=1.0 + 1e-9,
+        previous_cost=1.0,
+    )
+    assert pipeline_engine._should_stop_solver_iteration(
+        step_norm,
+        solution=np.zeros(2, dtype=np.float64),
+        cost=10.0,
+        previous_cost=10.0,
+    )
+    assert not pipeline_engine._should_stop_solver_iteration(
+        no_convergence,
+        solution=np.zeros(2, dtype=np.float64),
+        cost=10.0,
+        previous_cost=10.0,
+    )
 
 
 def test_retargeter_runs_minimal_fixture(tmp_path):
@@ -72,12 +118,18 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert provenance["solver"]["backend"] == "auto"
     assert provenance["solver"]["actual_backend"] == result.metadata["resolved_solver"]
     assert len(provenance["solver"]["frame_statuses"]) == motion.frame_count
-    assert provenance["mesh"] == {"topology": "delaunay", "k_neighbors": 4, "source": "problem"}
+    assert provenance["mesh"] == {
+        "topology": "delaunay",
+        "k_neighbors": 4,
+        "laplacian_weighting": "uniform",
+        "laplacian_epsilon": 1e-06,
+        "source": "problem",
+    }
     assert result.metadata["mesh"] == provenance["mesh"]
     assert result.metadata["playback"]["robot"]["name"] == robot.name
     assert result.metadata["playback"]["robot"]["link_names"] == list(robot.link_names)
     assert provenance["result"]["frame_count"] == motion.frame_count
-    assert [objective["name"] for objective in provenance["objectives"]] == ["laplacian", "smoothness"]
+    assert [objective["kind"] for objective in provenance["objectives"]] == ["laplacian", "smoothness"]
     report = evaluate_result(result)
     assert "optimization_cost" in report.metrics
     assert report.source_name == "fixture"
@@ -222,7 +274,13 @@ def test_problem_mesh_spec_controls_default_engine_topology():
 
     result = Retargeter().run(problem)
 
-    assert result.metadata["mesh"] == {"topology": "k_nearest", "k_neighbors": 2, "source": "problem"}
+    assert result.metadata["mesh"] == {
+        "topology": "k_nearest",
+        "k_neighbors": 2,
+        "laplacian_weighting": "uniform",
+        "laplacian_epsilon": 1e-06,
+        "source": "problem",
+    }
     assert result.metadata["provenance"]["mesh"] == result.metadata["mesh"]
 
 
@@ -245,7 +303,13 @@ def test_custom_engine_mesh_builder_overrides_problem_mesh_spec():
 
     result = Retargeter(engine=engine).run(problem)
 
-    assert result.metadata["mesh"] == {"topology": "complete", "k_neighbors": 7, "source": "engine"}
+    assert result.metadata["mesh"] == {
+        "topology": "complete",
+        "k_neighbors": 7,
+        "laplacian_weighting": "uniform",
+        "laplacian_epsilon": 1e-06,
+        "source": "engine",
+    }
 
 
 def test_retargeter_initializes_root_qpos_from_motion_root_poses():
@@ -283,6 +347,46 @@ def test_retargeter_initializes_root_qpos_from_motion_root_poses():
 
     assert np.allclose(result.qpos[:, 0:3], root_positions)
     assert np.allclose(result.qpos[:, 3:7], [[1.0, 0.0, 0.0, 0.0]] * source.frame_count)
+
+
+def test_retargeter_can_optimize_root_translation_as_typed_qpos_variable():
+    robot = robots.get("synthetic_humanoid")
+    backend = SimpleKinematicsBackend(robot)
+    qpos = np.zeros(robot.qpos_size(), dtype=np.float64)
+    qpos[3] = 1.0
+    current, _jacobian = backend.point_jacobians_for_qpos_indices(
+        qpos,
+        ("left_toe",),
+        np.asarray([0], dtype=np.int64),
+    )
+    motion = MotionSequence(
+        name="root_variable",
+        joint_names=("Pelvis",),
+        joint_positions=np.zeros((1, 1, 3), dtype=np.float64),
+        metadata={"height_m": robot.height_m},
+    )
+    targets = LinkTargetPlan.from_arrays(
+        link_names=("left_toe",),
+        positions=np.asarray([[current[0] + np.array([0.1, 0.0, 0.0], dtype=np.float64)]], dtype=np.float64),
+    )
+    problem = RetargetingProblem(
+        name="root_variable",
+        task_kind=TaskKind.ROBOT_ONLY,
+        robot=robot,
+        motion=motion,
+        scene=SceneSpec.robot_only(),
+        targets=targets,
+        variables=QposVariableSpec.qpos_indices((0,)),
+        objectives=(LinkTrackingObjectiveConfig(),),
+        constraints=(TrustRegionConstraintConfig(radius=1.0),),
+        solver=SolverSpec(backend="numpy_least_squares", max_iterations=2),
+        scale_to_robot=False,
+    )
+
+    result = Retargeter().run(problem)
+
+    assert np.allclose(result.qpos[0, 0], 0.1, atol=1e-7)
+    assert result.metadata["variables"]["indices"] == [0]
 
 
 def test_problem_output_fps_resamples_dynamic_object_trajectory():
@@ -342,6 +446,12 @@ def test_object_result_metadata_includes_visualizer_playback_object():
 def test_problem_registry_preflight_reports_missing_extension_references():
     motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
     robot = robots.get("synthetic_humanoid")
+    class MissingObjectiveConfig(ObjectiveConfig):
+        kind: Literal["missing_objective"] = "missing_objective"
+
+    class MissingConstraintConfig(ConstraintConfig):
+        kind: Literal["missing_constraint"] = "missing_constraint"
+
     problem = RetargetingProblem(
         name="missing_extensions",
         task_kind=TaskKind.ROBOT_ONLY,
@@ -349,8 +459,8 @@ def test_problem_registry_preflight_reports_missing_extension_references():
         motion=motion,
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
-        objectives=(ObjectiveSpec(name="missing_objective"),),
-        constraints=(ConstraintSpec(name="missing_constraint"),),
+        objectives=(MissingObjectiveConfig(),),
+        constraints=(MissingConstraintConfig(),),
         solver=SolverSpec(backend="missing_solver"),
     )
 
@@ -377,37 +487,51 @@ def test_problem_can_apply_reusable_optimization_profile():
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
     )
-    profile = OptimizationProfile.defaults(name="low_smoothness").with_objective("smoothness", weight=0.01)
+    from retarget.optimization import SmoothnessObjectiveConfig
+
+    profile = OptimizationProfile.defaults(name="low_smoothness").with_objective(
+        SmoothnessObjectiveConfig(weight=0.01)
+    )
 
     problem = base_problem.with_optimization_profile(profile)
 
     assert problem.metadata["optimization_profile"] == "low_smoothness"
-    assert [objective.name for objective in problem.objectives] == ["laplacian", "smoothness"]
+    assert [objective.kind for objective in problem.objectives] == ["laplacian", "smoothness"]
     assert problem.objectives[-1].weight == 0.01
     assert base_problem.objectives[-1].weight == 0.2
 
 
 def test_registered_custom_objective_and_constraint_affect_retargeting():
+    class FirstJointTargetConfig(ObjectiveConfig):
+        kind: Literal["unit_test_first_joint_target"] = "unit_test_first_joint_target"
+        target: float = 0.0
+
+    class FirstJointCapConfig(ConstraintConfig):
+        kind: Literal["unit_test_first_joint_cap"] = "unit_test_first_joint_cap"
+        upper: float
+
     class FirstJointTargetObjective:
         name = "unit_test_first_joint_target"
+        config_type = FirstJointTargetConfig
 
         def describe(self) -> str:
             return "Drive the first actuated joint toward a configured target."
 
-        def build(self, context: TermContext, spec: ObjectiveSpec) -> tuple[ObjectiveContribution, ...]:
+        def build(self, context: TermContext, config: FirstJointTargetConfig) -> tuple[ObjectiveContribution, ...]:
             matrix = np.zeros((1, context.dof), dtype=np.float64)
             matrix[0, 0] = 1.0
-            target = float(spec.parameters.get("target", 0.0))
+            target = config.target
             return (ObjectiveContribution(matrix=matrix, target=np.asarray([target - context.current_joints[0]])),)
 
     class FirstJointCapConstraint:
         name = "unit_test_first_joint_cap"
+        config_type = FirstJointCapConfig
 
         def describe(self) -> str:
             return "Cap the first actuated joint at an absolute upper limit."
 
-        def build(self, context: TermContext, spec: ConstraintSpec) -> ConstraintContribution:
-            limit = float(spec.parameters["upper"])
+        def build(self, context: TermContext, config: FirstJointCapConfig) -> ConstraintContribution:
+            limit = config.upper
             lower = np.full(context.dof, -1e6, dtype=np.float64)
             upper = np.full(context.dof, 1e6, dtype=np.float64)
             upper[0] = limit - context.current_joints[0]
@@ -424,8 +548,8 @@ def test_registered_custom_objective_and_constraint_affect_retargeting():
         motion=motion,
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
-        objectives=(ObjectiveSpec(name="unit_test_first_joint_target", parameters={"target": 0.5}),),
-        constraints=(ConstraintSpec(name="unit_test_first_joint_cap", parameters={"upper": 0.1}),),
+        objectives=(FirstJointTargetConfig(target=0.5),),
+        constraints=(FirstJointCapConfig(upper=0.1),),
         solver=SolverSpec(backend="numpy_least_squares", max_iterations=2),
     )
 
@@ -510,11 +634,8 @@ def test_self_collision_constraint_uses_backend_distances():
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
         constraints=(
-            ConstraintSpec(name="joint_limits"),
-            ConstraintSpec(
-                name="self_collision",
-                parameters={"minimum_distance": 0.3, "geom_pairs": (("left_toe", "right_toe"),)},
-            ),
+            JointLimitsConstraintConfig(),
+            SelfCollisionConstraintConfig(minimum_distance=0.3, pairs=(("left_toe", "right_toe"),)),
         ),
         solver=SolverSpec(max_iterations=2),
     )
@@ -545,10 +666,7 @@ def test_scene_non_penetration_uses_object_sample_points():
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.object_interaction(object_spec),
         constraints=(
-            ConstraintSpec(
-                name="non_penetration",
-                parameters={"links": ("left_toe",), "scene_clearance": 0.05, "activation_distance": 0.1},
-            ),
+            NonPenetrationConstraintConfig(links=("left_toe",), scene_clearance=0.05, activation_distance=0.1),
         ),
     )
     qpos = np.zeros(robot.qpos_size())
@@ -581,10 +699,7 @@ def test_penetration_metric_includes_scene_clearance_violation():
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.object_interaction(object_spec),
         constraints=(
-            ConstraintSpec(
-                name="non_penetration",
-                parameters={"floor_z": -2.0, "scene_clearance": 0.05},
-            ),
+            NonPenetrationConstraintConfig(floor_z=-2.0, scene_clearance=0.05),
         ),
     )
     qpos = np.zeros((1, robot.qpos_size()))
@@ -605,12 +720,9 @@ def test_retargeter_runs_with_self_collision_constraint():
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
         constraints=(
-            ConstraintSpec(name="joint_limits"),
-            ConstraintSpec(name="trust_region"),
-            ConstraintSpec(
-                name="self_collision",
-                parameters={"minimum_distance": 0.02, "geom_pairs": (("left_toe", "right_toe"),)},
-            ),
+            JointLimitsConstraintConfig(),
+            TrustRegionConstraintConfig(),
+            SelfCollisionConstraintConfig(minimum_distance=0.02, pairs=(("left_toe", "right_toe"),)),
         ),
         solver=SolverSpec(max_iterations=2),
     )
@@ -667,13 +779,15 @@ def _term_context(
         q_previous=qpos.copy(),
         frame_idx=0,
         contact_frame=None,
-        frame_contacts={},
+        target_frame=None,
         robot_point_names=(),
         robot_points=np.zeros((0, 3), dtype=np.float64),
         robot_jacobians=np.zeros((0, 3, dof), dtype=np.float64),
         environment_points=np.zeros((0, 3), dtype=np.float64),
         adjacency=(),
         target_laplacian=np.zeros((0, 3), dtype=np.float64),
+        laplacian_weighting=problem.mesh.laplacian_weighting,
+        laplacian_epsilon=problem.mesh.laplacian_epsilon,
         reference_pose=None,
         joint_lower=np.full(dof, -1e6, dtype=np.float64),
         joint_upper=np.full(dof, 1e6, dtype=np.float64),

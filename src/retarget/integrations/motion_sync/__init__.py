@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -12,7 +12,9 @@ from numpy.typing import ArrayLike
 from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
 from retarget.core.pose import PoseSequence
 from retarget.motion.contact import ContactPlan, ContactTrack, SupportPlane
+from retarget.motion.qpos import NominalQposPlan
 from retarget.motion.spec import MotionSequence
+from retarget.motion.targets import LinkTargetPlan
 from retarget.scene.spec import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
 
 __all__ = [
@@ -30,6 +32,8 @@ class PreparedRetargetInputs:
     motion: MotionSequence
     scene: SceneSpec
     contacts: ContactPlan | None = None
+    targets: LinkTargetPlan | None = None
+    nominal_qpos: NominalQposPlan | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -45,7 +49,8 @@ def from_sync_clip(
     root_quaternions: ArrayLike | None = None,
     root_quaternion_order: QuaternionOrder = QuaternionOrder.WXYZ,
     height_m: float | None = None,
-    link_targets: Mapping[str, Any] | None = None,
+    targets: LinkTargetPlan | None = None,
+    nominal_qpos: NominalQposPlan | None = None,
     contact_type: Any | None = None,
     contact_layer: Any | None = None,
     contact_link_mapping: Mapping[str, Sequence[str] | str] | None = None,
@@ -59,12 +64,7 @@ def from_sync_clip(
     task_kind: TaskKind | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> PreparedRetargetInputs:
-    """Build retargeting inputs from a synchronized capture clip.
-
-    The adapter intentionally accepts already-aligned joint arrays. ``motion_sync``
-    owns capture vocabulary and contact persistence; ``retarget`` consumes the
-    prepared motion, scene, and typed contact plan.
-    """
+    """Build retargeting inputs from a synchronized capture clip."""
 
     positions = np.asarray(joint_positions, dtype=np.float64)
     if positions.ndim != 3 or positions.shape[2] != 3:
@@ -76,8 +76,6 @@ def from_sync_clip(
     motion_metadata: dict[str, Any] = dict(metadata or {})
     if height_m is not None:
         motion_metadata["height_m"] = float(height_m)
-    if link_targets is not None:
-        motion_metadata["link_targets"] = _copy_link_targets(link_targets, frame_count=positions.shape[0])
 
     root_poses = None
     if root_positions is not None or root_quaternions is not None:
@@ -108,13 +106,10 @@ def from_sync_clip(
         support=support,
         frame_count=positions.shape[0],
     )
-    if contact_plan is not None:
-        frame_count = cast(int, contact_plan.frame_count)
-        legacy_contacts = tuple(
-            contact_plan.frame(frame_idx).as_contact_dict()
-            for frame_idx in range(frame_count)
-        )
-        motion = motion.model_copy(update={"contacts": legacy_contacts})
+    if targets is not None and targets.frame_count != positions.shape[0]:
+        raise ValueError("targets frame count must match joint_positions")
+    if nominal_qpos is not None and nominal_qpos.frame_count != positions.shape[0]:
+        raise ValueError("nominal_qpos frame count must match joint_positions")
 
     scene = scene_from_sync_clip(
         frame_count=positions.shape[0],
@@ -131,6 +126,8 @@ def from_sync_clip(
         motion=motion,
         scene=scene,
         contacts=contact_plan,
+        targets=targets,
+        nominal_qpos=nominal_qpos,
         metadata={
             "source": "motion_sync",
             "clip_name": getattr(clip, "name", None),
@@ -299,16 +296,6 @@ def _clip_fps(clip: Any) -> float:
     if positive.size == 0:
         return 30.0
     return float(1.0 / np.mean(positive))
-
-
-def _copy_link_targets(raw: Mapping[str, Any], *, frame_count: int) -> dict[str, Any]:
-    out = dict(raw)
-    if "positions" in out:
-        positions = np.asarray(out["positions"], dtype=np.float64)
-        if positions.ndim != 3 or positions.shape[0] != frame_count or positions.shape[2] != 3:
-            raise ValueError("link target positions must have shape (frames, links, 3)")
-        out["positions"] = positions
-    return out
 
 
 def _link_names(value: Sequence[str] | str) -> tuple[str, ...]:

@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from retarget import TaskKind
+from retarget import LinkTargetPlan, TaskKind
 from retarget.integrations.motion_sync import contact_plan_from_sync_clip, from_sync_clip
 
 
@@ -69,15 +69,17 @@ def test_from_sync_clip_returns_motion_scene_contacts_and_metadata() -> None:
     object_positions = np.zeros((3, 3), dtype=np.float64)
     object_quaternions = np.asarray([[1.0, 0.0, 0.0, 0.0]] * 3, dtype=np.float64)
 
+    targets = LinkTargetPlan.from_arrays(
+        link_names=("left_toe",),
+        positions=np.zeros((3, 1, 3), dtype=np.float64),
+    )
+
     prepared = from_sync_clip(
         clip,
         joint_names=("Pelvis", "L_Foot"),
         joint_positions=joint_positions,
         height_m=1.8,
-        link_targets={
-            "names": ("left_toe",),
-            "positions": np.zeros((3, 1, 3), dtype=np.float64),
-        },
+        targets=targets,
         contact_layer=layer,
         contact_link_mapping={"left_shoe": "left_toe", "right_shoe": "right_toe"},
         object_name="board",
@@ -88,8 +90,8 @@ def test_from_sync_clip_returns_motion_scene_contacts_and_metadata() -> None:
 
     assert prepared.motion.name == "fake_clip"
     assert prepared.motion.metadata["height_m"] == 1.8
-    assert prepared.motion.metadata["link_targets"]["names"] == ("left_toe",)
-    assert prepared.motion.contacts[0] == {"left_shoe": True, "right_shoe": False}
+    assert prepared.targets is not None
+    assert prepared.targets.link_names == ("left_toe",)
     assert prepared.contacts is not None
     assert prepared.scene.task_kind == TaskKind.OBJECT_INTERACTION
     assert prepared.scene.object is not None

@@ -161,14 +161,14 @@ Python enums must stay consistent with those strings.
 
 ## 8. Wire into retarget
 
-`retarget` does not import your `ClipSession`. Export script responsibilities:
+`retarget` core does not import your `ClipSession`. Integration adapter responsibilities:
 
 1. Load `SyncClip` with your session.
 2. Run detectors; save clip.
-3. Convert `core_joint_positions()` to Z-up if needed (see `prepare_clip.py`).
-4. Map `stance_matrix()` or per-foot states to `contact_states` with names matching `motion_formats.get("smplx").contact_joints`.
-5. Write `skate_motion.npz` / `board_trajectory.npz` plus any `link_target_*` arrays used as retargeter hints.
-6. Point `retarget run` config at those files.
+3. Convert `core_joint_positions()` to Z-up if needed.
+4. Build `MotionSequence`, `SceneSpec`, `ContactPlan`, and `LinkTargetPlan`.
+5. Return a `PreparedRetargetInputs` bundle.
+6. Add a typed run-config `[source]` block when the adapter should be available from `retarget run`.
 
 See [End-to-end pipeline](pipeline.md) and [Introduction](../introduction.md).
 

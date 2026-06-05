@@ -89,7 +89,7 @@ All streams must share the same frame index and `fps`:
 
 ### Contact labels
 
-Per-frame contacts are dictionaries such as `{"L_Foot": True, "R_Foot": False}`. When present, **`foot_contact`** and **`foot_lock`** constraints use your labels; otherwise the engine infers stance from foot joint velocity ([Architecture](architecture.md)).
+The optimizer consumes typed `ContactPlan` data. Legacy per-frame dictionaries such as `{"L_Foot": True, "R_Foot": False}` are still accepted by loaders and converted at the CLI boundary, but new integrations should build `ContactPlan` directly.
 
 Built-in loaders accept contacts in JSON/NPZ/CSV:
 
@@ -123,25 +123,26 @@ Full loader rules: [Add a motion format](adding-a-motion-format.md).
 
 ### Python assembly
 
-`examples/skateboarding/prepare_clip.py` is the runnable bridge from the ecosystem output to `retarget`:
+`retarget.integrations.motion_sync.skateboarding.from_skateboarding_clip()` is the bridge from the ecosystem output to `retarget`. The runnable example calls it directly:
 
 ```bash
-uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
+uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes
 ```
 
-It loads `motion_sync_output/synced/<demo>/synced.npz` with `SKATE_SESSION`, refreshes `SKATE_FOOT_SUPPORT` when the stored contact layer is stale, and writes generated assets under `examples/skateboarding/generated/<demo>/`:
+The adapter loads `motion_sync_output/synced/<demo>/synced.npz` with `SKATE_SESSION`, refreshes `SKATE_FOOT_SUPPORT` when the stored contact layer is stale, and returns a `PreparedRetargetInputs` bundle:
 
-- `skate_motion.npz` — SMPL-X core joints, explicit `L_Foot` / `R_Foot` contacts, root poses, and named `link_tracking` targets.
-- `board_trajectory.npz` — Vicon skateboard rigid-body poses.
-- `deck_samples.npy` — object-frame deck samples for scene constraints.
+- `motion` — SMPL-X core joints, root poses, and provenance.
+- `scene` — skateboard object trajectory and deck samples.
+- `contacts` — typed foot-support states and support plane.
+- `targets` — named link-tracking targets.
 
-The prepared motion includes per-frame link targets:
+The target plan includes per-frame link targets:
 
 - Mocap shoe positions drive `left_ankle_roll_link` and `right_ankle_roll_link`, with higher weights during detected stance.
 - Video SMPL-X hips, knees, and ankles guide the rest of the lower body.
 - An upper-body center-of-mass proxy guides `torso_link`; smoothness and `nominal_tracking` keep the upper body near a regular posture.
 
-`prepare_clip.py` converts video FK joints from **Y-up to Z-up** before aligning them to the Vicon lab frame (see [Coordinate conventions](coordinate-conventions.md)).
+The adapter converts video FK joints from **Y-up to Z-up** before aligning them to the Vicon lab frame (see [Coordinate conventions](coordinate-conventions.md)).
 
 ### Real clip example (`pushoff5_twoshoes`)
 
@@ -195,7 +196,7 @@ trajectory_path = "board_trajectory.npz"
 
 Trajectory files may be `.npy`, `.npz`, `.json`, or `.csv` with positions and optional quaternions (see [Add objectives or constraints](adding-objectives-constraints.md)). Missing rotations default to identity.
 
-The skateboarding example writes `deck_samples.npy` and `board_trajectory.npz` from Vicon data in `prepare_clip.py`.
+The skateboarding adapter builds deck samples and the board trajectory from Vicon data in memory.
 
 Object points move with the trajectory each frame; robot links are checked for clearance in the object frame.
 
@@ -218,11 +219,11 @@ The default engine lowers registered terms into a per-frame quadratic subproblem
 | Term | What it does for skate |
 |------|-------------------------|
 | `laplacian` | Preserves body–board–ground spatial relationships from the human motion |
-| `link_tracking` | Tracks named robot links to mocap/video/COM targets stored in `MotionSequence.metadata` |
+| `link_tracking` | Tracks named robot links to mocap/video/COM targets stored in `LinkTargetPlan` |
 | `smoothness` | Reduces jitter frame-to-frame |
 | `nominal_tracking` | Keeps the upper body near a regular posture while lower-body targets dominate |
-| `foot_contact` / `foot_lock` | Respects stance windows (your contacts or velocity inference) |
-| `non_penetration` | Keeps feet and board from interpenetrating; clearance vs. deck samples |
+| `foot_sticking` / `foot_lock` | Respects typed stance windows and support planes |
+| `non_penetration` | Keeps feet and board from interpenetrating via support-plane and deck sample-point sources |
 
 Tune weights in a run config (`[[objectives]]`, `[[constraints]]`) so foot and scene terms are not drowned out by smoothness. Term reference: [Add objectives or constraints](adding-objectives-constraints.md).
 
@@ -231,7 +232,6 @@ Tune weights in a run config (`[[objectives]]`, `[[constraints]]`) so foot and s
 Once paths and weights stabilize, capture the experiment in TOML/YAML ([Run configs](tutorials/run-configs.md)). The skateboarding `run_config.toml` uses paths relative to `examples/skateboarding/`, so call it from the repository root or keep those generated paths intact:
 
 ```bash
-uv run python examples/skateboarding/prepare_clip.py --demo pushoff5_twoshoes
 uv run retarget run --config examples/skateboarding/run_config.toml
 uv run retarget evaluate \
   --result examples/skateboarding/generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz \
@@ -255,7 +255,7 @@ uv run retarget evaluate \
 Typical iteration loop:
 
 1. Fix time alignment or contact labels in upstream fusion.
-2. Re-run with adjusted constraint parameters.
+2. Re-run with adjusted typed objective or constraint config fields.
 3. Inspect `RetargetingResult.qpos` and provenance metadata ([Result schema](result-schema.md)).
 4. Preview with `retarget view` ([Export and view](tutorials/export-and-view.md)).
 

@@ -134,7 +134,7 @@ See `examples/climbing_terrain.py` for a runnable copy.
 
 ## Choosing objectives and constraints
 
-`OptimizationProfile` bundles sensible defaults per task kind. You can still append custom `ObjectiveSpec` / `ConstraintSpec` entries on the problem or in config `[[objectives]]` / `[[constraints]]` tables.
+`OptimizationProfile` bundles sensible defaults per task kind. You can still append typed objective and constraint config objects on the problem, or add `[[objectives]]` / `[[constraints]]` tables with `kind` fields in a run config.
 
 !!! info "Penetration metrics"
     Evaluation’s `penetration` metric needs the same scene geometry you used at retarget time. Pass `--config` to `retarget evaluate` when comparing object or terrain runs.

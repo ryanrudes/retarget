@@ -28,16 +28,18 @@ flowchart TB
   subgraph cd [contact_detection]
     detect -.->|classify_foot_support_states| algo[Algorithms]
   end
-  subgraph fuse [Your export script]
-    clip --> prepare_script[prepare_clip.py]
-    prepare_script --> skate_npz[skate_motion.npz + link targets]
-    prepare_script --> board_npz[board_trajectory.npz]
+  subgraph adapter [retarget integrations]
+    clip --> prepared[PreparedRetargetInputs]
   end
   subgraph rt [retarget]
-    skate_npz --> motion[MotionSequence]
-    board_npz --> scene[SceneSpec object]
+    prepared --> motion[MotionSequence]
+    prepared --> scene[SceneSpec object]
+    prepared --> contacts[ContactPlan]
+    prepared --> targets[LinkTargetPlan]
     motion --> result[RetargetingResult]
     scene --> result
+    contacts --> result
+    targets --> result
   end
 ```
 
@@ -76,4 +78,4 @@ The design goal is **one clip, one timeline, many registered views**:
 | Video / SMPL-X joints | `VideoSchema` / `register_video` | `clip.joint(SmplxCoreJoints.L_FOOT)` |
 | Contacts | `ContactSchema` / `register_contacts` | `clip.contact(SKATE_FOOT_SUPPORT)` |
 
-`retarget` never reads `synced.npz` directly in the core library; **`examples/skateboarding/prepare_clip.py`** adapts a `SyncClip` into the motion, scene, and link-target files your run config expects.
+`retarget` core never reads `synced.npz` directly. Integration adapters such as `retarget.integrations.motion_sync.skateboarding` adapt a `SyncClip` into `MotionSequence`, `SceneSpec`, `ContactPlan`, and `LinkTargetPlan` before building the problem.

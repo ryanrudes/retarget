@@ -36,31 +36,30 @@ foot = clip.contact(SKATE_FOOT_SUPPORT)
 stance = foot.stance_matrix()  # (frames, 2) for retarget L_Foot / R_Foot
 ```
 
-## Phase B — Prepare retarget inputs
+## Phase B — retarget adapter and run
 
-Foot-support should be on the clip before preparation (Phase A step 5). `prepare_clip.py` will refresh stale `SKATE_FOOT_SUPPORT` labels in memory; pass `--save-contact-layer` if you want to persist a freshly detected layer back to `synced.npz`.
+Foot-support should be on the clip before retargeting (Phase A step 5). The skateboarding adapter refreshes stale `SKATE_FOOT_SUPPORT` labels in memory; pass `--save-contact-layer` to `run_retarget.py` if you want to persist a freshly detected layer back to `synced.npz`.
 
 ```bash
 cd ~/GitHub/retarget
 uv sync
 git submodule update --init
-
-uv run python examples/skateboarding/prepare_clip.py --demo <demo>
 ```
 
-Writes:
+The adapter returns:
 
-| File | Contents |
-|------|----------|
-| `skate_motion.npz` | Z-up SMPL-X core joints, `contact_states`, `fps`, and named `link_tracking` targets |
-| `board_trajectory.npz` | Board positions + quaternions (wxyz) |
-| `deck_samples.npy` | Deck sample points in object frame |
+| Object | Contents |
+|--------|----------|
+| `MotionSequence` | Z-up SMPL-X core joints, root poses, fps, and provenance |
+| `SceneSpec` | Board object trajectory and deck sample points |
+| `ContactPlan` | Foot-support states, link mapping, and support plane |
+| `LinkTargetPlan` | Named robot link targets for mocap shoes, SMPL-X lower body, and torso proxy |
 
-`prepare_clip.py` uses `clip.core_joint_positions()`, `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()`, Vicon shoe poses from `clip.body(Bodies.LEFT_SHOE / RIGHT_SHOE)`, and board poses from `clip.body(Bodies.SKATEBOARD)`.
+`retarget.integrations.motion_sync.skateboarding` uses `clip.core_joint_positions()`, `clip.contact(SKATE_FOOT_SUPPORT).stance_matrix()`, Vicon shoe poses from `clip.body(Bodies.LEFT_SHOE / RIGHT_SHOE)`, and board poses from `clip.body(Bodies.SKATEBOARD)`.
 
 ## Phase C — retarget
 
-Install the G1 robot assets once, then run the programmatic MuJoCo-aware example. Example demo: `pushoff5_twoshoes` after Phase B.
+Install the G1 robot assets once, then run the programmatic MuJoCo-aware example. Example demo: `pushoff5_twoshoes`.
 
 ```bash
 cd ~/GitHub/retarget
@@ -84,5 +83,5 @@ Tune objectives and constraints in the TOML ([Run configs](../tutorials/run-conf
 | FK before sync | `joints.npy` in GVHMR folder | Sync refuses to run |
 | Sync quality | `lag`, `corr` in metadata | Wrong foot alignment in fuse |
 | Detect | `contact__foot_support__*` keys in `synced.npz` | Stale layer after re-sync—re-run `detect --force` |
-| Fuse | `skate_motion.npz` frame count = board trajectory | Trim/crop mismatch |
-| Retarget | `format = "smplx"` in config | Joint order / contact name mismatch |
+| Adapter | `PreparedRetargetInputs` frame counts align | Trim/crop mismatch |
+| Retarget | `[source] kind = "motion_sync_skateboarding"` in config | Missing synced clip or stale contact layer |

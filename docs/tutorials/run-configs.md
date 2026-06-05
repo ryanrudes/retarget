@@ -1,6 +1,6 @@
 # Run configs
 
-Config files capture everything needed to reproduce a retargeting experiment: motion path, robot, scene, mesh topology, solver settings, objectives, and constraints. The CLI loads TOML, YAML, or JSON and resolves relative paths against the config file’s directory.
+Config files capture everything needed to reproduce a retargeting experiment: source, robot, scene, mesh topology, solver settings, typed objectives, and typed constraints. The CLI loads TOML, YAML, or JSON and resolves relative paths against the config file's directory.
 
 ## Start from the example
 
@@ -20,25 +20,29 @@ A minimal config names inputs and outputs:
 
 ```toml
 name = "my_run"
-motion = "../tests/fixtures/minimal_motion.json"
-format = "minimal"
 robot = "synthetic_humanoid"
 task_kind = "robot_only"
 output = "my_run.npz"
+
+[source]
+kind = "motion_file"
+path = "../tests/fixtures/minimal_motion.json"
+format = "minimal"
 ```
 
 Add tuning sections as experiments grow:
 
 | Key / section | Purpose |
 |---------------|---------|
+| `[source]` | Typed input source such as `motion_file` or `motion_sync_skateboarding` |
 | `show_progress` | Rich per-frame progress bar during optimization (also `retarget run --progress`) |
 | `[mesh]` | Interaction mesh topology (`delaunay`, `k_neighbors`, …) |
 | `[solver]` | Backend (`auto`, `numpy_least_squares`, `cvxpy_clarabel`), iterations, trust region |
 | `[scene]` | Ground grid for robot-only tasks; nested `[scene.object]` / `[scene.terrain]` for other task kinds |
-| `[[objectives]]` | Registered objective terms and weights |
-| `[[constraints]]` | Registered constraints; optional `parameters = { ... }` |
+| `[[objectives]]` | Typed objective config tables with `kind` and config fields |
+| `[[constraints]]` | Typed constraint config tables with `kind` and config fields |
 
-The full example in `examples/run_config.toml` sets Laplacian and smoothness objectives, joint limits, trust region, and foot-contact constraints:
+The full example in `examples/run_config.toml` sets Laplacian and smoothness objectives plus joint limits, trust region, and foot-sticking constraints:
 
 ```toml
 scale_to_robot = true
@@ -54,12 +58,12 @@ max_iterations = 8
 trust_radius = 0.2
 
 [[objectives]]
-name = "laplacian"
+kind = "laplacian"
 weight = 10.0
 
 [[constraints]]
-name = "foot_contact"
-parameters = { velocity_threshold = 0.02, tolerance = 0.001 }
+kind = "foot_sticking"
+tolerance = 0.001
 ```
 
 See [Interaction mesh](../interaction-mesh.md) for how mesh settings affect the optimization geometry.

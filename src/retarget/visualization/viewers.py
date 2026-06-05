@@ -18,6 +18,7 @@ from retarget.visualization.playback import (
     PlaybackData,
     PlaybackFrame,
     PlaybackObject,
+    PlaybackObjectVisualPart,
     PlaybackRobot,
     build_playback_data,
 )
@@ -345,6 +346,13 @@ def _add_object_scene(
 
 
 def _try_add_object_mesh(scene: Any, obj: PlaybackObject, object_name: str) -> Any | None:
+    if obj.visual_parts:
+        handles = tuple(
+            handle
+            for part in obj.visual_parts
+            if (handle := _try_add_object_visual_part(scene, part, object_name)) is not None
+        )
+        return handles or None
     if obj.mesh_path is None or not obj.mesh_path.exists():
         return None
     add_mesh = getattr(scene, "add_mesh_trimesh", None)
@@ -354,8 +362,8 @@ def _try_add_object_mesh(scene: Any, obj: PlaybackObject, object_name: str) -> A
         import trimesh
     except ImportError:  # pragma: no cover - optional dependency
         return None
-    loaded = trimesh.load_mesh(str(obj.mesh_path), process=False)
-    if not hasattr(loaded, "vertices") or not hasattr(loaded, "faces"):
+    loaded = _load_scaled_mesh(trimesh, obj.mesh_path, obj.asset_scale)
+    if loaded is None:
         return None
     return add_mesh(
         f"/retarget/object/{object_name}/mesh",
@@ -363,6 +371,59 @@ def _try_add_object_mesh(scene: Any, obj: PlaybackObject, object_name: str) -> A
         position=(0.0, 0.0, 0.0),
         wxyz=(1.0, 0.0, 0.0, 0.0),
     )
+
+
+def _try_add_object_visual_part(scene: Any, part: PlaybackObjectVisualPart, object_name: str) -> Any | None:
+    if not part.mesh_path.exists():
+        return None
+    add_mesh = getattr(scene, "add_mesh_simple", None)
+    if add_mesh is None:
+        return None
+    try:
+        import trimesh
+    except ImportError:  # pragma: no cover - optional dependency
+        return None
+    loaded = _load_scaled_mesh(trimesh, part.mesh_path, part.asset_scale)
+    if loaded is None:
+        return None
+    color, opacity = _mesh_color_and_opacity(part.rgba)
+    kwargs: dict[str, Any] = {
+        "color": color,
+        "material": "standard",
+        "flat_shading": False,
+        "side": "double",
+        "position": (0.0, 0.0, 0.0),
+        "wxyz": (1.0, 0.0, 0.0, 0.0),
+    }
+    if opacity is not None:
+        kwargs["opacity"] = opacity
+    return add_mesh(
+        f"/retarget/object/{object_name}/parts/{_scene_name_component(part.name)}",
+        np.asarray(loaded.vertices, dtype=np.float64),
+        np.asarray(loaded.faces, dtype=np.int64),
+        **kwargs,
+    )
+
+
+def _load_scaled_mesh(trimesh: Any, mesh_path: Any, asset_scale: tuple[float, float, float]) -> Any | None:
+    loaded = trimesh.load_mesh(str(mesh_path), process=False)
+    if not hasattr(loaded, "vertices") or not hasattr(loaded, "faces"):
+        return None
+    scale = np.asarray(asset_scale, dtype=np.float64)
+    if not np.allclose(scale, np.ones(3, dtype=np.float64)):
+        loaded = loaded.copy()
+        loaded.vertices = np.asarray(loaded.vertices, dtype=np.float64) * scale
+    return loaded
+
+
+def _mesh_color_and_opacity(
+    rgba: tuple[float, float, float, float] | None,
+) -> tuple[tuple[int, int, int], float | None]:
+    if rgba is None:
+        return (72, 76, 88), None
+    color = tuple(round(channel * 255.0) for channel in rgba[:3])
+    opacity = float(rgba[3]) if rgba[3] < 1.0 else None
+    return (color[0], color[1], color[2]), opacity
 
 
 def _add_diagnostics(scene: Any, playback: PlaybackData, frame: PlaybackFrame) -> _DiagnosticSceneHandles:

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -135,6 +136,51 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert report.source_name == "fixture"
     assert report.frame_count == motion.frame_count
     assert report.metric_units["optimization_cost"] == "cost"
+
+
+def test_object_asset_scale_feeds_environment_and_playback_metadata() -> None:
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+    mesh_path = Path("/tmp/box.obj")
+    object_spec = ObjectSpec(
+        name="scaled_box",
+        mesh_path=mesh_path,
+        asset_scale=(2.0, 3.0, 4.0),
+        visual_parts=[
+            {
+                "name": "box1",
+                "mesh_path": mesh_path,
+                "asset_scale": (2.0, 3.0, 4.0),
+                "rgba": (0.3, 0.7, 0.9, 0.5),
+            }
+        ],
+        sample_points=np.asarray([[0.5, 1.0, 1.5]], dtype=np.float64),
+    )
+    problem = RetargetingProblem(
+        name="scaled_object",
+        task_kind=TaskKind.CLIMBING,
+        robot=robot,
+        motion=motion,
+        motion_format=motion_formats.get("minimal"),
+        scene=SceneSpec.climbing(object_spec=object_spec),
+    )
+
+    assert np.allclose(object_spec.scaled_sample_points(), [[1.0, 3.0, 6.0]])
+    assert np.allclose(pipeline_engine._environment_points(problem, None), [[1.0, 3.0, 6.0]])
+
+    playback = pipeline_engine._object_playback_metadata(problem)
+
+    assert playback is not None
+    assert playback["asset_scale"] == [2.0, 3.0, 4.0]
+    assert playback["sample_points"] == [[1.0, 3.0, 6.0]]
+    assert playback["visual_parts"] == [
+        {
+            "name": "box1",
+            "mesh_path": str(mesh_path),
+            "asset_scale": [2.0, 3.0, 4.0],
+            "rgba": [0.3, 0.7, 0.9, 0.5],
+        }
+    ]
 
 
 def test_scale_to_robot_warns_when_source_height_unknown() -> None:

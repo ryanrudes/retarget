@@ -7,6 +7,7 @@ Holosoma tasks using retarget's typed problem surface.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -38,7 +39,7 @@ from retarget.optimization import (
 from retarget.optimization.variables import QposVariableSpec
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.robots.spec import RobotSpec
-from retarget.scene.spec import ObjectSpec, ObjectTrajectory, SceneSpec
+from retarget.scene.spec import ObjectSpec, ObjectTrajectory, ObjectVisualPart, SceneSpec
 
 G1_DOF = 29
 G1_HEIGHT_M = 1.32
@@ -188,10 +189,60 @@ class HolosomaClimbPreparation:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _HolosomaClimbLayout:
+    fixture_dir: Path
+    motion_path: Path
+    object_mesh_path: Path
+    object_urdf_path: Path
+    scene_xml_path: Path
+
+
 def default_holosoma_root() -> Path:
     """Return the sibling Holosoma checkout path used by local parity tests."""
 
     return Path(__file__).resolve().parents[4] / "holosoma"
+
+
+def _holosoma_climb_layout(root: Path) -> _HolosomaClimbLayout:
+    fixture_candidates = (
+        root / "src" / "holosoma_retargeting" / "holosoma_retargeting" / "demo_data" / "climb" / "mocap_climb_seq_0",
+        root / "demo_data" / "climb" / "mocap_climb_seq_0",
+        root / "tests" / "fixtures" / "climb_seq_0",
+    )
+    fixture_dir = next((path for path in fixture_candidates if path.exists()), None)
+    if fixture_dir is None:
+        candidates = "\n".join(str(path) for path in fixture_candidates)
+        raise FileNotFoundError(f"Could not find Holosoma climb fixture. Checked:\n{candidates}")
+
+    motion_files = sorted(fixture_dir.glob("mocap_climb_seq_0_joint_positions*.npy"))
+    if not motion_files:
+        raise FileNotFoundError(f"No mocap_climb_seq_0_joint_positions*.npy file found in {fixture_dir}")
+
+    layout = _HolosomaClimbLayout(
+        fixture_dir=fixture_dir,
+        motion_path=motion_files[0],
+        object_mesh_path=fixture_dir / "multi_boxes.obj",
+        object_urdf_path=fixture_dir / "multi_boxes.urdf",
+        scene_xml_path=fixture_dir / "g1_29dof_spherehand_w_multi_boxes.xml",
+    )
+    for path in (layout.object_mesh_path, layout.object_urdf_path, layout.scene_xml_path):
+        if not path.exists():
+            raise FileNotFoundError(path)
+    return layout
+
+
+def _holosoma_g1_robot_dir(root: Path) -> Path:
+    candidates = (
+        root / "src" / "holosoma_retargeting" / "holosoma_retargeting" / "models" / "g1",
+        root / "models" / "g1",
+        root / "src" / "interaction_mesh_retarget" / "robots" / "g1",
+    )
+    for candidate in candidates:
+        if (candidate / "g1_29dof_spherehand.urdf").exists() and (candidate / "g1_29dof_spherehand.xml").exists():
+            return candidate
+    checked = "\n".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"Could not find Holosoma G1 spherehand assets. Checked:\n{checked}")
 
 
 def mocap_motion_format() -> MotionFormatSpec:
@@ -221,14 +272,12 @@ def from_mocap_climb_fixture(
 
     root = Path(holosoma_root) if holosoma_root is not None else default_holosoma_root()
     root = root.resolve()
-    fixture_dir = root / "tests" / "fixtures" / "climb_seq_0"
-    motion_path = fixture_dir / "mocap_climb_seq_0_joint_positions_f900-3700.npy"
-    object_mesh_path = fixture_dir / "multi_boxes.obj"
-    object_urdf_path = fixture_dir / "multi_boxes.urdf"
-    scene_xml_path = fixture_dir / "g1_29dof_spherehand_w_multi_boxes.xml"
-    for path in (motion_path, object_mesh_path, object_urdf_path, scene_xml_path):
-        if not path.exists():
-            raise FileNotFoundError(path)
+    layout = _holosoma_climb_layout(root)
+    fixture_dir = layout.fixture_dir
+    motion_path = layout.motion_path
+    object_mesh_path = layout.object_mesh_path
+    object_urdf_path = layout.object_urdf_path
+    scene_xml_path = layout.scene_xml_path
     if ensure_model_assets:
         ensure_g1_model_assets(root)
 
@@ -244,10 +293,18 @@ def from_mocap_climb_fixture(
     object_poses = preprocess_object_poses(object_poses, scale=scale)
     object_poses_mujoco = convert_object_poses_to_mujoco_order(object_poses)
     q_init = compute_climb_q_init(human_joints, object_poses, demo_joints=MOCAP_DEMO_JOINTS, robot_dof=G1_DOF)
-    object_samples = sample_multi_boxes_like_holosoma(object_mesh_path, sample_count=MULTI_BOX_SAMPLE_COUNT)
+    object_asset_scale = (scale, scale, scale)
+    scaled_object_urdf_path, scaled_scene_xml_path = ensure_scaled_multi_boxes_assets(
+        fixture_dir=fixture_dir,
+        object_urdf_path=object_urdf_path,
+        scene_xml_path=scene_xml_path,
+        asset_scale=object_asset_scale,
+    )
+    object_samples_source = sample_multi_boxes_like_holosoma(object_mesh_path, sample_count=MULTI_BOX_SAMPLE_COUNT)
+    object_samples = object_samples_source * np.asarray(object_asset_scale, dtype=np.float64)
     robot = g1_spherehand_robot(
         root,
-        scene_xml_path=scene_xml_path,
+        scene_xml_path=scaled_scene_xml_path,
         include_object_collision=include_object_collision,
     )
     geometry_pairs = (
@@ -304,14 +361,17 @@ def from_mocap_climb_fixture(
         object_spec=ObjectSpec(
             name="multi_boxes",
             mesh_path=object_mesh_path,
-            urdf_path=object_urdf_path,
-            sample_points=object_samples,
+            urdf_path=scaled_object_urdf_path,
+            asset_scale=object_asset_scale,
+            visual_parts=_object_visual_parts_from_urdf(scaled_object_urdf_path),
+            sample_points=object_samples_source,
             trajectory=object_trajectory,
             qpos_mode="external",
             metadata={
                 "sample_count": MULTI_BOX_SAMPLE_COUNT,
                 "sample_seed": MULTI_BOX_SAMPLE_SEED,
-                "sample_space": "object_local",
+                "sample_space": "object_asset_local",
+                "active_sample_space": "scaled_object_local",
             },
         )
     )
@@ -321,6 +381,7 @@ def from_mocap_climb_fixture(
         "task_type": "climbing",
         "data_format": "mocap",
         "fixture": str(fixture_dir),
+        "asset_scale": list(object_asset_scale),
         "include_object_collision": include_object_collision,
         "collision_detection_threshold": COLLISION_DETECTION_THRESHOLD,
         "q_a_init_idx": -7,
@@ -341,7 +402,7 @@ def from_mocap_climb_fixture(
             max_iterations=10,
             first_frame_iterations=50,
             trust_radius=0.2,
-            convergence="cost_plateau",
+            convergence="none",
         ),
         objectives=profile.objectives,
         constraints=profile.constraints,
@@ -375,7 +436,7 @@ def g1_spherehand_robot(
 
     root = Path(holosoma_root) if holosoma_root is not None else default_holosoma_root()
     root = root.resolve()
-    robot_dir = root / "src" / "interaction_mesh_retarget" / "robots" / "g1"
+    robot_dir = _holosoma_g1_robot_dir(root)
     urdf_path = robot_dir / "g1_29dof_spherehand.urdf"
     robot_xml_path = robot_dir / "g1_29dof_spherehand.xml"
     xml_path = Path(scene_xml_path).resolve() if scene_xml_path is not None else robot_xml_path
@@ -416,7 +477,9 @@ def ensure_g1_model_assets(holosoma_root: str | Path | None = None) -> tuple[Pat
 
     root = Path(holosoma_root) if holosoma_root is not None else default_holosoma_root()
     root = root.resolve()
-    source_robot = root / "src" / "interaction_mesh_retarget" / "robots" / "g1"
+    source_robot = _holosoma_g1_robot_dir(root)
+    if not (root / "tests" / "fixtures" / "climb_seq_0").exists():
+        return ()
     models_g1 = root / "models" / "g1"
     models_g1.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
@@ -585,6 +648,101 @@ def sample_multi_boxes_like_holosoma(
             r1, r2 = 1.0 - r1, 1.0 - r2
         samples[idx] = v1 + r1 * (v2 - v1) + r2 * (v3 - v1)
     return samples
+
+
+def ensure_scaled_multi_boxes_assets(
+    *,
+    fixture_dir: str | Path,
+    object_urdf_path: str | Path,
+    scene_xml_path: str | Path,
+    asset_scale: tuple[float, float, float],
+) -> tuple[Path, Path]:
+    """Create Holosoma-style scaled multi-box URDF and scene XML assets."""
+
+    fixture = Path(fixture_dir)
+    source_urdf = Path(object_urdf_path)
+    source_scene_xml = Path(scene_xml_path)
+    source_box_assets = fixture / "box_assets.xml"
+    for path in (source_urdf, source_scene_xml, source_box_assets):
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+    sx, sy, sz = (float(v) for v in asset_scale)
+    suffix = f"{sx:.2f}_{sy:.2f}_{sz:.2f}"
+    scaled_urdf = source_urdf.with_name(f"{source_urdf.stem}_scaled_{suffix}{source_urdf.suffix}")
+    scaled_box_assets = source_box_assets.with_name(
+        f"{source_box_assets.stem}_scaled_{suffix}{source_box_assets.suffix}"
+    )
+    scaled_scene_xml = source_scene_xml.with_name(f"{source_scene_xml.stem}_scaled_{suffix}{source_scene_xml.suffix}")
+
+    _write_xml_with_replaced_scale(source_urdf, scaled_urdf, asset_scale=asset_scale)
+    _write_xml_with_replaced_scale(source_box_assets, scaled_box_assets, asset_scale=asset_scale)
+    _write_scene_with_box_asset_include(source_scene_xml, scaled_scene_xml, include_name=scaled_box_assets.name)
+    return scaled_urdf, scaled_scene_xml
+
+
+def _write_xml_with_replaced_scale(source: Path, destination: Path, *, asset_scale: tuple[float, float, float]) -> None:
+    sx, sy, sz = (float(v) for v in asset_scale)
+    content = source.read_text()
+    replacement = f'scale="{sx} {sy} {sz}"'
+    content = re.sub(r'scale="[^"]*"', replacement, content)
+    if destination.exists() and destination.read_text() == content:
+        return
+    destination.write_text(content)
+
+
+def _write_scene_with_box_asset_include(source: Path, destination: Path, *, include_name: str) -> None:
+    content = source.read_text()
+    content = re.sub(r'file="box_assets\.xml"', f'file="{include_name}"', content)
+    if destination.exists() and destination.read_text() == content:
+        return
+    destination.write_text(content)
+
+
+def _object_visual_parts_from_urdf(urdf_path: str | Path) -> tuple[ObjectVisualPart, ...]:
+    path = Path(urdf_path)
+    if not path.exists():
+        return ()
+    root = ET.parse(path).getroot()
+    parts: list[ObjectVisualPart] = []
+    for link in root.iter("link"):
+        link_name = link.attrib.get("name", "object")
+        for visual_idx, visual in enumerate(link.findall("visual")):
+            mesh = visual.find("./geometry/mesh")
+            if mesh is None:
+                continue
+            filename = mesh.attrib.get("filename")
+            if not filename:
+                continue
+            mesh_path = (path.parent / filename).resolve()
+            scale = cast(tuple[float, float, float] | None, _xml_float_tuple(mesh.attrib.get("scale"), expected=3))
+            rgba = _visual_rgba(visual)
+            part_name = Path(filename).stem or f"{link_name}_{visual_idx}"
+            parts.append(
+                ObjectVisualPart(
+                    name=part_name,
+                    mesh_path=mesh_path,
+                    asset_scale=scale,
+                    rgba=rgba,
+                )
+            )
+    return tuple(parts)
+
+
+def _visual_rgba(visual: ET.Element) -> tuple[float, float, float, float] | None:
+    color = visual.find("./material/color")
+    if color is None:
+        return None
+    return cast(tuple[float, float, float, float] | None, _xml_float_tuple(color.attrib.get("rgba"), expected=4))
+
+
+def _xml_float_tuple(value: str | None, *, expected: int) -> tuple[float, ...] | None:
+    if not value:
+        return None
+    values = tuple(float(item) for item in value.split())
+    if len(values) != expected:
+        raise ValueError(f"expected {expected} float values, got {len(values)}")
+    return values
 
 
 def object_non_penetration_geometry_pairs(
@@ -795,6 +953,7 @@ __all__ = [
     "convert_object_poses_to_mujoco_order",
     "default_holosoma_root",
     "ensure_g1_model_assets",
+    "ensure_scaled_multi_boxes_assets",
     "foot_sticking_contact_plan",
     "from_mocap_climb_fixture",
     "g1_spherehand_robot",

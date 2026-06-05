@@ -154,6 +154,44 @@ def test_mujoco_backend_collision_candidate_jacobians_filter_scene_keywords(tmp_
     assert np.allclose(backend.model.geom_margin, original_margins)
 
 
+def test_mujoco_backend_penetrating_ground_jacobian_increases_signed_distance(tmp_path):
+    pytest.importorskip("mujoco")
+    xml_path = tmp_path / "penetrating_ground.xml"
+    xml_path.write_text(
+        """
+<mujoco model="penetrating_ground">
+  <worldbody>
+    <geom name="ground" type="plane" size="1 1 0.1" pos="0 0 0" contype="1" conaffinity="1"/>
+    <body name="robot" pos="0 0 0">
+      <freejoint/>
+      <geom name="robot_geom" type="sphere" size="0.05" contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip()
+    )
+    robot = RobotSpec(
+        name="penetrating_ground",
+        dof=1,
+        height_m=1.0,
+        joint_names=("dummy",),
+    )
+    backend = MuJoCoKinematicsBackend(robot, xml_path=xml_path)
+    qpos = np.zeros(robot.qpos_size(), dtype=np.float64)
+    qpos[3] = 1.0
+
+    rows = backend.geom_distance_jacobians(
+        qpos,
+        np.asarray([2], dtype=np.int64),
+        (("ground", "robot_geom"),),
+        max_distance=0.1,
+    )
+
+    assert len(rows) == 1
+    assert rows[0].distance.distance < 0.0
+    assert rows[0].jacobian[0] > 0.0
+
+
 def test_mujoco_backend_extracts_limited_hinge_and_slide_ranges_with_spec_overrides():
     robot = RobotSpec(
         name="mujoco_fixture",

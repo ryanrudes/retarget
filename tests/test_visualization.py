@@ -6,10 +6,12 @@ from retarget.core.enums import RunStatus
 from retarget.results import RetargetingResult
 from retarget.robots import RobotSpec
 from retarget.visualization import DryRunVisualizer, build_playback_data
+from retarget.visualization.playback import PlaybackObject, PlaybackObjectVisualPart
 from retarget.visualization.viewers import (
     _PlaybackGuiHandles,
     _populate_viser_scene,
     _run_viser_playback_loop,
+    _try_add_object_mesh,
 )
 
 
@@ -68,6 +70,40 @@ def test_build_playback_data_uses_object_playback_metadata():
     assert playback.object.point_count == 2
     assert np.allclose(playback.object.positions[:, 0], [0.25, 0.50])
     assert np.allclose(playback.frame(1).object_points[:, 0], [0.40, 0.60])
+
+
+def test_build_playback_data_uses_object_visual_parts(tmp_path) -> None:
+    mesh_path = tmp_path / "box.obj"
+    mesh_path.write_text("")
+    result = RetargetingResult(
+        name="object_parts",
+        status=RunStatus.SUCCESS,
+        qpos=np.zeros((1, 7), dtype=np.float64),
+        metadata={
+            "playback": {
+                "object": {
+                    "name": "multi_boxes",
+                    "sample_points": [[0.0, 0.0, 0.0]],
+                    "visual_parts": [
+                        {
+                            "name": "box1",
+                            "mesh_path": str(mesh_path),
+                            "asset_scale": [2.0, 3.0, 4.0],
+                            "rgba": [0.3, 0.7, 0.9, 0.5],
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+    playback = build_playback_data(result)
+
+    assert playback.object is not None
+    assert len(playback.object.visual_parts) == 1
+    assert playback.object.visual_parts[0].mesh_path == mesh_path
+    assert playback.object.visual_parts[0].asset_scale == (2.0, 3.0, 4.0)
+    assert playback.object.visual_parts[0].rgba == pytest.approx((0.3, 0.7, 0.9, 0.5))
 
 
 def test_build_playback_data_uses_robot_link_positions():
@@ -196,6 +232,60 @@ def test_populate_viser_scene_uses_playback_fps_override():
     assert server.gui.fps_value == 60.0
 
 
+def test_object_mesh_rendering_applies_asset_scale(tmp_path) -> None:
+    trimesh = pytest.importorskip("trimesh")
+    mesh_path = tmp_path / "box.obj"
+    trimesh.creation.box(extents=(1.0, 1.0, 1.0)).export(mesh_path)
+    obj = PlaybackObject(
+        name="scaled_box",
+        local_points=np.asarray([[0.0, 0.0, 0.0]], dtype=np.float64),
+        world_points=np.zeros((1, 1, 3), dtype=np.float64),
+        positions=np.zeros((1, 3), dtype=np.float64),
+        quaternions=np.asarray([[1.0, 0.0, 0.0, 0.0]], dtype=np.float64),
+        mesh_path=mesh_path,
+        asset_scale=(2.0, 3.0, 4.0),
+    )
+    scene = _FakeScene()
+
+    _try_add_object_mesh(scene, obj, "scaled_box")
+
+    assert ("mesh", "/retarget/object/scaled_box/mesh") in scene.calls
+    assert scene.mesh_bounds is not None
+    assert np.allclose(scene.mesh_bounds[0], [-1.0, -1.5, -2.0])
+    assert np.allclose(scene.mesh_bounds[1], [1.0, 1.5, 2.0])
+
+
+def test_object_visual_part_rendering_uses_color_and_scale(tmp_path) -> None:
+    trimesh = pytest.importorskip("trimesh")
+    mesh_path = tmp_path / "box.obj"
+    trimesh.creation.box(extents=(1.0, 1.0, 1.0)).export(mesh_path)
+    obj = PlaybackObject(
+        name="multi_boxes",
+        local_points=np.asarray([[0.0, 0.0, 0.0]], dtype=np.float64),
+        world_points=np.zeros((1, 1, 3), dtype=np.float64),
+        positions=np.zeros((1, 3), dtype=np.float64),
+        quaternions=np.asarray([[1.0, 0.0, 0.0, 0.0]], dtype=np.float64),
+        visual_parts=(
+            PlaybackObjectVisualPart(
+                name="box1",
+                mesh_path=mesh_path,
+                asset_scale=(2.0, 3.0, 4.0),
+                rgba=(0.3, 0.7, 0.9, 0.5),
+            ),
+        ),
+    )
+    scene = _FakeScene()
+
+    _try_add_object_mesh(scene, obj, "multi_boxes")
+
+    assert ("mesh_simple", "/retarget/object/multi_boxes/parts/box1") in scene.calls
+    assert scene.mesh_bounds is not None
+    assert np.allclose(scene.mesh_bounds[0], [-1.0, -1.5, -2.0])
+    assert np.allclose(scene.mesh_bounds[1], [1.0, 1.5, 2.0])
+    assert scene.mesh_color == (76, 178, 230)
+    assert scene.mesh_opacity == pytest.approx(0.5)
+
+
 def test_run_viser_playback_loop_advances_frames_when_playing(monkeypatch: pytest.MonkeyPatch) -> None:
     result = RetargetingResult(
         name="loop",
@@ -265,6 +355,9 @@ class _FakeViserServer:
 class _FakeScene:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.mesh_bounds: np.ndarray | None = None
+        self.mesh_color: tuple[int, int, int] | None = None
+        self.mesh_opacity: float | None = None
 
     def add_grid(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("grid", name))
@@ -280,6 +373,27 @@ class _FakeScene:
 
     def add_box(self, name: str, **_kwargs: object) -> object:
         self.calls.append(("box", name))
+        return _FakeHandle()
+
+    def add_mesh_trimesh(self, name: str, mesh: object, **_kwargs: object) -> object:
+        self.calls.append(("mesh", name))
+        self.mesh_bounds = np.asarray(mesh.bounds, dtype=np.float64)
+        return _FakeHandle()
+
+    def add_mesh_simple(
+        self,
+        name: str,
+        vertices: np.ndarray,
+        faces: np.ndarray,
+        **kwargs: object,
+    ) -> object:
+        del faces
+        self.calls.append(("mesh_simple", name))
+        self.mesh_bounds = np.vstack([vertices.min(axis=0), vertices.max(axis=0)])
+        color = kwargs.get("color")
+        self.mesh_color = color if isinstance(color, tuple) else None
+        opacity = kwargs.get("opacity")
+        self.mesh_opacity = float(opacity) if opacity is not None else None
         return _FakeHandle()
 
 

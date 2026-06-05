@@ -35,7 +35,7 @@ from retarget.optimization.variables import QposVariableSpec
 from retarget.pipeline import RetargetingProblem
 from retarget.robots import robot_providers, robots
 from retarget.robots.spec import RobotSpec
-from retarget.scene import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
+from retarget.scene import ObjectSpec, ObjectTrajectory, ObjectVisualPart, SceneSpec, TerrainSpec
 
 
 @dataclass(frozen=True)
@@ -129,6 +129,27 @@ ObjectiveConfigInput: TypeAlias = ObjectiveConfigUnion | dict[str, Any]
 ConstraintConfigInput: TypeAlias = ConstraintConfigUnion | dict[str, Any]
 
 
+class ObjectVisualPartConfig(BaseModel):
+    """Serializable visual mesh part for object playback."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    mesh_path: Path
+    asset_scale: float | tuple[float, float, float] | None = None
+    rgba: tuple[float, float, float, float] | None = None
+
+    @field_validator("mesh_path", mode="before")
+    @classmethod
+    def _coerce_mesh_path(cls, value: Any) -> Path:
+        return Path(value)
+
+    def resolve_paths(self, base_dir: Path) -> ObjectVisualPartConfig:
+        """Return a copy with relative asset paths resolved against `base_dir`."""
+
+        return self.model_copy(update={"mesh_path": _resolve_relative(self.mesh_path, base_dir)})
+
+
 class ObjectConfig(BaseModel):
     """Serializable object-scene options for CLI run specs."""
 
@@ -137,6 +158,8 @@ class ObjectConfig(BaseModel):
     name: str = "object"
     mesh_path: Path | None = None
     urdf_path: Path | None = None
+    asset_scale: float | tuple[float, float, float] = 1.0
+    visual_parts: tuple[ObjectVisualPartConfig, ...] = ()
     sample_points: tuple[tuple[float, float, float], ...] | None = None
     sample_points_path: Path | None = None
     mesh_sample_count: int = 128
@@ -163,6 +186,7 @@ class ObjectConfig(BaseModel):
             update={
                 "mesh_path": _resolve_relative(self.mesh_path, base_dir),
                 "urdf_path": _resolve_relative(self.urdf_path, base_dir),
+                "visual_parts": tuple(part.resolve_paths(base_dir) for part in self.visual_parts),
                 "sample_points_path": _resolve_relative(self.sample_points_path, base_dir),
                 "trajectory_path": _resolve_relative(self.trajectory_path, base_dir),
             }
@@ -649,6 +673,16 @@ def _object_spec(config: ObjectConfig | None, *, frame_count: int, fps: float) -
         name=config.name,
         mesh_path=config.mesh_path,
         urdf_path=config.urdf_path,
+        asset_scale=config.asset_scale,
+        visual_parts=tuple(
+            ObjectVisualPart(
+                name=part.name,
+                mesh_path=part.mesh_path,
+                asset_scale=part.asset_scale,
+                rgba=part.rgba,
+            )
+            for part in config.visual_parts
+        ),
         sample_points=_scene_points(
             config.sample_points,
             config.sample_points_path,

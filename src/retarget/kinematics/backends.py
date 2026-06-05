@@ -480,9 +480,11 @@ class MuJoCoKinematicsBackend:
             distance, first_point, second_point = self._geom_distance(first_id, second_id, max_distance=max_distance)
             if distance > max_distance:
                 continue
-            delta = second_point - first_point
-            norm = float(np.linalg.norm(delta))
-            normal = delta / norm if norm > 1e-12 else np.zeros(3, dtype=np.float64)
+            normal = _signed_distance_normal(
+                distance=distance,
+                first_point=first_point,
+                second_point=second_point,
+            )
             distances.append(
                 GeometryDistance(
                     first=first,
@@ -529,9 +531,11 @@ class MuJoCoKinematicsBackend:
             distance, first_point, second_point = self._geom_distance(first_id, second_id, max_distance=max_distance)
             if distance > max_distance:
                 continue
-            delta = second_point - first_point
-            norm = float(np.linalg.norm(delta))
-            normal = delta / norm if norm > 1e-12 else np.zeros(3, dtype=np.float64)
+            normal = _signed_distance_normal(
+                distance=distance,
+                first_point=first_point,
+                second_point=second_point,
+            )
             first_body = self._geom_body_id(first_id)
             second_body = self._geom_body_id(second_id)
             first_jac = self._point_jacobian_qpos(first_point, first_body, transform)
@@ -583,9 +587,11 @@ class MuJoCoKinematicsBackend:
             )
             if distance > max_distance:
                 continue
-            delta = second_point - first_point
-            norm = float(np.linalg.norm(delta))
-            normal = delta / norm if norm > 1e-12 else np.zeros(3, dtype=np.float64)
+            normal = _signed_distance_normal(
+                distance=distance,
+                first_point=first_point,
+                second_point=second_point,
+            )
             first_jac = self._point_jacobian_qpos(first_point, self._geom_body_id(first_id), transform)
             second_jac = self._point_jacobian_qpos(second_point, self._geom_body_id(second_id), transform)
             row = _select_qpos_columns(normal @ (second_jac - first_jac), indices)
@@ -801,6 +807,22 @@ def _select_qpos_columns(matrix: NDArray[np.float64], indices: NDArray[np.int64]
         if 0 <= index < matrix.shape[-1]:
             selected[..., col] = matrix[..., index]
     return selected
+
+
+def _signed_distance_normal(
+    *,
+    distance: float,
+    first_point: NDArray[np.float64],
+    second_point: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Return the normal that increases MuJoCo's signed geom distance."""
+
+    delta = np.asarray(second_point, dtype=np.float64) - np.asarray(first_point, dtype=np.float64)
+    norm = float(np.linalg.norm(delta))
+    if norm <= 1e-12:
+        return np.zeros(3, dtype=np.float64)
+    normal = delta / norm
+    return -normal if distance < 0.0 else normal
 
 
 def _name_matches_any_keyword(name: str, keywords: tuple[str, ...]) -> bool:

@@ -15,6 +15,71 @@ from retarget.core.pose import PoseSequence
 ObjectQposMode = Literal["appended", "external"]
 
 
+def _coerce_asset_scale(value: Any, *, allow_none: bool = False) -> tuple[float, float, float] | None:
+    if value is None:
+        return None if allow_none else (1.0, 1.0, 1.0)
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim == 0:
+        arr = np.repeat(arr.reshape(()), 3)
+    arr = arr.reshape(-1)
+    if arr.shape != (3,):
+        raise ValueError("asset_scale must be a scalar or three values")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("asset_scale must contain finite values")
+    if np.any(arr <= 0.0):
+        raise ValueError("asset_scale values must be positive")
+    return (float(arr[0]), float(arr[1]), float(arr[2]))
+
+
+def _coerce_rgba(value: Any) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    if arr.shape != (4,):
+        raise ValueError("rgba must contain four values")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("rgba must contain finite values")
+    if np.any((arr < 0.0) | (arr > 1.0)):
+        raise ValueError("rgba values must be in [0, 1]")
+    return (float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3]))
+
+
+class ObjectVisualPart(BaseModel):
+    """A renderable object mesh part with optional material styling.
+
+    Attributes:
+        name (str): Stable part label used in scene paths.
+        mesh_path (Path): Mesh file for this visual part.
+        asset_scale (tuple[float, float, float] | None): Optional part-local scale; inherits the
+            parent object scale when omitted by playback metadata builders.
+        rgba (tuple[float, float, float, float] | None): Optional material color with alpha in ``[0, 1]``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    name: str
+    mesh_path: Path
+    asset_scale: tuple[float, float, float] | None = None
+    rgba: tuple[float, float, float, float] | None = None
+
+    @field_validator("mesh_path", mode="before")
+    @classmethod
+    def _path(cls, value: Any) -> Path:
+        if value in (None, ""):
+            raise ValueError("mesh_path is required for object visual parts")
+        return Path(value)
+
+    @field_validator("asset_scale", mode="before")
+    @classmethod
+    def _validate_asset_scale(cls, value: Any) -> tuple[float, float, float] | None:
+        return _coerce_asset_scale(value, allow_none=True)
+
+    @field_validator("rgba", mode="before")
+    @classmethod
+    def _validate_rgba(cls, value: Any) -> tuple[float, float, float, float] | None:
+        return _coerce_rgba(value)
+
+
 class ObjectTrajectory(BaseModel):
     """Dynamic object poses over time.
 
@@ -45,7 +110,9 @@ class ObjectSpec(BaseModel):
         name (str): Object identifier referenced by the scene and optimizer.
         mesh_path (Path | None): Optional triangle mesh file for visualization or sampling.
         urdf_path (Path | None): Optional URDF describing articulated object geometry.
-        sample_points (FloatArray | None): Precomputed surface points with shape ``(N, 3)``.
+        asset_scale (tuple[float, float, float]): Scale applied to asset-local geometry.
+        visual_parts (tuple[ObjectVisualPart, ...]): Optional visual mesh parts with typed materials.
+        sample_points (FloatArray | None): Precomputed asset-local surface points with shape ``(N, 3)``.
         trajectory (ObjectTrajectory | None): Time-varying object pose track.
         qpos_mode (ObjectQposMode): Whether the trajectory is appended to qpos or treated as an external scene pose.
         metadata (dict[str, Any]): Opaque sidecar fields (mass, scale, asset ids, …).
@@ -56,6 +123,8 @@ class ObjectSpec(BaseModel):
     name: str
     mesh_path: Path | None = None
     urdf_path: Path | None = None
+    asset_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    visual_parts: tuple[ObjectVisualPart, ...] = ()
     sample_points: FloatArray | None = None
     trajectory: ObjectTrajectory | None = None
     qpos_mode: ObjectQposMode = "appended"
@@ -66,6 +135,26 @@ class ObjectSpec(BaseModel):
     def _path_or_none(cls, value: Any) -> Path | None:
         return None if value in (None, "") else Path(value)
 
+    @field_validator("asset_scale", mode="before")
+    @classmethod
+    def _validate_asset_scale(cls, value: Any) -> tuple[float, float, float]:
+        result = _coerce_asset_scale(value)
+        if result is None:
+            raise ValueError("asset_scale is required")
+        return result
+
+    @field_validator("visual_parts", mode="before")
+    @classmethod
+    def _validate_visual_parts(cls, value: Any) -> tuple[ObjectVisualPart, ...]:
+        if value is None or value == "":
+            return ()
+        if not isinstance(value, list | tuple):
+            raise ValueError("visual_parts must be a list or tuple")
+        return tuple(
+            item if isinstance(item, ObjectVisualPart) else ObjectVisualPart.model_validate(item)
+            for item in value
+        )
+
     @field_validator("sample_points", mode="before")
     @classmethod
     def _validate_points(cls, value: Any) -> FloatArray | None:
@@ -75,6 +164,17 @@ class ObjectSpec(BaseModel):
         if arr.ndim != 2:
             raise ValueError("sample_points must have shape (N, 3)")
         return arr
+
+    def scaled_sample_points(self, default: FloatArray | None = None) -> FloatArray | None:
+        """Return object sample points in the active object-local geometry frame."""
+
+        raw_points = self.sample_points if self.sample_points is not None else default
+        if raw_points is None:
+            return None
+        points = as_float_array(raw_points, shape_tail=(3,), name="sample_points")
+        if points.ndim != 2:
+            raise ValueError("sample_points must have shape (N, 3)")
+        return points * np.asarray(self.asset_scale, dtype=np.float64)
 
 
 class TerrainSpec(BaseModel):

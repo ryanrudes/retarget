@@ -95,7 +95,7 @@ from retarget.pipeline.retargeter import Retargeter
 from retarget.results.spec import EvaluationManifest, EvaluationRecord, EvaluationReport, RetargetingResult
 from retarget.robots import robot_providers, robots
 from retarget.robots.spec import JointLimit, QposLayout, RobotSpec
-from retarget.scene.spec import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
+from retarget.scene.spec import ObjectSpec, ObjectTrajectory, ObjectVisualPart, SceneSpec, TerrainSpec
 
 __all__ = [
     "AssetInstallManifest",
@@ -159,6 +159,7 @@ __all__ = [
     "NonPenetrationSource",
     "ObjectSpec",
     "ObjectTrajectory",
+    "ObjectVisualPart",
     "Objective",
     "ObjectiveConfig",
     "ObjectiveConfigUnion",

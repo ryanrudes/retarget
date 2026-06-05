@@ -515,10 +515,20 @@ def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | N
     if object_spec is None:
         return None
 
-    sample_points = object_spec.sample_points if object_spec.sample_points is not None else _default_object_points()
+    sample_points = object_spec.scaled_sample_points(default=_default_object_points())
     metadata: dict[str, Any] = {
         "name": object_spec.name,
         "mesh_path": str(object_spec.mesh_path) if object_spec.mesh_path is not None else None,
+        "asset_scale": list(object_spec.asset_scale),
+        "visual_parts": [
+            {
+                "name": part.name,
+                "mesh_path": str(part.mesh_path),
+                "asset_scale": list(part.asset_scale or object_spec.asset_scale),
+                "rgba": None if part.rgba is None else list(part.rgba),
+            }
+            for part in object_spec.visual_parts
+        ],
         "sample_points": _jsonable(sample_points),
         "sample_points_space": "object" if object_spec.trajectory is not None else "world",
         "qpos_mode": object_spec.qpos_mode,
@@ -589,6 +599,16 @@ def _scene_provenance(problem: RetargetingProblem) -> dict[str, Any]:
             "name": problem.scene.object.name,
             "mesh_path": str(problem.scene.object.mesh_path) if problem.scene.object.mesh_path is not None else None,
             "urdf_path": str(problem.scene.object.urdf_path) if problem.scene.object.urdf_path is not None else None,
+            "asset_scale": list(problem.scene.object.asset_scale),
+            "visual_parts": [
+                {
+                    "name": part.name,
+                    "mesh_path": str(part.mesh_path),
+                    "asset_scale": list(part.asset_scale or problem.scene.object.asset_scale),
+                    "rgba": None if part.rgba is None else list(part.rgba),
+                }
+                for part in problem.scene.object.visual_parts
+            ],
             "qpos_mode": problem.scene.object.qpos_mode,
             "sample_point_count": (
                 int(problem.scene.object.sample_points.shape[0])
@@ -763,8 +783,8 @@ def _object_reference_pose(problem: RetargetingProblem, frame_idx: int) -> Pose 
 
 def _environment_points(problem: RetargetingProblem, reference_pose: Pose | None) -> FloatArray:
     if problem.scene.object is not None:
-        points = problem.scene.object.sample_points
-        return np.asarray(points if points is not None else _default_object_points(), dtype=np.float64)
+        points = problem.scene.object.scaled_sample_points(default=_default_object_points())
+        return np.asarray(points, dtype=np.float64)
     if problem.scene.terrain is not None and problem.scene.terrain.sample_points is not None:
         return problem.scene.terrain.sample_points
     return problem.scene.ground_points()

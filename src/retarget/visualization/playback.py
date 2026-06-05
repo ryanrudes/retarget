@@ -90,6 +90,55 @@ class PlaybackFrame(BaseModel):
         return arr
 
 
+class PlaybackObjectVisualPart(BaseModel):
+    """One visual mesh part for a playback object."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    name: str
+    mesh_path: Path
+    asset_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    rgba: tuple[float, float, float, float] | None = None
+
+    @field_validator("mesh_path", mode="before")
+    @classmethod
+    def _validate_mesh_path(cls, value: Any) -> Path:
+        if value in (None, ""):
+            raise ValueError("visual part mesh_path is required")
+        return Path(str(value))
+
+    @field_validator("asset_scale", mode="before")
+    @classmethod
+    def _validate_asset_scale(cls, value: Any) -> tuple[float, float, float]:
+        if value is None:
+            return (1.0, 1.0, 1.0)
+        arr = np.asarray(value, dtype=np.float64)
+        if arr.ndim == 0:
+            arr = np.repeat(arr.reshape(()), 3)
+        arr = arr.reshape(-1)
+        if arr.shape != (3,):
+            raise ValueError("asset_scale must be a scalar or three values")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("asset_scale must contain finite values")
+        if np.any(arr <= 0.0):
+            raise ValueError("asset_scale values must be positive")
+        return (float(arr[0]), float(arr[1]), float(arr[2]))
+
+    @field_validator("rgba", mode="before")
+    @classmethod
+    def _validate_rgba(cls, value: Any) -> tuple[float, float, float, float] | None:
+        if value is None:
+            return None
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+        if arr.shape != (4,):
+            raise ValueError("rgba must contain four values")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("rgba must contain finite values")
+        if np.any((arr < 0.0) | (arr > 1.0)):
+            raise ValueError("rgba values must be in [0, 1]")
+        return (float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3]))
+
+
 class PlaybackObject(BaseModel):
     """Scene object samples transformed for result playback.
 
@@ -100,6 +149,8 @@ class PlaybackObject(BaseModel):
         positions (FloatArray): Object origin positions with shape ``(frames, 3)``.
         quaternions (FloatArray): Object orientations (wxyz) with shape ``(frames, 4)``.
         mesh_path (Path | None): Optional mesh file for Viser mesh rendering.
+        asset_scale (tuple[float, float, float]): Scale applied to asset-local mesh vertices.
+        visual_parts (tuple[PlaybackObjectVisualPart, ...]): Optional colored object mesh parts.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -110,6 +161,8 @@ class PlaybackObject(BaseModel):
     positions: FloatArray
     quaternions: FloatArray
     mesh_path: Path | None = None
+    asset_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    visual_parts: tuple[PlaybackObjectVisualPart, ...] = ()
 
     @field_validator("local_points", mode="before")
     @classmethod
@@ -147,6 +200,23 @@ class PlaybackObject(BaseModel):
     @classmethod
     def _validate_mesh_path(cls, value: Any) -> Path | None:
         return None if value in (None, "") else Path(str(value))
+
+    @field_validator("asset_scale", mode="before")
+    @classmethod
+    def _validate_asset_scale(cls, value: Any) -> tuple[float, float, float]:
+        if value is None:
+            return (1.0, 1.0, 1.0)
+        arr = np.asarray(value, dtype=np.float64)
+        if arr.ndim == 0:
+            arr = np.repeat(arr.reshape(()), 3)
+        arr = arr.reshape(-1)
+        if arr.shape != (3,):
+            raise ValueError("asset_scale must be a scalar or three values")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("asset_scale must contain finite values")
+        if np.any(arr <= 0.0):
+            raise ValueError("asset_scale values must be positive")
+        return (float(arr[0]), float(arr[1]), float(arr[2]))
 
     @model_validator(mode="after")
     def _validate_lengths(self) -> PlaybackObject:
@@ -422,6 +492,8 @@ def _object_playback(result: RetargetingResult) -> PlaybackObject | None:
         positions=positions,
         quaternions=quaternions,
         mesh_path=_metadata_path(object_metadata.get("mesh_path")),
+        asset_scale=object_metadata.get("asset_scale", (1.0, 1.0, 1.0)),
+        visual_parts=_playback_visual_parts(object_metadata.get("visual_parts")),
     )
 
 
@@ -485,6 +557,12 @@ def _metadata_path(value: Any) -> Path | None:
     return Path(str(value))
 
 
+def _playback_visual_parts(value: Any) -> tuple[PlaybackObjectVisualPart, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(PlaybackObjectVisualPart.model_validate(item) for item in value if isinstance(item, dict))
+
+
 def _object_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
     playback = metadata.get("playback")
     if not isinstance(playback, dict):
@@ -527,4 +605,11 @@ def _transform_points(local_points: FloatArray, positions: FloatArray, quaternio
     )
 
 
-__all__ = ["PlaybackData", "PlaybackFrame", "PlaybackObject", "PlaybackRobot", "build_playback_data"]
+__all__ = [
+    "PlaybackData",
+    "PlaybackFrame",
+    "PlaybackObject",
+    "PlaybackObjectVisualPart",
+    "PlaybackRobot",
+    "build_playback_data",
+]

@@ -141,7 +141,11 @@ def _run_stage(stage: str, holosoma_root: Path, *, real_data_frames: int) -> tup
 
 
 def _defaults_checks() -> tuple[ParityCheck, ...]:
-    retargeter_mod = importlib.import_module("interaction_mesh_retarget.config.retargeter")
+    retargeter_mod = _import_holosoma_module(
+        "interaction_mesh_retarget.config.retargeter",
+        "holosoma_retargeting.config_types.retargeter",
+        "config_types.retargeter",
+    )
     holosoma_config = retargeter_mod.RetargeterConfig()
     holosoma_foot_lock = retargeter_mod.FootLockConfig()
     solver = SolverSpec()
@@ -185,7 +189,19 @@ def _defaults_checks() -> tuple[ParityCheck, ...]:
 
 
 def _mesh_checks() -> tuple[ParityCheck, ...]:
-    holosoma_mesh = importlib.import_module("interaction_mesh_retarget.geometry.mesh")
+    try:
+        holosoma_mesh = _import_holosoma_module("interaction_mesh_retarget.geometry.mesh")
+    except ModuleNotFoundError as exc:
+        return (
+            ParityCheck(
+                stage="mesh",
+                name="legacy_mesh_module",
+                status="skip",
+                retarget=None,
+                holosoma=None,
+                note=f"Holosoma mesh helper module is not importable in this checkout: {exc.name}",
+            ),
+        )
     vertices = np.asarray(
         [
             [0.0, 0.0, 0.0],
@@ -243,8 +259,20 @@ def _sqp_checks() -> tuple[ParityCheck, ...]:
             ),
         )
 
-    problem_builder = importlib.import_module("interaction_mesh_retarget.core.problem_builder")
-    holosoma_mesh = importlib.import_module("interaction_mesh_retarget.geometry.mesh")
+    try:
+        problem_builder = _import_holosoma_module("interaction_mesh_retarget.core.problem_builder")
+        holosoma_mesh = _import_holosoma_module("interaction_mesh_retarget.geometry.mesh")
+    except ModuleNotFoundError as exc:
+        return (
+            ParityCheck(
+                stage="sqp",
+                name="legacy_sqp_module",
+                status="skip",
+                retarget=None,
+                holosoma=None,
+                note=f"Holosoma SQP helper module is not importable in this checkout: {exc.name}",
+            ),
+        )
     vertices = np.asarray(
         [
             [0.0, 0.0, 0.0],
@@ -516,8 +544,16 @@ def _run_holosoma_climb_reference(holosoma_root: Path, *, frame_count: int) -> n
 
 
 def _task_contract_checks(holosoma_root: Path) -> tuple[ParityCheck, ...]:
-    retargeter_mod = importlib.import_module("interaction_mesh_retarget.config.retargeter")
-    robot_mod = importlib.import_module("interaction_mesh_retarget.config.robot")
+    retargeter_mod = _import_holosoma_module(
+        "interaction_mesh_retarget.config.retargeter",
+        "holosoma_retargeting.config_types.retargeter",
+        "config_types.retargeter",
+    )
+    robot_mod = _import_holosoma_module(
+        "interaction_mesh_retarget.config.robot",
+        "holosoma_retargeting.config_types.robot",
+        "config_types.robot",
+    )
     holosoma_config = retargeter_mod.RetargeterConfig()
     holosoma_robot = robot_mod.RobotConfig(robot_type="g1")
     retarget_robot = g1_spherehand_robot(holosoma_root)
@@ -532,7 +568,8 @@ def _task_contract_checks(holosoma_root: Path) -> tuple[ParityCheck, ...]:
     diagonal_metadata = (
         diagonal.model_dump(mode="json") if isinstance(diagonal, DiagonalRegularizationObjectiveConfig) else None
     )
-    retarget_g1 = Path(".retarget_assets/robot/g1/robot.toml")
+    robot_assets_available = retarget_robot.urdf_path is not None and retarget_robot.urdf_path.exists()
+    holosoma_robot_xml = retarget_robot.mujoco_xml_path or retarget_robot.urdf_path
     root_note = "The primitive is available and the real-data adapter now uses it."
     return (
         ParityCheck(
@@ -578,9 +615,9 @@ def _task_contract_checks(holosoma_root: Path) -> tuple[ParityCheck, ...]:
         ParityCheck(
             stage="task_contract",
             name="local_g1_assets",
-            status="pass" if retarget_g1.exists() else "fail",
-            retarget=str(retarget_g1),
-            holosoma=str(holosoma_root / "src/interaction_mesh_retarget/robots/g1/g1_29dof.xml"),
+            status="pass" if robot_assets_available else "fail",
+            retarget=str(retarget_robot.urdf_path),
+            holosoma=str(holosoma_robot_xml),
             note="Robot assets are present locally for source-level and real-data parity checks.",
         ),
         ParityCheck(
@@ -680,12 +717,28 @@ def _default_holosoma_root() -> Path:
 
 def _install_holosoma_source(root: Path) -> None:
     src = root / "src"
-    if not src.exists():
+    amazon_src = src / "holosoma_retargeting"
+    amazon_package = src / "holosoma_retargeting" / "holosoma_retargeting"
+    if not src.exists() and not amazon_package.exists():
         raise FileNotFoundError(f"Holosoma source path not found: {src}")
-    for path in (src, root):
+    for path in (amazon_src, amazon_package, src, root):
+        if not path.exists():
+            continue
         value = str(path)
         if value not in sys.path:
             sys.path.insert(0, value)
+
+
+def _import_holosoma_module(*module_names: str) -> Any:
+    last_error: ModuleNotFoundError | None = None
+    for module_name in module_names:
+        try:
+            return importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            last_error = exc
+    if last_error is None:
+        raise ModuleNotFoundError("No Holosoma module names were provided")
+    raise last_error
 
 
 def _git_output(root: Path, *args: str) -> str | None:

@@ -1,0 +1,49 @@
+# Bundled minimal fixture:
+#   uv run python examples/basic/run_retarget.py --scale-to-robot
+#
+# CLI run from the repository root:
+#   uv run retarget run --config examples/basic/run_config.toml
+
+name = "basic"
+robot = "synthetic_humanoid"
+task_kind = "robot_only"
+output = "generated/basic_retarget.npz"
+scale_to_robot = true
+output_fps = 30
+
+[source]
+kind = "motion_file"
+path = "../../tests/fixtures/minimal_motion.json"
+format = "minimal"
+
+[mesh]
+topology = "delaunay"
+k_neighbors = 4
+
+[solver]
+backend = "auto"
+max_iterations = 8
+trust_radius = 0.2
+tolerance = 1e-6
+
+[scene]
+ground_size = 7
+ground_range = [-0.75, 0.75]
+
+[[objectives]]
+kind = "laplacian"
+weight = 10.0
+
+[[objectives]]
+kind = "smoothness"
+weight = 0.2
+
+[[constraints]]
+kind = "joint_limits"
+
+[[constraints]]
+kind = "trust_region"
+
+[[constraints]]
+kind = "foot_sticking"
+tolerance = 0.001

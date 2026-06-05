@@ -15,7 +15,7 @@ from retarget.kinematics.mujoco_xml import (
     strip_floor_contact_pairs,
 )
 from retarget.kinematics.registry import kinematics_backends
-from retarget.kinematics.types import GeometryDistance
+from retarget.kinematics.types import GeometryDistance, GeometryDistanceJacobian
 from retarget.robots.spec import RobotSpec
 
 
@@ -51,25 +51,60 @@ class SimpleKinematicsBackend:
         rotational = np.zeros_like(translational)
         return positions, translational, rotational
 
+    def body_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        body_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return fixture body Jacobians with columns selected by qpos indices."""
+
+        positions, translational = self.point_jacobians_for_qpos_indices(qpos, body_names, qpos_indices)
+        rotational = np.zeros_like(translational)
+        return positions, translational, rotational
+
     def point_jacobians(
         self,
         qpos: NDArray[np.float64],
         point_names: tuple[str, ...],
-        ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return point positions and dense Jacobians with respect to actuated joints."""
 
+        indices = np.arange(
+            self.robot.qpos_layout.joint_start,
+            self.robot.qpos_layout.joint_start + self.robot.dof,
+            dtype=np.int64,
+        )
+        return self.point_jacobians_for_qpos_indices(qpos, point_names, indices)
+
+    def point_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        point_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return point positions and Jacobians with respect to selected qpos coordinates."""
+
         q = np.asarray(qpos, dtype=np.float64)
+        indices = np.asarray(qpos_indices, dtype=np.int64)
         root = q[:3]
         joints = q[self.robot.qpos_layout.joint_slice(self.robot.dof)]
-        positions = []
-        jacobians = np.zeros((len(point_names), 3, self.robot.dof), dtype=np.float64)
-        for i, name in enumerate(point_names):
-            joint_index = self._point_to_joint_index(name, fallback=i)
+        positions: list[NDArray[np.float64]] = []
+        jacobians = np.zeros((len(point_names), 3, indices.shape[0]), dtype=np.float64)
+        root_start, root_stop = self.robot.qpos_layout.root_position
+        joint_start = self.robot.qpos_layout.joint_start
+        for point_idx, name in enumerate(point_names):
+            joint_index = self._point_to_joint_index(name, fallback=point_idx)
             value = joints[joint_index] if len(joints) else 0.0
             axis = self._joint_axis(joint_index)
             scale = self._joint_scale(name)
             positions.append(root + self._point_offset(name) + scale * value * axis)
-            jacobians[i, :, joint_index] = scale * axis
+            for col, qpos_idx in enumerate(indices):
+                index = int(qpos_idx)
+                if root_start <= index < root_stop:
+                    jacobians[point_idx, index - root_start, col] = 1.0
+                elif joint_start <= index < joint_start + self.robot.dof and index - joint_start == joint_index:
+                    jacobians[point_idx, :, col] = scale * axis
         return np.asarray(positions, dtype=np.float64), jacobians
 
     def qpos_to_qvel(
@@ -160,6 +195,29 @@ class SimpleKinematicsBackend:
         """Return fixture geometry pairs no farther apart than `margin`."""
 
         return self.geom_distances(qpos, geom_pairs, max_distance=margin)
+
+    def geom_distance_jacobians(
+        self,
+        qpos: NDArray[np.float64],
+        qpos_indices: NDArray[np.int64],
+        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        *,
+        max_distance: float = np.inf,
+    ) -> tuple[GeometryDistanceJacobian, ...]:
+        """Return fixture geometry distance Jacobians for selected qpos coordinates."""
+
+        distances = self.geom_distances(qpos, geom_pairs, max_distance=max_distance)
+        if not distances:
+            return ()
+        names = tuple(dict.fromkeys(name for distance in distances for name in (distance.first, distance.second)))
+        _positions, jacobians = self.point_jacobians_for_qpos_indices(qpos, names, qpos_indices)
+        jacobian_by_name = dict(zip(names, jacobians, strict=True))
+        rows: list[GeometryDistanceJacobian] = []
+        for distance in distances:
+            normal = distance.normal_from_first_to_second
+            row = normal @ (jacobian_by_name[distance.second] - jacobian_by_name[distance.first])
+            rows.append(GeometryDistanceJacobian(distance=distance, jacobian=row))
+        return tuple(rows)
 
     def _point_to_joint_index(self, point_name: str, *, fallback: int) -> int:
         normalized = point_name.lower().replace("-", "_")
@@ -287,6 +345,17 @@ class MuJoCoKinematicsBackend:
         positions, translational, _rotational = self.body_jacobians(qpos, point_names)
         return positions, translational
 
+    def point_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        point_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return body positions and MuJoCo Jacobians with selected qpos columns."""
+
+        positions, translational, _rotational = self.body_jacobians_for_qpos_indices(qpos, point_names, qpos_indices)
+        return positions, translational
+
     def body_jacobians(
         self,
         qpos: NDArray[np.float64],
@@ -313,6 +382,35 @@ class MuJoCoKinematicsBackend:
             mujoco.mj_jacBody(self.model, self.data, jacp, jacr, body_id)
             translational[idx] = (jacp @ transform)[:, qpos_joint_slice]
             rotational[idx] = (jacr @ transform)[:, qpos_joint_slice]
+        return positions, translational, rotational
+
+    def body_jacobians_for_qpos_indices(
+        self,
+        qpos: NDArray[np.float64],
+        body_names: tuple[str, ...],
+        qpos_indices: NDArray[np.int64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return body Jacobians with columns selected by qpos indices."""
+
+        mujoco = self._mujoco
+        indices = np.asarray(qpos_indices, dtype=np.int64)
+        self._set_qpos(qpos)
+        mujoco.mj_forward(self.model, self.data)
+        transform = self._qdot_to_qvel_transform()
+        translational = np.zeros((len(body_names), 3, indices.shape[0]), dtype=np.float64)
+        rotational = np.zeros((len(body_names), 3, indices.shape[0]), dtype=np.float64)
+        positions = np.zeros((len(body_names), 3), dtype=np.float64)
+        for idx, body_name in enumerate(body_names):
+            mujoco_body = self._mujoco_body_name(body_name)
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, mujoco_body)
+            if body_id < 0:
+                raise KeyError(f"Body {body_name!r} not found in MuJoCo model")
+            positions[idx] = self.data.xpos[body_id]
+            jacp = np.zeros((3, self.model.nv), dtype=np.float64)
+            jacr = np.zeros((3, self.model.nv), dtype=np.float64)
+            mujoco.mj_jacBody(self.model, self.data, jacp, jacr, body_id)
+            translational[idx] = _select_qpos_columns(jacp @ transform, indices)
+            rotational[idx] = _select_qpos_columns(jacr @ transform, indices)
         return positions, translational, rotational
 
     def qpos_to_qvel(
@@ -408,6 +506,104 @@ class MuJoCoKinematicsBackend:
 
         return self.geom_distances(qpos, geom_pairs, max_distance=margin)
 
+    def geom_distance_jacobians(
+        self,
+        qpos: NDArray[np.float64],
+        qpos_indices: NDArray[np.int64],
+        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        *,
+        max_distance: float = np.inf,
+    ) -> tuple[GeometryDistanceJacobian, ...]:
+        """Return MuJoCo geom distances with linearized qpos-index Jacobians."""
+
+        mujoco = self._mujoco
+        indices = np.asarray(qpos_indices, dtype=np.int64)
+        self._set_qpos(qpos)
+        mujoco.mj_forward(self.model, self.data)
+        transform = self._qdot_to_qvel_transform()
+        pairs = geom_pairs if geom_pairs is not None else self._default_geom_pairs()
+        rows: list[GeometryDistanceJacobian] = []
+        for first, second in pairs:
+            first_id = self._geom_id(first)
+            second_id = self._geom_id(second)
+            distance, first_point, second_point = self._geom_distance(first_id, second_id, max_distance=max_distance)
+            if distance > max_distance:
+                continue
+            delta = second_point - first_point
+            norm = float(np.linalg.norm(delta))
+            normal = delta / norm if norm > 1e-12 else np.zeros(3, dtype=np.float64)
+            first_body = self._geom_body_id(first_id)
+            second_body = self._geom_body_id(second_id)
+            first_jac = self._point_jacobian_qpos(first_point, first_body, transform)
+            second_jac = self._point_jacobian_qpos(second_point, second_body, transform)
+            row = _select_qpos_columns(normal @ (second_jac - first_jac), indices)
+            rows.append(
+                GeometryDistanceJacobian(
+                    distance=GeometryDistance(
+                        first=first,
+                        second=second,
+                        distance=distance,
+                        point_on_first=first_point,
+                        point_on_second=second_point,
+                        normal_from_first_to_second=normal,
+                    ),
+                    jacobian=row.reshape(-1),
+                )
+            )
+        return tuple(rows)
+
+    def collision_candidate_jacobians(
+        self,
+        qpos: NDArray[np.float64],
+        qpos_indices: NDArray[np.int64],
+        *,
+        max_distance: float,
+        scene_geometry_keywords: tuple[str, ...] = (),
+        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...] = (),
+    ) -> tuple[GeometryDistanceJacobian, ...]:
+        """Return Jacobians for MuJoCo broad-phase collision candidates."""
+
+        mujoco = self._mujoco
+        indices = np.asarray(qpos_indices, dtype=np.int64)
+        self._set_qpos(qpos)
+        mujoco.mj_forward(self.model, self.data)
+        transform = self._qdot_to_qvel_transform()
+        rows: list[GeometryDistanceJacobian] = []
+        for first_id, second_id in self._broadphase_collision_pairs(
+            margin=max_distance,
+            scene_geometry_keywords=scene_geometry_keywords,
+            excluded_geometry_keyword_pairs=excluded_geometry_keyword_pairs,
+        ):
+            first = self._geom_name(first_id)
+            second = self._geom_name(second_id)
+            distance, first_point, second_point = self._geom_distance(
+                first_id,
+                second_id,
+                max_distance=max_distance,
+            )
+            if distance > max_distance:
+                continue
+            delta = second_point - first_point
+            norm = float(np.linalg.norm(delta))
+            normal = delta / norm if norm > 1e-12 else np.zeros(3, dtype=np.float64)
+            first_jac = self._point_jacobian_qpos(first_point, self._geom_body_id(first_id), transform)
+            second_jac = self._point_jacobian_qpos(second_point, self._geom_body_id(second_id), transform)
+            row = _select_qpos_columns(normal @ (second_jac - first_jac), indices)
+            rows.append(
+                GeometryDistanceJacobian(
+                    distance=GeometryDistance(
+                        first=first,
+                        second=second,
+                        distance=distance,
+                        point_on_first=first_point,
+                        point_on_second=second_point,
+                        normal_from_first_to_second=normal,
+                    ),
+                    jacobian=row.reshape(-1),
+                )
+            )
+        return tuple(rows)
+
     def _mujoco_body_name(self, link_name: str) -> str:
         cached = self._mujoco_body_names.get(link_name)
         if cached is not None:
@@ -437,6 +633,9 @@ class MuJoCoKinematicsBackend:
         mujoco = self._mujoco
         name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
         return str(name) if name else f"geom_{geom_id}"
+
+    def _geom_body_id(self, geom_id: int) -> int:
+        return int(np.asarray(self.model.geom_bodyid[geom_id]).reshape(()))
 
     def _joint_name(self, joint_id: int) -> str:
         mujoco = self._mujoco
@@ -491,6 +690,75 @@ class MuJoCoKinematicsBackend:
         second_point = np.asarray(self.data.geom_xpos[second_id], dtype=np.float64).copy()
         return float(np.linalg.norm(second_point - first_point)), first_point, second_point
 
+    def _broadphase_collision_pairs(
+        self,
+        *,
+        margin: float,
+        scene_geometry_keywords: tuple[str, ...],
+        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...],
+    ) -> tuple[tuple[int, int], ...]:
+        mujoco = self._mujoco
+        saved_margins = np.asarray(self.model.geom_margin, dtype=np.float64).copy()
+        try:
+            self.model.geom_margin[:] = float(margin)
+            mujoco.mj_collision(self.model, self.data)
+            pairs: set[tuple[int, int]] = set()
+            for contact_idx in range(int(self.data.ncon)):
+                contact = self.data.contact[contact_idx]
+                first_id = int(contact.geom1)
+                second_id = int(contact.geom2)
+                if first_id < 0 or second_id < 0:
+                    continue
+                first, second = sorted((first_id, second_id))
+                if self._collision_candidate_masks_ok(first, second) and self._collision_candidate_keywords_ok(
+                    first,
+                    second,
+                    scene_geometry_keywords=scene_geometry_keywords,
+                    excluded_geometry_keyword_pairs=excluded_geometry_keyword_pairs,
+                ):
+                    pairs.add((first, second))
+            return tuple(sorted(pairs))
+        finally:
+            self.model.geom_margin[:] = saved_margins
+
+    def _collision_candidate_masks_ok(self, first_id: int, second_id: int) -> bool:
+        contype = self.model.geom_contype
+        conaffinity = self.model.geom_conaffinity
+        if contype[first_id] == 0 and conaffinity[first_id] == 0:
+            return False
+        return not (contype[second_id] == 0 and conaffinity[second_id] == 0)
+
+    def _collision_candidate_keywords_ok(
+        self,
+        first_id: int,
+        second_id: int,
+        *,
+        scene_geometry_keywords: tuple[str, ...],
+        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...],
+    ) -> bool:
+        first = self._geom_name(first_id)
+        second = self._geom_name(second_id)
+        if scene_geometry_keywords and not (
+            _name_matches_any_keyword(first, scene_geometry_keywords)
+            or _name_matches_any_keyword(second, scene_geometry_keywords)
+        ):
+            return False
+        return not any(
+            _keyword_pair_matches(first, second, pair)
+            for pair in excluded_geometry_keyword_pairs
+        )
+
+    def _point_jacobian_qpos(
+        self,
+        point_world: NDArray[np.float64],
+        body_id: int,
+        transform: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
+        jacp = np.zeros((3, self.model.nv), dtype=np.float64)
+        jacr = np.zeros((3, self.model.nv), dtype=np.float64)
+        self._mujoco.mj_jac(self.model, self.data, jacp, jacr, point_world, body_id)
+        return jacp @ transform
+
     def _qdot_to_qvel_transform(self) -> NDArray[np.float64]:
         mujoco = self._mujoco
         transform = np.zeros((self.model.nv, self.model.nq), dtype=np.float64)
@@ -522,6 +790,26 @@ class MuJoCoKinematicsBackend:
             ],
             dtype=np.float64,
         )
+
+
+def _select_qpos_columns(matrix: NDArray[np.float64], indices: NDArray[np.int64]) -> NDArray[np.float64]:
+    """Select qpos columns, returning zeros for non-model qpos coordinates."""
+
+    selected = np.zeros((*matrix.shape[:-1], indices.shape[0]), dtype=np.float64)
+    for col, qpos_idx in enumerate(indices):
+        index = int(qpos_idx)
+        if 0 <= index < matrix.shape[-1]:
+            selected[..., col] = matrix[..., index]
+    return selected
+
+
+def _name_matches_any_keyword(name: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in name for keyword in keywords)
+
+
+def _keyword_pair_matches(first: str, second: str, pair: tuple[str, str]) -> bool:
+    left, right = pair
+    return (left in first and right in second) or (right in first and left in second)
 
 
 kinematics_backends.register(KinematicsBackendName.SIMPLE, lambda robot: SimpleKinematicsBackend(robot))

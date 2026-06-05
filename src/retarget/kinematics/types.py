@@ -41,4 +41,24 @@ class GeometryDistance:
         object.__setattr__(self, "distance", float(self.distance))
 
 
-__all__ = ["GeometryDistance"]
+@dataclass(frozen=True)
+class GeometryDistanceJacobian:
+    """Linearized distance row for a geometry pair.
+
+    Attributes:
+        distance (GeometryDistance): Pair distance and closest-point metadata.
+        jacobian (NDArray[np.float64]): Derivative of distance with respect to
+            the active qpos variable set, shape ``(variables,)``.
+    """
+
+    distance: GeometryDistance
+    jacobian: NDArray[np.float64]
+
+    def __post_init__(self) -> None:
+        jacobian = np.asarray(self.jacobian, dtype=np.float64)
+        if jacobian.ndim != 1:
+            raise ValueError("geometry distance jacobian must be 1D")
+        object.__setattr__(self, "jacobian", jacobian)
+
+
+__all__ = ["GeometryDistance", "GeometryDistanceJacobian"]

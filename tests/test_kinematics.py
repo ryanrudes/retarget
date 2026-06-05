@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from retarget.core.protocols import KinematicsBackend
 from retarget.kinematics.backends import MuJoCoKinematicsBackend, SimpleKinematicsBackend
@@ -17,6 +18,23 @@ def test_simple_backend_returns_point_jacobians():
     assert positions.shape == (2, 3)
     assert jacobians.shape == (2, 3, robot.dof)
     assert np.any(jacobians[0])
+
+
+def test_simple_backend_qpos_index_jacobians_include_root_translation():
+    robot = robots.get("synthetic_humanoid")
+    backend = SimpleKinematicsBackend(robot)
+    qpos = np.zeros(robot.qpos_size())
+    qpos[3] = 1.0
+    left_ankle = robot.joint_index("left_ankle")
+    indices = np.asarray([0, 1, 2, robot.qpos_layout.joint_start + left_ankle], dtype=np.int64)
+
+    _positions, jacobians = backend.point_jacobians_for_qpos_indices(qpos, ("left_toe",), indices)
+
+    assert jacobians.shape == (1, 3, 4)
+    assert np.allclose(jacobians[0, :, 0], [1.0, 0.0, 0.0])
+    assert np.allclose(jacobians[0, :, 1], [0.0, 1.0, 0.0])
+    assert np.allclose(jacobians[0, :, 2], [0.0, 0.0, 1.0])
+    assert np.any(jacobians[0, :, 3])
 
 
 def test_simple_backend_exposes_full_kinematics_protocol():
@@ -83,6 +101,57 @@ def test_mujoco_qdot_transform_supports_ball_joints():
     )
     assert transform[9, 11] == 1.0
     assert transform[10, 12] == 1.0
+
+
+def test_mujoco_backend_collision_candidate_jacobians_filter_scene_keywords(tmp_path):
+    pytest.importorskip("mujoco")
+    xml_path = tmp_path / "collision.xml"
+    xml_path.write_text(
+        """
+<mujoco model="collision_fixture">
+  <worldbody>
+    <geom name="ground" type="plane" size="1 1 0.1" pos="0 0 0" contype="1" conaffinity="1"/>
+    <body name="robot" pos="0 0 0">
+      <freejoint/>
+      <geom name="robot_geom" type="sphere" size="0.05" contype="1" conaffinity="1"/>
+      <body name="hinge_link" pos="0 0 0">
+        <joint name="joint" type="hinge" axis="0 0 1" range="-1 1" limited="true"/>
+        <geom name="hinge_geom" type="sphere" size="0.01" contype="0" conaffinity="0"/>
+      </body>
+    </body>
+    <body name="object" pos="0 0 0.13">
+      <geom name="multi_boxes_link_1" type="sphere" size="0.05" contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip()
+    )
+    robot = RobotSpec(
+        name="collision_fixture",
+        dof=1,
+        height_m=1.0,
+        joint_names=("joint",),
+        link_names=("robot",),
+    )
+    backend = MuJoCoKinematicsBackend(robot, xml_path=xml_path)
+    qpos = np.zeros(robot.qpos_size(), dtype=np.float64)
+    qpos[2] = 0.05
+    qpos[3] = 1.0
+    original_margins = backend.model.geom_margin.copy()
+
+    candidates = backend.collision_candidate_jacobians(
+        qpos,
+        np.asarray([0, 1, 2, 7], dtype=np.int64),
+        max_distance=0.1,
+        scene_geometry_keywords=("multi_boxes", "ground"),
+        excluded_geometry_keyword_pairs=(("multi_boxes", "ground"),),
+    )
+
+    pairs = {frozenset((candidate.distance.first, candidate.distance.second)) for candidate in candidates}
+    assert frozenset(("robot_geom", "multi_boxes_link_1")) in pairs
+    assert frozenset(("ground", "multi_boxes_link_1")) not in pairs
+    assert all(candidate.jacobian.shape == (4,) for candidate in candidates)
+    assert np.allclose(backend.model.geom_margin, original_margins)
 
 
 def test_mujoco_backend_extracts_limited_hinge_and_slide_ranges_with_spec_overrides():

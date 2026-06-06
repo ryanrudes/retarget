@@ -17,12 +17,28 @@ from typing import Any, cast
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
+from retarget.core.enums import (
+    ContactState,
+    ConvergenceMode,
+    FrameConvention,
+    GeometryName,
+    GeometrySource,
+    MotionJoint,
+    NominalFallback,
+    NonPenetrationSource,
+    ObjectQposMode,
+    ObjectSampleSpace,
+    QuaternionOrder,
+    RobotLink,
+    SolverBackend,
+    TaskKind,
+)
 from retarget.core.pose import PoseSequence
 from retarget.mesh import InteractionMeshSpec, LaplacianWeighting
-from retarget.motion.contact import ContactPlan, ContactTrack, SupportPlane
+from retarget.motion.contact import ContactPlan, ContactTrack
 from retarget.motion.qpos import InitialQposPlan
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
+from retarget.motion.support import SupportPlane
 from retarget.optimization import (
     ConstraintConfigUnion,
     DiagonalRegularizationObjectiveConfig,
@@ -52,15 +68,54 @@ COLLISION_DETECTION_THRESHOLD = 0.1
 MULTI_BOX_SAMPLE_COUNT = 100
 MULTI_BOX_SAMPLE_SEED = 42
 
+
+class HolosomaMocapJoint(MotionJoint):
+    """Named MOCAP joints used by the Holosoma climbing recipe."""
+
+    HIPS = "Hips"
+    SPINE1 = "Spine1"
+    LEFT_TOE_BASE = "LeftToeBase"
+    RIGHT_TOE_BASE = "RightToeBase"
+    LEFT_HAND_MIDDLE3 = "LeftHandMiddle3"
+    RIGHT_HAND_MIDDLE3 = "RightHandMiddle3"
+
+
+class G1SpherehandContactLink(RobotLink):
+    """G1 spherehand links constrained by Holosoma foot-sticking contacts."""
+
+    LEFT_ANKLE_ROLL_SPHERE_1 = "left_ankle_roll_sphere_1_link"
+    RIGHT_ANKLE_ROLL_SPHERE_1 = "right_ankle_roll_sphere_1_link"
+    LEFT_ANKLE_ROLL_SPHERE_2 = "left_ankle_roll_sphere_2_link"
+    RIGHT_ANKLE_ROLL_SPHERE_2 = "right_ankle_roll_sphere_2_link"
+    LEFT_ANKLE_ROLL_SPHERE_3 = "left_ankle_roll_sphere_3_link"
+    RIGHT_ANKLE_ROLL_SPHERE_3 = "right_ankle_roll_sphere_3_link"
+    LEFT_ANKLE_ROLL_SPHERE_4 = "left_ankle_roll_sphere_4_link"
+    RIGHT_ANKLE_ROLL_SPHERE_4 = "right_ankle_roll_sphere_4_link"
+
+
+class HolosomaContactState(ContactState):
+    """Contact states emitted by the Holosoma foot-sticking extractor."""
+
+    AIR = "air"
+    STICKING = "sticking"
+
+
+class HolosomaGeometryName(GeometryName):
+    """Scene geometry groups referenced by the Holosoma climbing recipe."""
+
+    MULTI_BOXES = "multi_boxes"
+    GROUND = "ground"
+
+
 G1_FOOT_STICKING_LINKS = (
-    "left_ankle_roll_sphere_1_link",
-    "right_ankle_roll_sphere_1_link",
-    "left_ankle_roll_sphere_2_link",
-    "right_ankle_roll_sphere_2_link",
-    "left_ankle_roll_sphere_3_link",
-    "right_ankle_roll_sphere_3_link",
-    "left_ankle_roll_sphere_4_link",
-    "right_ankle_roll_sphere_4_link",
+    G1SpherehandContactLink.LEFT_ANKLE_ROLL_SPHERE_1,
+    G1SpherehandContactLink.RIGHT_ANKLE_ROLL_SPHERE_1,
+    G1SpherehandContactLink.LEFT_ANKLE_ROLL_SPHERE_2,
+    G1SpherehandContactLink.RIGHT_ANKLE_ROLL_SPHERE_2,
+    G1SpherehandContactLink.LEFT_ANKLE_ROLL_SPHERE_3,
+    G1SpherehandContactLink.RIGHT_ANKLE_ROLL_SPHERE_3,
+    G1SpherehandContactLink.LEFT_ANKLE_ROLL_SPHERE_4,
+    G1SpherehandContactLink.RIGHT_ANKLE_ROLL_SPHERE_4,
 )
 G1_LEFT_FOOT_STICKING_LINKS = tuple(link for link in G1_FOOT_STICKING_LINKS if link.startswith("left_"))
 G1_RIGHT_FOOT_STICKING_LINKS = tuple(link for link in G1_FOOT_STICKING_LINKS if link.startswith("right_"))
@@ -198,6 +253,35 @@ class _HolosomaClimbLayout:
     scene_xml_path: Path
 
 
+@dataclass(frozen=True)
+class HolosomaClimbRecipe:
+    """Strict typed recipe for Holosoma's MOCAP climbing subset."""
+
+    holosoma_root: str | Path | None = None
+    frame_count: int | None = None
+    ensure_model_assets: bool = False
+    include_object_collision: bool = True
+    solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL
+    show_progress: bool = False
+
+    def prepare(self) -> HolosomaClimbPreparation:
+        """Load source assets and build typed intermediates plus the problem."""
+
+        return from_mocap_climb_fixture(
+            self.holosoma_root,
+            frame_count=self.frame_count,
+            ensure_model_assets=self.ensure_model_assets,
+            include_object_collision=self.include_object_collision,
+            solver_backend=self.solver_backend,
+            show_progress=self.show_progress,
+        )
+
+    def build_problem(self) -> RetargetingProblem:
+        """Return the complete Holosoma climb retargeting problem."""
+
+        return self.prepare().problem
+
+
 def default_holosoma_root() -> Path:
     """Return the sibling Holosoma checkout path used by local parity tests."""
 
@@ -265,7 +349,7 @@ def from_mocap_climb_fixture(
     frame_count: int | None = None,
     ensure_model_assets: bool = False,
     include_object_collision: bool = True,
-    solver_backend: str = "cvxpy_clarabel",
+    solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL,
     show_progress: bool = False,
 ) -> HolosomaClimbPreparation:
     """Build the typed retargeting problem for Holosoma's real MOCAP climb fixture."""
@@ -338,12 +422,12 @@ def from_mocap_climb_fixture(
         fps=MOCAP_FPS,
         frame=FrameConvention.Z_UP_RIGHT_HANDED,
         root_poses=root_poses,
+        source_height_m=MOCAP_HUMAN_HEIGHT_M,
         metadata={
             "source": "holosoma_fixture",
             "source_path": str(motion_path),
             "raw_downsample": MOCAP_DOWNSAMPLE,
             "holosoma_scale": scale,
-            "source_height_m": MOCAP_HUMAN_HEIGHT_M,
             "robot_height_m": G1_HEIGHT_M,
         },
     )
@@ -365,13 +449,12 @@ def from_mocap_climb_fixture(
             asset_scale=object_asset_scale,
             visual_parts=_object_visual_parts_from_urdf(scaled_object_urdf_path),
             sample_points=object_samples_source,
+            sample_space=ObjectSampleSpace.OBJECT_ASSET_LOCAL,
             trajectory=object_trajectory,
-            qpos_mode="external",
+            qpos_mode=ObjectQposMode.EXTERNAL,
             metadata={
                 "sample_count": MULTI_BOX_SAMPLE_COUNT,
                 "sample_seed": MULTI_BOX_SAMPLE_SEED,
-                "sample_space": "object_asset_local",
-                "active_sample_space": "scaled_object_local",
             },
         )
     )
@@ -402,7 +485,7 @@ def from_mocap_climb_fixture(
             max_iterations=10,
             first_frame_iterations=50,
             trust_radius=0.2,
-            convergence="none",
+            convergence=ConvergenceMode.NONE,
         ),
         objectives=profile.objectives,
         constraints=profile.constraints,
@@ -459,6 +542,7 @@ def g1_spherehand_robot(
         contact_links=G1_FOOT_STICKING_LINKS,
         joint_limits=joint_limits,
         default_link_mapping=dict(MOCAP_TO_G1_LINK_MAPPING),
+        geometry_names=robot_geom_names,
         urdf_path=urdf_path,
         mujoco_xml_path=xml_path if include_object_collision or scene_xml_path is not None else robot_xml_path,
         metadata={
@@ -466,7 +550,6 @@ def g1_spherehand_robot(
             "robot_type": "g1",
             "robot_dof": G1_DOF,
             "uses_spherehand": True,
-            "holosoma_robot_geom_names": list(robot_geom_names),
             "scene_xml_path": str(xml_path) if include_object_collision or scene_xml_path is not None else None,
         },
     )
@@ -590,21 +673,21 @@ def foot_sticking_contact_plan(
     return ContactPlan(
         tracks=(
             ContactTrack(
-                subject="LeftToeBase",
+                subject=HolosomaMocapJoint.LEFT_TOE_BASE.value,
                 states=left_states,
                 link_names=G1_LEFT_FOOT_STICKING_LINKS,
                 active_states=(1,),
                 support_states=(1,),
-                labels=("air", "sticking"),
+                labels=(HolosomaContactState.AIR.value, HolosomaContactState.STICKING.value),
                 metadata={"source": "holosoma_velocity", "velocity_threshold": velocity_threshold},
             ),
             ContactTrack(
-                subject="RightToeBase",
+                subject=HolosomaMocapJoint.RIGHT_TOE_BASE.value,
                 states=right_states,
                 link_names=G1_RIGHT_FOOT_STICKING_LINKS,
                 active_states=(1,),
                 support_states=(1,),
-                labels=("air", "sticking"),
+                labels=(HolosomaContactState.AIR.value, HolosomaContactState.STICKING.value),
                 metadata={"source": "holosoma_velocity", "velocity_threshold": velocity_threshold},
             ),
         ),
@@ -757,12 +840,7 @@ def object_non_penetration_geometry_pairs(
     fixture = Path(fixture_dir)
     object_geoms = _included_geom_names(fixture / "box_body.xml", prefix=object_name)
     scene_geoms = object_geoms + (("ground",) if include_ground else ())
-    metadata_geoms = robot.metadata.get("holosoma_robot_geom_names")
-    robot_geoms = (
-        tuple(str(name) for name in metadata_geoms)
-        if isinstance(metadata_geoms, (list, tuple))
-        else tuple(robot.link_names)
-    )
+    robot_geoms = robot.geometry_names or tuple(robot.link_names)
     robot_geoms = tuple(name for name in robot_geoms if name not in scene_geoms and not name.startswith(object_name))
     return tuple((robot_geom, scene_geom) for robot_geom in robot_geoms for scene_geom in scene_geoms)
 
@@ -787,8 +865,8 @@ def holosoma_climb_profile(
         constraints = (
             *constraints,
             NonPenetrationConstraintConfig(
-                sources=("geometry",),
-                geometry_source="backend_candidates",
+                sources=(NonPenetrationSource.GEOMETRY,),
+                geometry_source=GeometrySource.BACKEND_CANDIDATES,
                 tolerance=1e-3,
                 scene_clearance=1e-3,
                 activation_distance=COLLISION_DETECTION_THRESHOLD,
@@ -804,7 +882,7 @@ def holosoma_climb_profile(
             NominalTrackingObjectiveConfig(
                 weight=5.0,
                 qpos_indices=G1_NOMINAL_TRACKING_QPOS_INDICES,
-                fallback="current",
+                fallback=NominalFallback.CURRENT,
             ),
             DiagonalRegularizationObjectiveConfig(weight=1.0, qpos_weights=tuple(float(v) for v in qpos_weights)),
             SmoothnessObjectiveConfig(weight=0.2),

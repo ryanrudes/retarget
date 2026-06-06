@@ -2,10 +2,18 @@ import numpy as np
 import pytest
 
 from retarget import RetargetingProblem, SceneSpec, TaskKind
+from retarget.core.enums import (
+    ConvergenceMode,
+    GeometrySource,
+    NonPenetrationSource,
+    ObjectQposMode,
+    ObjectSampleSpace,
+)
 from retarget.integrations.holosoma import (
     G1_LEFT_FOOT_STICKING_LINKS,
     G1_NOMINAL_TRACKING_QPOS_INDICES,
     G1_RIGHT_FOOT_STICKING_LINKS,
+    HolosomaClimbRecipe,
     _holosoma_climb_layout,
     _holosoma_g1_robot_dir,
     _object_visual_parts_from_urdf,
@@ -52,7 +60,7 @@ def test_external_object_trajectory_does_not_append_qpos() -> None:
         object_spec=ObjectSpec(
             name="box",
             trajectory=ObjectTrajectory.identity(1),
-            qpos_mode="external",
+            qpos_mode=ObjectQposMode.EXTERNAL,
         )
     )
     initial_qpos = InitialQposPlan.from_array(np.zeros((1, robot.qpos_size()), dtype=np.float64))
@@ -127,9 +135,11 @@ def test_holosoma_mocap_climb_fixture_builds_typed_problem_contract() -> None:
     diagonal = prep.problem.objectives[2]
 
     assert prep.motion.joint_positions.shape == (3, 53, 3)
+    assert prep.motion.source_height_m is not None
     assert prep.scene.object is not None
     assert prep.scene.object.asset_scale == pytest.approx((prep.scale, prep.scale, prep.scale))
-    assert prep.scene.object.qpos_mode == "external"
+    assert prep.scene.object.qpos_mode == ObjectQposMode.EXTERNAL
+    assert prep.scene.object.sample_space == ObjectSampleSpace.OBJECT_ASSET_LOCAL
     assert prep.scene.object.urdf_path is not None
     assert "_scaled_" in prep.scene.object.urdf_path.name
     assert prep.robot.mujoco_xml_path is not None
@@ -143,12 +153,25 @@ def test_holosoma_mocap_climb_fixture_builds_typed_problem_contract() -> None:
     assert prep.initial_qpos.qpos.shape == (3, 36)
     assert prep.problem.solver.max_iterations == 10
     assert prep.problem.solver.first_frame_iterations == 50
-    assert prep.problem.solver.convergence == "none"
+    assert prep.problem.solver.convergence == ConvergenceMode.NONE
     assert tuple(resolved_variables.indices) == tuple(range(36))
     assert nominal.qpos_indices == G1_NOMINAL_TRACKING_QPOS_INDICES
     assert diagonal.qpos_weights[19] == pytest.approx(0.2)
     assert diagonal.qpos_weights[20] == pytest.approx(0.2)
     assert not any(isinstance(constraint, NonPenetrationConstraintConfig) for constraint in prep.problem.constraints)
+
+
+@pytest.mark.skipif(not HOLOSOMA_FIXTURE.exists(), reason="Holosoma climb fixture is not available")
+def test_holosoma_climb_recipe_builds_problem() -> None:
+    recipe = HolosomaClimbRecipe(frame_count=2, include_object_collision=False)
+
+    problem = recipe.build_problem()
+
+    assert problem.name == "holosoma_mocap_climb_seq_0"
+    assert problem.task_kind == TaskKind.CLIMBING
+    assert problem.motion.source_height_m is not None
+    assert problem.scene.object is not None
+    assert problem.scene.object.qpos_mode == ObjectQposMode.EXTERNAL
 
 
 @pytest.mark.skipif(not HOLOSOMA_FIXTURE.exists(), reason="Holosoma climb fixture is not available")
@@ -165,7 +188,7 @@ def test_holosoma_mocap_climb_contacts_and_geometry_pairs_are_typed() -> None:
     assert all("mocap" not in first for first, _second in prep.geometry_pairs)
     non_penetration = prep.problem.constraints[-1]
     assert isinstance(non_penetration, NonPenetrationConstraintConfig)
-    assert non_penetration.sources == ("geometry",)
-    assert non_penetration.geometry_source == "backend_candidates"
+    assert non_penetration.sources == (NonPenetrationSource.GEOMETRY,)
+    assert non_penetration.geometry_source == GeometrySource.BACKEND_CANDIDATES
     assert non_penetration.scene_geometry_keywords == ("multi_boxes", "ground")
     assert non_penetration.excluded_geometry_keyword_pairs == (("multi_boxes", "ground"),)

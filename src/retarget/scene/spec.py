@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.array import FloatArray, as_float_array
-from retarget.core.enums import TaskKind
+from retarget.core.enums import ObjectQposMode, ObjectSampleSpace, TaskKind
 from retarget.core.pose import PoseSequence
-
-ObjectQposMode = Literal["appended", "external"]
 
 
 def _coerce_asset_scale(value: Any, *, allow_none: bool = False) -> tuple[float, float, float] | None:
@@ -113,6 +111,7 @@ class ObjectSpec(BaseModel):
         asset_scale (tuple[float, float, float]): Scale applied to asset-local geometry.
         visual_parts (tuple[ObjectVisualPart, ...]): Optional visual mesh parts with typed materials.
         sample_points (FloatArray | None): Precomputed asset-local surface points with shape ``(N, 3)``.
+        sample_space (ObjectSampleSpace): Coordinate space for ``sample_points``.
         trajectory (ObjectTrajectory | None): Time-varying object pose track.
         qpos_mode (ObjectQposMode): Whether the trajectory is appended to qpos or treated as an external scene pose.
         metadata (dict[str, Any]): Opaque sidecar fields (mass, scale, asset ids, …).
@@ -126,8 +125,9 @@ class ObjectSpec(BaseModel):
     asset_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
     visual_parts: tuple[ObjectVisualPart, ...] = ()
     sample_points: FloatArray | None = None
+    sample_space: ObjectSampleSpace = ObjectSampleSpace.OBJECT_LOCAL
     trajectory: ObjectTrajectory | None = None
-    qpos_mode: ObjectQposMode = "appended"
+    qpos_mode: ObjectQposMode = ObjectQposMode.APPENDED
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_path", "urdf_path", mode="before")
@@ -174,7 +174,9 @@ class ObjectSpec(BaseModel):
         points = as_float_array(raw_points, shape_tail=(3,), name="sample_points")
         if points.ndim != 2:
             raise ValueError("sample_points must have shape (N, 3)")
-        return points * np.asarray(self.asset_scale, dtype=np.float64)
+        if self.sample_space in (ObjectSampleSpace.OBJECT_LOCAL, ObjectSampleSpace.OBJECT_ASSET_LOCAL):
+            return points * np.asarray(self.asset_scale, dtype=np.float64)
+        return points.copy()
 
 
 class TerrainSpec(BaseModel):
@@ -278,7 +280,7 @@ class SceneSpec(BaseModel):
         return (
             self.object is not None
             and self.object.trajectory is not None
-            and self.object.qpos_mode == "appended"
+            and self.object.qpos_mode == ObjectQposMode.APPENDED
         )
 
     def resampled(self, fps: float) -> SceneSpec:

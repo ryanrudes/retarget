@@ -144,4 +144,4 @@ def test_skateboarding_recipe_builds_problem_from_typed_source() -> None:
     assert problem.scene.task_kind == TaskKind.OBJECT_INTERACTION
     assert problem.scale_to_robot is False
     non_penetration = problem.constraints[-1]
-    assert non_penetration.sources == (NonPenetrationSource.SUPPORT, NonPenetrationSource.SCENE_POINTS)
+    assert non_penetration.sources == (NonPenetrationSource.SCENE_POINTS,)

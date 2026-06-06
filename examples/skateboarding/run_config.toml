@@ -50,6 +50,6 @@ tolerance = 0.001
 
 [[constraints]]
 kind = "non_penetration"
-sources = ["support", "scene_points"]
+sources = ["scene_points"]
 scene_clearance = 0.015
 activation_distance = 0.05

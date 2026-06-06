@@ -136,7 +136,7 @@ The source loads `motion_sync_output/synced/<demo>/synced.npz` with `SKATE_SESSI
 - `contacts` — typed foot-support states and support plane.
 - `targets` — named link-tracking targets.
 
-The recipe adds the reusable optimization profile: link tracking, smoothness, nominal tracking, joint limits, trust region, foot sticking, and non-penetration sources. Run configs are declarative frontends over this same typed path; `[source] kind = "motion_sync_skateboarding"` selects the registered source builder rather than a separate retargeting workflow.
+The recipe adds the reusable optimization profile: link tracking, smoothness, nominal tracking, joint limits, trust region, foot sticking, and scene-point non-penetration against the skateboard samples. Run configs are declarative frontends over this same typed path; `[source] kind = "motion_sync_skateboarding"` selects the registered source builder rather than a separate retargeting workflow.
 
 The target plan includes per-frame link targets:
 

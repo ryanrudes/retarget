@@ -311,9 +311,12 @@ class MuJoCoKinematicsBackend:
         self.data: Any = mujoco.MjData(self.model)
         link_names = set(self.robot.link_names) | set(self.robot.contact_links)
         link_names.update(self.robot.default_link_mapping.values())
-        metadata_aliases = self.robot.metadata.get("mujoco_body_names")
-        aliases = metadata_aliases if isinstance(metadata_aliases, dict) else None
-        self._mujoco_body_names = build_mujoco_body_name_map(mujoco, self.model, link_names, aliases=aliases)
+        self._mujoco_body_names = build_mujoco_body_name_map(
+            mujoco,
+            self.model,
+            link_names,
+            aliases=self.robot.mujoco_body_aliases,
+        )
 
     def forward_kinematics(self, qpos: NDArray[np.float64], link_names: tuple[str, ...]) -> NDArray[np.float64]:
         """Return MuJoCo body positions for named links."""
@@ -614,9 +617,7 @@ class MuJoCoKinematicsBackend:
         cached = self._mujoco_body_names.get(link_name)
         if cached is not None:
             return cached
-        metadata_aliases = self.robot.metadata.get("mujoco_body_names")
-        aliases = metadata_aliases if isinstance(metadata_aliases, dict) else None
-        resolved = resolve_mujoco_body_name(self._mujoco, self.model, link_name, aliases)
+        resolved = resolve_mujoco_body_name(self._mujoco, self.model, link_name, self.robot.mujoco_body_aliases)
         if resolved is None:
             return link_name
         self._mujoco_body_names[link_name] = resolved

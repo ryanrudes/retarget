@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,8 @@ class RobotSpec(BaseModel):
         joint_limits (dict[str, tuple[float, float]]): Per-joint ``(lower, upper)`` bounds.
         default_joint_mapping (dict[str, str]): Source-joint to robot-joint name map.
         default_link_mapping (dict[str, str]): Source-link to robot link/joint name map.
+        geometry_names (tuple[str, ...]): Collision/visual geometry names exposed by the robot model.
+        mujoco_body_aliases (dict[str, str]): Robot link-name to MuJoCo body-name overrides.
         urdf_path (Path | None): Optional URDF used for visualization or kinematics.
         mujoco_xml_path (Path | None): Optional MuJoCo XML model path.
         qpos_layout (QposLayout): Layout of root, joints, and optional object pose in ``qpos``.
@@ -94,6 +97,8 @@ class RobotSpec(BaseModel):
     joint_limits: dict[str, tuple[float, float]] = Field(default_factory=dict)
     default_joint_mapping: dict[str, str] = Field(default_factory=dict)
     default_link_mapping: dict[str, str] = Field(default_factory=dict)
+    geometry_names: tuple[str, ...] = ()
+    mujoco_body_aliases: dict[str, str] = Field(default_factory=dict)
     urdf_path: Path | None = None
     mujoco_xml_path: Path | None = None
     qpos_layout: QposLayout = Field(default_factory=QposLayout)
@@ -103,6 +108,56 @@ class RobotSpec(BaseModel):
     @classmethod
     def _path_or_none(cls, value: Any) -> Path | None:
         return None if value in (None, "") else Path(value)
+
+    @field_validator(
+        "joint_names",
+        "link_names",
+        "contact_links",
+        "nominal_tracking_joints",
+        "geometry_names",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_name_tuple(cls, value: Any) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str | StrEnum):
+            return (_name_value(value),)
+        return tuple(_name_value(item) for item in value)
+
+    @field_validator("default_joint_mapping", "default_link_mapping", "mujoco_body_aliases", mode="before")
+    @classmethod
+    def _coerce_name_mapping(cls, value: Any) -> dict[str, str]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("name mappings must be dictionaries")
+        return {_name_value(key): _name_value(item) for key, item in value.items()}
+
+    @field_validator("joint_limits", mode="before")
+    @classmethod
+    def _coerce_joint_limits(cls, value: Any) -> dict[str, tuple[float, float]]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("joint_limits must be a dictionary")
+        out: dict[str, tuple[float, float]] = {}
+        for key, bounds in value.items():
+            if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+                raise ValueError("joint_limits values must be (lower, upper) pairs")
+            out[_name_value(key)] = (float(bounds[0]), float(bounds[1]))
+        return out
+
+    @field_validator("metadata")
+    @classmethod
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {"mujoco_body_names", "holosoma_robot_geom_names", "geometry_names"}
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError(
+                "RobotSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present)
+            )
+        return dict(value)
 
     @model_validator(mode="after")
     def _validate_robot(self) -> RobotSpec:
@@ -116,6 +171,12 @@ class RobotSpec(BaseModel):
             raise ValueError("joint_names length must match dof")
         if len(set(self.joint_names)) != len(self.joint_names):
             raise ValueError("joint_names must be unique")
+        if len(set(self.link_names)) != len(self.link_names):
+            raise ValueError("link_names must be unique")
+        if len(set(self.contact_links)) != len(self.contact_links):
+            raise ValueError("contact_links must be unique")
+        if len(set(self.geometry_names)) != len(self.geometry_names):
+            raise ValueError("geometry_names must be unique")
         unknown_limits = set(self.joint_limits) - set(self.joint_names)
         if unknown_limits:
             raise ValueError(f"joint_limits reference unknown joints: {sorted(unknown_limits)}")
@@ -129,6 +190,9 @@ class RobotSpec(BaseModel):
         unknown_link_targets = set(self.default_link_mapping.values()) - valid_link_targets
         if unknown_link_targets:
             raise ValueError(f"default_link_mapping targets unknown links: {sorted(unknown_link_targets)}")
+        unknown_aliases = set(self.mujoco_body_aliases) - valid_link_targets
+        if unknown_aliases:
+            raise ValueError(f"mujoco_body_aliases reference unknown links: {sorted(unknown_aliases)}")
         return self
 
     def joint_index(self, name: str) -> int:
@@ -205,3 +269,9 @@ def _load_mapping(path: Path) -> dict[str, Any]:
             raise ValueError(f"{path} must contain a mapping at the document root")
         return dict(loaded)
     raise ValueError(f"Unsupported robot spec suffix {suffix!r}; expected .toml, .yaml, .yml, or .json")
+
+
+def _name_value(value: Any) -> str:
+    if isinstance(value, StrEnum):
+        return value.value
+    return str(value)

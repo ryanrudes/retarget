@@ -7,12 +7,19 @@ from retarget.assets import AssetStore
 from retarget.core.enums import (
     AssetKind,
     Constraint,
+    ContactPatch,
+    ContactState,
+    ContactSubject,
     ExportFormat,
+    GeometryName,
     KinematicsBackendName,
     MotionFormat,
+    MotionJoint,
     MotionLoaderSuffix,
     Objective,
     Robot,
+    RobotJoint,
+    RobotLink,
     RobotProviderName,
     RunStatus,
     VisualizerName,
@@ -102,6 +109,66 @@ def test_builtin_registry_enums_resolve_to_builtin_items():
     assert visualizers.get(VisualizerName.DRY_RUN) is visualizers.get("dry_run")
     assert kinematics_backends.get(KinematicsBackendName.SIMPLE) is kinematics_backends.get("simple")
     assert robot_providers.get(RobotProviderName.REGISTRY) is robot_providers.get("registry")
+
+
+def test_user_vocab_enums_normalize_into_robot_specs():
+    class UnitRobotJoint(RobotJoint):
+        HIP = "hip_joint"
+
+    class UnitRobotLink(RobotLink):
+        FOOT = "foot_link"
+
+    class UnitMotionJoint(MotionJoint):
+        HIP = "HumanHip"
+        FOOT = "HumanFoot"
+
+    class UnitContactSubject(ContactSubject):
+        LEFT_FOOT = "left_foot_subject"
+
+    class UnitContactState(ContactState):
+        PLANTED = "planted"
+
+    class UnitContactPatch(ContactPatch):
+        TOE = "toe_patch"
+
+    class UnitGeometry(GeometryName):
+        FOOT_COLLISION = "foot_collision"
+
+    spec = RobotSpec(
+        name="unit_enum_robot",
+        dof=1,
+        height_m=1.0,
+        joint_names=(UnitRobotJoint.HIP,),
+        link_names=(UnitRobotLink.FOOT,),
+        contact_links=(UnitRobotLink.FOOT,),
+        nominal_tracking_joints=(UnitRobotJoint.HIP,),
+        joint_limits={UnitRobotJoint.HIP: (-1.0, 1.0)},
+        default_joint_mapping={UnitMotionJoint.HIP: UnitRobotJoint.HIP},
+        default_link_mapping={UnitMotionJoint.FOOT: UnitRobotLink.FOOT},
+        geometry_names=(UnitGeometry.FOOT_COLLISION,),
+        mujoco_body_aliases={UnitRobotLink.FOOT: "foot_body"},
+    )
+
+    assert spec.joint_names == ("hip_joint",)
+    assert spec.contact_links == ("foot_link",)
+    assert spec.default_joint_mapping == {"HumanHip": "hip_joint"}
+    assert spec.default_link_mapping == {"HumanFoot": "foot_link"}
+    assert spec.geometry_names == ("foot_collision",)
+    assert spec.mujoco_body_aliases == {"foot_link": "foot_body"}
+    assert UnitContactSubject.LEFT_FOOT.value == "left_foot_subject"
+    assert UnitContactState.PLANTED.value == "planted"
+    assert UnitContactPatch.TOE.value == "toe_patch"
+
+
+def test_robot_spec_rejects_behavioral_metadata_keys():
+    with pytest.raises(ValueError, match="use typed fields"):
+        RobotSpec(
+            name="bad_metadata_robot",
+            dof=1,
+            height_m=1.0,
+            joint_names=("joint",),
+            metadata={"mujoco_body_names": {"link": "body"}},
+        )
 
 
 def test_spec_registries_accept_decorated_factories():

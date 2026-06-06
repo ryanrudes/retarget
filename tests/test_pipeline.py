@@ -12,6 +12,7 @@ from retarget import (
     InteractionMeshSpec,
     MeshTopology,
     ObjectiveConfig,
+    ObjectSampleSpace,
     ObjectSpec,
     ObjectTrajectory,
     OptimizationProfile,
@@ -20,10 +21,11 @@ from retarget import (
     RetargetingResult,
     RunStatus,
     SceneSpec,
+    SolverBackend,
     SolverSpec,
     TaskKind,
 )
-from retarget.core.enums import QuaternionOrder
+from retarget.core.enums import ConvergenceMode, QuaternionOrder
 from retarget.core.pose import PoseSequence
 from retarget.kinematics import SimpleKinematicsBackend
 from retarget.metrics import PenetrationMetric, evaluate_result, metrics
@@ -54,9 +56,9 @@ def test_solver_iteration_count_supports_explicit_first_frame_count() -> None:
 
 
 def test_solver_convergence_modes_are_explicit() -> None:
-    cost_plateau = SolverSpec(convergence="cost_plateau", cost_atol=1e-8, cost_rtol=1e-5)
-    step_norm = SolverSpec(convergence="step_norm", tolerance=1e-6)
-    no_convergence = SolverSpec(convergence="none")
+    cost_plateau = SolverSpec(convergence=ConvergenceMode.COST_PLATEAU, cost_atol=1e-8, cost_rtol=1e-5)
+    step_norm = SolverSpec(convergence=ConvergenceMode.STEP_NORM, tolerance=1e-6)
+    no_convergence = SolverSpec(convergence=ConvergenceMode.NONE)
 
     assert not pipeline_engine._should_stop_solver_iteration(
         cost_plateau,
@@ -173,6 +175,7 @@ def test_object_asset_scale_feeds_environment_and_playback_metadata() -> None:
     assert playback is not None
     assert playback["asset_scale"] == [2.0, 3.0, 4.0]
     assert playback["sample_points"] == [[1.0, 3.0, 6.0]]
+    assert playback["sample_points_space"] == ObjectSampleSpace.OBJECT_LOCAL.value
     assert playback["visual_parts"] == [
         {
             "name": "box1",
@@ -183,17 +186,30 @@ def test_object_asset_scale_feeds_environment_and_playback_metadata() -> None:
     ]
 
 
+def test_object_world_sample_space_is_not_scaled() -> None:
+    object_spec = ObjectSpec(
+        name="world_points",
+        asset_scale=(2.0, 3.0, 4.0),
+        sample_points=np.asarray([[0.5, 1.0, 1.5]], dtype=np.float64),
+        sample_space=ObjectSampleSpace.WORLD,
+    )
+
+    assert np.allclose(object_spec.scaled_sample_points(), [[0.5, 1.0, 1.5]])
+
+
 def test_scale_to_robot_warns_when_source_height_unknown() -> None:
-    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal").model_copy(update={"metadata": {}})
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal").model_copy(
+        update={"source_height_m": None, "metadata": {"height_m": 1.7}},
+    )
     robot = robots.get("synthetic_humanoid")
     problem = RetargetingProblem(
         name="scale_warning",
         task_kind=TaskKind.ROBOT_ONLY,
         robot=robot,
         motion=motion,
-        motion_format=motion_formats.get("smplx"),
+        motion_format=None,
         scene=SceneSpec.robot_only(),
-        solver=SolverSpec(backend="numpy_least_squares"),
+        solver=SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES),
         scale_to_robot=True,
     )
 
@@ -213,7 +229,7 @@ def test_scale_to_robot_does_not_warn_when_source_height_known() -> None:
         motion=motion,
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
-        solver=SolverSpec(backend="numpy_least_squares"),
+        solver=SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES),
         scale_to_robot=True,
     )
 
@@ -233,7 +249,7 @@ def test_engine_advances_progress_when_enabled(monkeypatch: pytest.MonkeyPatch) 
         motion=motion,
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.robot_only(),
-        solver=SolverSpec(backend="numpy_least_squares"),
+        solver=SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES),
         show_progress=True,
     )
     advances: list[int] = []
@@ -409,7 +425,7 @@ def test_retargeter_can_optimize_root_translation_as_typed_qpos_variable():
         name="root_variable",
         joint_names=("Pelvis",),
         joint_positions=np.zeros((1, 1, 3), dtype=np.float64),
-        metadata={"height_m": robot.height_m},
+        source_height_m=robot.height_m,
     )
     targets = LinkTargetPlan.from_arrays(
         link_names=("left_toe",),
@@ -425,7 +441,7 @@ def test_retargeter_can_optimize_root_translation_as_typed_qpos_variable():
         variables=QposVariableSpec.qpos_indices((0,)),
         objectives=(LinkTrackingObjectiveConfig(),),
         constraints=(TrustRegionConstraintConfig(radius=1.0),),
-        solver=SolverSpec(backend="numpy_least_squares", max_iterations=2),
+        solver=SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES, max_iterations=2),
         scale_to_robot=False,
     )
 
@@ -596,7 +612,7 @@ def test_registered_custom_objective_and_constraint_affect_retargeting():
         scene=SceneSpec.robot_only(),
         objectives=(FirstJointTargetConfig(target=0.5),),
         constraints=(FirstJointCapConfig(upper=0.1),),
-        solver=SolverSpec(backend="numpy_least_squares", max_iterations=2),
+        solver=SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES, max_iterations=2),
     )
 
     result = Retargeter().run(problem)

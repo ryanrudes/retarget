@@ -10,12 +10,12 @@ from typing import Any, cast
 import numpy as np
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import FrameConvention, QuaternionOrder, RunStatus
+from retarget.core.enums import ConvergenceMode, FrameConvention, QposVariableKind, QuaternionOrder, RunStatus
 from retarget.core.pose import Pose
 from retarget.core.protocols import KinematicsBackend
 from retarget.kinematics.backends import SimpleKinematicsBackend
 from retarget.mesh.interaction import InteractionMeshBuilder, InteractionMeshSpec, LaplacianWeighting
-from retarget.motion.contact import ContactFrame, ContactPlan, SupportPlane
+from retarget.motion.contact import ContactFrame, ContactPlan
 from retarget.motion.qpos import NominalQposFrame, NominalQposPlan
 from retarget.motion.spec import MotionSequence
 from retarget.motion.targets import LinkTargetPlan, TargetFrame
@@ -324,9 +324,9 @@ def _should_stop_solver_iteration(
     cost: float,
     previous_cost: float,
 ) -> bool:
-    if solver.convergence == "none":
+    if solver.convergence == ConvergenceMode.NONE:
         return False
-    if solver.convergence == "cost_plateau":
+    if solver.convergence == ConvergenceMode.COST_PLATEAU:
         return bool(np.isclose(cost, previous_cost, rtol=solver.cost_rtol, atol=solver.cost_atol))
     return float(np.linalg.norm(solution)) <= solver.tolerance
 
@@ -370,7 +370,7 @@ def _contact_plan_for_problem(
         return None
     subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
     link_mapping = {subject: _links_for_contact_subject(subject, problem.robot.contact_links) for subject in subjects}
-    support = _support_plane_from_motion_metadata(motion)
+    support = motion.support
     factor = _motion_scale_factor(problem)
     if support is not None and factor is not None:
         support = support.scaled(factor)
@@ -385,7 +385,7 @@ def _contact_plan_for_problem(
 def _source_height_m(problem: RetargetingProblem) -> float | None:
     """Return a positive source actor height in meters, if one is available."""
 
-    source_height = problem.motion.metadata.get("height_m")
+    source_height = problem.motion.source_height_m
     if source_height is None and problem.motion_format is not None:
         source_height = problem.motion_format.default_height_m
     if source_height is None:
@@ -415,7 +415,7 @@ def _scale_to_robot_skipped_warning(problem: RetargetingProblem) -> str | None:
     )
     return (
         "scale_to_robot is enabled but motion was not scaled: no positive source height. "
-        f"Set motion.metadata['height_m'], {format_hint}, or disable scale_to_robot."
+        f"Set motion.source_height_m, {format_hint}, or disable scale_to_robot."
     )
 
 
@@ -530,8 +530,8 @@ def _object_playback_metadata(problem: RetargetingProblem) -> dict[str, Any] | N
             for part in object_spec.visual_parts
         ],
         "sample_points": _jsonable(sample_points),
-        "sample_points_space": "object" if object_spec.trajectory is not None else "world",
-        "qpos_mode": object_spec.qpos_mode,
+        "sample_points_space": object_spec.sample_space.value,
+        "qpos_mode": object_spec.qpos_mode.value,
         "frame_convention": FrameConvention.Z_UP_RIGHT_HANDED.value,
         "quaternion_order": QuaternionOrder.WXYZ.value,
     }
@@ -577,6 +577,7 @@ def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:
         "has_root_poses": problem.motion.root_poses is not None,
         "has_legacy_contacts": bool(problem.motion.contacts),
         "has_typed_contacts": problem.contacts is not None,
+        "source_height_m": problem.motion.source_height_m,
         "metadata": _jsonable(problem.motion.metadata),
     }
 
@@ -819,17 +820,6 @@ def _human_points(motion: MotionSequence, human_names: tuple[str, ...], frame_id
     return np.asarray(motion.joint_positions[frame_idx, indices, :], dtype=np.float64)
 
 
-def _support_plane_from_motion_metadata(motion: MotionSequence) -> SupportPlane | None:
-    raw = motion.metadata.get("support_plane")
-    if not isinstance(raw, dict):
-        return None
-    return SupportPlane(
-        normal=np.asarray(raw["normal"], dtype=np.float64),
-        origin=np.asarray(raw["origin"], dtype=np.float64),
-        up_axis=int(raw.get("up_axis", 2)),
-    )
-
-
 def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
     lower = subject.lower()
     if "left" in lower or lower.startswith(("l_", "l-")):
@@ -851,7 +841,7 @@ def _point_jacobians_for_variables(
     if callable(method):
         result = method(qpos, point_names, variable_set.indices)
         return cast(tuple[FloatArray, FloatArray], result)
-    if variable_set.spec.kind == "actuated":
+    if variable_set.spec.kind == QposVariableKind.ACTUATED:
         return backend.point_jacobians(qpos, point_names)
     raise TypeError(
         f"{type(backend).__name__} must implement point_jacobians_for_qpos_indices "

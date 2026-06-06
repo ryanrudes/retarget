@@ -9,19 +9,18 @@ import importlib.util
 import json
 import sys
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, TypeAlias
+from typing import Any, Protocol, Self, TypeAlias, cast
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
+from retarget.core.enums import FrameConvention, QuaternionOrder, RunSourceKind, TaskKind
 from retarget.core.pose import PoseSequence, convert_points_frame
 from retarget.core.registry import Registry
 from retarget.mesh import InteractionMeshSpec, sample_mesh_points
-from retarget.motion import LinkTargetPlan, NominalQposPlan, load_motion, motion_formats
-from retarget.motion.contact import ContactPlan, SupportPlane
+from retarget.motion import load_motion, motion_formats
+from retarget.motion.contact import ContactPlan
 from retarget.optimization import constraint_terms, objective_terms, validate_optimization_references
 from retarget.optimization.spec import (
     ConstraintConfig,
@@ -32,29 +31,53 @@ from retarget.optimization.spec import (
     SolverSpec,
 )
 from retarget.optimization.variables import QposVariableSpec
-from retarget.pipeline import RetargetingProblem
+from retarget.pipeline import PreparedRetargetingInputs, RetargetingProblem
 from retarget.robots import robot_providers, robots
 from retarget.robots.spec import RobotSpec
 from retarget.scene import ObjectSpec, ObjectTrajectory, ObjectVisualPart, SceneSpec, TerrainSpec
 
 
-@dataclass(frozen=True)
-class _PreparedInputs:
-    motion: Any
-    scene: SceneSpec
-    contacts: ContactPlan | None = None
-    targets: LinkTargetPlan | None = None
-    nominal_qpos: NominalQposPlan | None = None
-    motion_format_name: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+class BaseRunSourceConfig(BaseModel):
+    """Base class for typed run-source config blocks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: RunSourceKind
+
+    def resolve_paths(self, base_dir: Path) -> BaseRunSourceConfig:
+        """Return a copy with relative paths resolved."""
+
+        return self
 
 
-class MotionFileSourceConfig(BaseModel):
+class RunSourceBuilder(Protocol):
+    """Build prepared retarget inputs from one run-source config type."""
+
+    config_type: type[BaseRunSourceConfig]
+
+    def validate_registry_references(self, config: BaseRunSourceConfig, messages: list[str]) -> None:
+        """Append missing registry-reference messages for this source."""
+
+    def prepare(
+        self,
+        config: BaseRunSourceConfig,
+        robot: RobotSpec,
+        *,
+        run_name: str | None,
+        run_config: Any,
+    ) -> PreparedRetargetingInputs:
+        """Load and adapt source data for a run."""
+
+
+run_sources: Registry[RunSourceBuilder] = Registry("run source")
+
+
+class MotionFileSourceConfig(BaseRunSourceConfig):
     """Load a motion file through a registered motion format."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["motion_file"] = "motion_file"
+    kind: RunSourceKind = RunSourceKind.MOTION_FILE
     path: Path
     format_name: str = Field(default="minimal", alias="format")
 
@@ -69,12 +92,12 @@ class MotionFileSourceConfig(BaseModel):
         return self.model_copy(update={"path": _resolve_relative(self.path, base_dir)})
 
 
-class MotionSyncSkateboardingSourceConfig(BaseModel):
+class MotionSyncSkateboardingSourceConfig(BaseRunSourceConfig):
     """Prepare a skateboarding ``motion_sync`` clip directly."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["motion_sync_skateboarding"] = "motion_sync_skateboarding"
+    kind: RunSourceKind = RunSourceKind.MOTION_SYNC_SKATEBOARDING
     demo: str = "pushoff5_twoshoes"
     synced: Path | None = None
     synced_root: Path = Path("motion_sync_output/synced")
@@ -121,10 +144,6 @@ class MotionSyncSkateboardingSourceConfig(BaseModel):
         return self.synced_root / self.demo
 
 
-RunSourceConfig: TypeAlias = Annotated[
-    MotionFileSourceConfig | MotionSyncSkateboardingSourceConfig,
-    Field(discriminator="kind"),
-]
 ObjectiveConfigInput: TypeAlias = ObjectiveConfigUnion | dict[str, Any]
 ConstraintConfigInput: TypeAlias = ConstraintConfigUnion | dict[str, Any]
 
@@ -252,7 +271,7 @@ class RetargetingRunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = None
-    source: RunSourceConfig
+    source: BaseRunSourceConfig
     robot: str = "synthetic_humanoid"
     robot_provider: str = "registry"
     robot_options: dict[str, Any] = Field(default_factory=dict)
@@ -275,6 +294,20 @@ class RetargetingRunConfig(BaseModel):
     @classmethod
     def _coerce_path(cls, value: Any) -> Path:
         return Path(value)
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _coerce_source(cls, value: Any) -> BaseRunSourceConfig:
+        if isinstance(value, BaseRunSourceConfig):
+            return value
+        if not isinstance(value, dict):
+            raise ValueError("source must be a typed source mapping")
+        raw_kind = value.get("kind")
+        if raw_kind is None:
+            raise ValueError("source.kind is required")
+        kind = RunSourceKind(str(raw_kind))
+        builder = run_sources.get(kind)
+        return builder.config_type.model_validate(value)
 
     @field_validator("imports", mode="before")
     @classmethod
@@ -348,7 +381,6 @@ class RetargetingRunConfig(BaseModel):
         self.validate_registry_references()
         robot_spec = robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
         prepared = self._build_inputs(robot_spec)
-        motion_format = motion_formats.get(prepared.motion_format_name) if prepared.motion_format_name else None
         return RetargetingProblem(
             name=self.name or prepared.motion.name,
             task_kind=self.task_kind,
@@ -358,7 +390,7 @@ class RetargetingRunConfig(BaseModel):
             contacts=prepared.contacts,
             targets=prepared.targets,
             nominal_qpos=prepared.nominal_qpos,
-            motion_format=motion_format,
+            motion_format=prepared.motion_format,
             joint_mapping=self.joint_mapping,
             mesh=self.mesh,
             solver=self.solver,
@@ -392,8 +424,7 @@ class RetargetingRunConfig(BaseModel):
 
         self.import_extensions()
         messages: list[str] = []
-        if isinstance(self.source, MotionFileSourceConfig):
-            _append_missing_registry_messages(messages, motion_formats, (self.source.format_name,))
+        run_sources.get(self.source.kind).validate_registry_references(self.source, messages)
         _append_missing_registry_messages(messages, robot_providers, (self.robot_provider,))
         if self.robot_provider == "registry":
             _append_missing_registry_messages(messages, robots, (self.robot,))
@@ -413,35 +444,8 @@ class RetargetingRunConfig(BaseModel):
             constraints=self.resolved_constraints(),
         )
 
-    def _build_inputs(self, robot: RobotSpec) -> _PreparedInputs:
-        if isinstance(self.source, MotionFileSourceConfig):
-            motion = load_motion(self.source.path, self.source.format_name, name=self.name)
-            return _PreparedInputs(
-                motion=motion,
-                scene=self._build_scene(frame_count=motion.frame_count, fps=motion.fps),
-                contacts=_contact_plan_from_motion(motion, robot.contact_links),
-                motion_format_name=self.source.format_name,
-            )
-        from retarget.integrations.motion_sync.skateboarding import from_skateboarding_clip
-
-        prepared = from_skateboarding_clip(
-            self.source.synced_path,
-            name=self.name or self.source.demo,
-            max_frames=self.source.max_frames,
-            height_m=self.source.height_m,
-            force_contacts=self.source.force_contacts,
-            save_contact_layer=self.source.save_contact_layer,
-            contact_links=robot.contact_links,
-        )
-        return _PreparedInputs(
-            motion=prepared.motion,
-            scene=prepared.scene,
-            contacts=prepared.contacts,
-            targets=prepared.targets,
-            nominal_qpos=prepared.nominal_qpos,
-            motion_format_name="smplx",
-            metadata=dict(prepared.metadata),
-        )
+    def _build_inputs(self, robot: RobotSpec) -> PreparedRetargetingInputs:
+        return run_sources.get(self.source.kind).prepare(self.source, robot, run_name=self.name, run_config=self)
 
     def _build_scene(self, *, frame_count: int, fps: float) -> SceneSpec:
         object_spec = _object_spec(self.scene.object, frame_count=frame_count, fps=fps)
@@ -471,6 +475,78 @@ class RetargetingRunConfig(BaseModel):
             ground_size=self.scene.ground_size,
             metadata=self.scene.metadata,
         )
+
+
+class MotionFileSourceBuilder:
+    """Build retarget inputs from a registered motion file loader."""
+
+    config_type: type[BaseRunSourceConfig] = MotionFileSourceConfig
+
+    def validate_registry_references(self, config: BaseRunSourceConfig, messages: list[str]) -> None:
+        source = cast(MotionFileSourceConfig, config)
+        _append_missing_registry_messages(messages, motion_formats, (source.format_name,))
+
+    def prepare(
+        self,
+        config: BaseRunSourceConfig,
+        robot: RobotSpec,
+        *,
+        run_name: str | None,
+        run_config: Any,
+    ) -> PreparedRetargetingInputs:
+        source = cast(MotionFileSourceConfig, config)
+        motion_format = motion_formats.get(source.format_name)
+        motion = load_motion(source.path, source.format_name, name=run_name)
+        return PreparedRetargetingInputs(
+            motion=motion,
+            scene=run_config._build_scene(frame_count=motion.frame_count, fps=motion.fps),
+            contacts=_contact_plan_from_motion(motion, robot.contact_links),
+            motion_format=motion_format,
+        )
+
+
+class MotionSyncSkateboardingSourceBuilder:
+    """Build retarget inputs from the bundled skateboarding motion_sync recipe."""
+
+    config_type: type[BaseRunSourceConfig] = MotionSyncSkateboardingSourceConfig
+
+    def validate_registry_references(self, _config: BaseRunSourceConfig, _messages: list[str]) -> None:
+        return
+
+    def prepare(
+        self,
+        config: BaseRunSourceConfig,
+        robot: RobotSpec,
+        *,
+        run_name: str | None,
+        run_config: Any,
+    ) -> PreparedRetargetingInputs:
+        del run_config
+        source = cast(MotionSyncSkateboardingSourceConfig, config)
+        from retarget.integrations.motion_sync.skateboarding import from_skateboarding_clip
+
+        prepared = from_skateboarding_clip(
+            source.synced_path,
+            name=run_name or source.demo,
+            max_frames=source.max_frames,
+            height_m=source.height_m,
+            force_contacts=source.force_contacts,
+            save_contact_layer=source.save_contact_layer,
+            contact_links=robot.contact_links,
+        )
+        return PreparedRetargetingInputs(
+            motion=prepared.motion,
+            scene=prepared.scene,
+            contacts=prepared.contacts,
+            targets=prepared.targets,
+            nominal_qpos=prepared.nominal_qpos,
+            motion_format=prepared.motion_format,
+            metadata=dict(prepared.metadata),
+        )
+
+
+run_sources.register(RunSourceKind.MOTION_FILE, MotionFileSourceBuilder())
+run_sources.register(RunSourceKind.MOTION_SYNC_SKATEBOARDING, MotionSyncSkateboardingSourceBuilder())
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:
@@ -614,15 +690,15 @@ def _contact_plan_from_motion(motion: Any, contact_links: tuple[str, ...]) -> Co
         return None
     subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
     link_mapping = {subject: _links_for_contact_subject(subject, contact_links) for subject in subjects}
-    metadata_provenance = motion.metadata.get("contact_provenance", {})
+    contact_provenance = motion.contact_provenance
     return ContactPlan.from_binary_contacts(
         motion.contacts,
         link_mapping=link_mapping,
-        support=_support_plane_from_metadata(motion.metadata),
+        support=motion.support,
         provenance={
             "source": "motion_sequence.contacts",
             "motion": motion.name,
-            **(dict(metadata_provenance) if isinstance(metadata_provenance, dict) else {}),
+            **dict(contact_provenance),
         },
     )
 
@@ -636,25 +712,6 @@ def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> 
             link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
         )
     return contact_links
-
-
-def _support_plane_from_metadata(metadata: dict[str, Any]) -> SupportPlane | None:
-    raw = metadata.get("support_plane")
-    if isinstance(raw, dict):
-        normal = raw.get("normal")
-        origin = raw.get("origin")
-        up_axis = int(raw.get("up_axis", 2))
-    else:
-        normal = metadata.get("support_plane_normal")
-        origin = metadata.get("support_plane_origin")
-        up_axis = int(metadata.get("support_plane_up_axis", 2))
-    if normal is None or origin is None:
-        return None
-    return SupportPlane(
-        normal=np.asarray(normal, dtype=np.float64),
-        origin=np.asarray(origin, dtype=np.float64),
-        up_axis=up_axis,
-    )
 
 
 def _default_objectives() -> tuple[ObjectiveConfig, ...]:

@@ -38,7 +38,7 @@ class RetargetingProblem(BaseModel):
         objectives (tuple[ObjectiveConfig, ...]): Weighted least-squares terms applied each frame.
         constraints (tuple[ConstraintConfig, ...]): Bounds and linear constraints merged per subproblem.
         scale_to_robot (bool): Rescale motion to ``robot.height_m`` when source height is known;
-            emits a run warning when enabled but ``height_m`` / ``default_height_m`` is missing.
+            emits a run warning when enabled but ``motion.source_height_m`` / ``default_height_m`` is missing.
         output_fps (float | None): Resample motion and scene to this rate before retargeting; ``None`` keeps motion fps.
         show_progress (bool): When ``True``, show a Rich progress bar during per-frame optimization.
         progress_description (str | None): Progress bar label; defaults to :attr:`name`.

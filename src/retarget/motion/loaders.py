@@ -14,6 +14,7 @@ from retarget.core.enums import FrameConvention, MotionLoaderSuffix, QuaternionO
 from retarget.core.pose import PoseSequence
 from retarget.motion.registry import motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
+from retarget.motion.support import SupportPlane
 
 
 class JsonMotionLoader:
@@ -39,8 +40,7 @@ class JsonMotionLoader:
         joint_names = tuple(data.get("joint_names", spec.joint_names))
         positions = np.asarray(data["joint_positions"], dtype=np.float64)
         metadata = dict(data.get("metadata", {}))
-        if "height_m" in data:
-            metadata["height_m"] = data["height_m"]
+        source_height_m = _optional_height_from_mapping(data)
         fps = float(data.get("fps", spec.default_fps))
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
@@ -51,6 +51,7 @@ class JsonMotionLoader:
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
             contacts=_contacts_from_mapping(data),
+            source_height_m=source_height_m,
             metadata=metadata,
         )
 
@@ -106,17 +107,14 @@ class NpzMotionLoader:
         joint_names_raw: Any = data.get("joint_names", spec.joint_names)
         joint_names = tuple(str(v) for v in joint_names_raw)
         metadata: dict[str, Any] = {}
+        source_height_m = None
         if "height" in data:
-            metadata["height_m"] = float(np.asarray(data["height"]).reshape(()))
+            source_height_m = float(np.asarray(data["height"]).reshape(()))
         if "height_m" in data:
-            metadata["height_m"] = float(np.asarray(data["height_m"]).reshape(()))
+            source_height_m = float(np.asarray(data["height_m"]).reshape(()))
         _reject_legacy_link_targets(data)
         support_plane = _support_plane_from_npz(data)
-        if support_plane is not None:
-            metadata["support_plane"] = support_plane
         contact_provenance = _contact_provenance_from_npz(data)
-        if contact_provenance:
-            metadata["contact_provenance"] = contact_provenance
         fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
@@ -127,6 +125,9 @@ class NpzMotionLoader:
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
             contacts=_contacts_from_npz(data, spec),
+            support=support_plane,
+            contact_provenance=contact_provenance,
+            source_height_m=source_height_m,
             metadata=metadata,
         )
 
@@ -178,9 +179,7 @@ class CsvMotionLoader:
                         _coordinate_column_candidates(joint_name, axis),
                     )
         metadata: dict[str, Any] = {}
-        height = _optional_csv_float(normalized_rows[0], ("height_m", "height"))
-        if height is not None:
-            metadata["height_m"] = height
+        source_height_m = _optional_csv_float(normalized_rows[0], ("height_m", "height"))
         fps = _csv_fps(normalized_rows, spec.default_fps)
         return MotionSequence(
             name=name or path.stem,
@@ -190,6 +189,7 @@ class CsvMotionLoader:
             frame=spec.frame_convention,
             root_poses=_csv_root_poses(normalized_rows, spec, fps=fps),
             contacts=_csv_contacts(normalized_rows, spec.contact_joints),
+            source_height_m=source_height_m,
             metadata=metadata,
         )
 
@@ -243,7 +243,7 @@ def _reject_legacy_link_targets(data: Any) -> None:
         )
 
 
-def _support_plane_from_npz(data: Any) -> dict[str, Any] | None:
+def _support_plane_from_npz(data: Any) -> SupportPlane | None:
     if "support_plane_normal" not in data and "support_plane_origin" not in data:
         return None
     if "support_plane_normal" not in data or "support_plane_origin" not in data:
@@ -251,7 +251,12 @@ def _support_plane_from_npz(data: Any) -> dict[str, Any] | None:
     normal = np.asarray(data["support_plane_normal"], dtype=np.float64).reshape(3)
     origin = np.asarray(data["support_plane_origin"], dtype=np.float64).reshape(3)
     up_axis = int(np.asarray(data["support_plane_up_axis"]).reshape(())) if "support_plane_up_axis" in data else 2
-    return {"normal": normal, "origin": origin, "up_axis": up_axis}
+    return SupportPlane(normal=normal, origin=origin, up_axis=up_axis)
+
+
+def _optional_height_from_mapping(data: dict[str, Any]) -> float | None:
+    value = data.get("source_height_m", data.get("height_m", data.get("height")))
+    return None if value is None else float(value)
 
 
 def _contact_provenance_from_npz(data: Any) -> dict[str, Any]:

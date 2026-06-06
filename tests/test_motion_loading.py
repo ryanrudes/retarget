@@ -12,7 +12,8 @@ def test_json_motion_loader():
     motion = load_motion(Path("tests/fixtures/minimal_motion.json"), "minimal")
     assert motion.frame_count == 3
     assert motion.joint_count == 11
-    assert motion.metadata["height_m"] == 1.7
+    assert motion.source_height_m == 1.7
+    assert "height_m" not in motion.metadata
 
 
 def test_json_motion_loader_reads_explicit_contacts(tmp_path):
@@ -147,7 +148,8 @@ def test_csv_motion_loader_infers_fps_and_reorders_by_frame(tmp_path):
 
     assert motion.frame_count == 2
     assert motion.joint_names == spec.joint_names
-    assert motion.metadata["height_m"] == 1.8
+    assert motion.source_height_m == 1.8
+    assert "height_m" not in motion.metadata
     assert motion.fps == 2.0
     assert motion.joint("Pelvis")[0, 0] == 1.0
     assert motion.joint("Pelvis")[1, 0] == 2.0
@@ -267,14 +269,16 @@ def test_motion_sequence_resampled_interpolates_joint_positions():
             dtype=np.float64,
         ),
         fps=1.0,
-        metadata={"height_m": 1.8},
+        source_height_m=1.8,
+        metadata={"source": "unit_test"},
     )
 
     resampled = motion.resampled(2.0)
 
     assert resampled.frame_count == 3
     assert resampled.fps == 2.0
-    assert resampled.metadata["height_m"] == 1.8
+    assert resampled.source_height_m == 1.8
+    assert resampled.metadata["source"] == "unit_test"
     assert resampled.metadata["resampled_from_fps"] == 1.0
     assert np.allclose(resampled.joint("root")[:, 0], [0.0, 1.0, 2.0])
     assert np.allclose(resampled.joint("hand")[:, 1], [2.0, 3.0, 4.0])

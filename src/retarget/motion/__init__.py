@@ -1,10 +1,11 @@
 """Motion specs, registries, and loaders."""
 
-from retarget.motion.contact import ContactFrame, ContactPlan, ContactTrack, SupportPlane, infer_contact_by_velocity
+from retarget.motion.contact import ContactFrame, ContactPlan, ContactTrack, infer_contact_by_velocity
 from retarget.motion.loaders import CsvMotionLoader, JsonMotionLoader, NpyMotionLoader, NpzMotionLoader, load_motion
 from retarget.motion.qpos import InitialQposFrame, InitialQposPlan, NominalQposFrame, NominalQposPlan
 from retarget.motion.registry import motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
+from retarget.motion.support import SupportPlane
 from retarget.motion.targets import LinkTargetPlan, LinkTargetSample, LinkTargetTrack, TargetFrame
 
 __all__ = [

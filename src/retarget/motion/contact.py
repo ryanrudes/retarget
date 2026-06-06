@@ -7,56 +7,9 @@ from dataclasses import dataclass, field
 from typing import cast
 
 import numpy as np
-from numpy.typing import ArrayLike
 
-from retarget.core.array import FloatArray
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
-
-
-@dataclass(frozen=True)
-class SupportPlane:
-    """Planar support surface used by contact-aware terms."""
-
-    normal: FloatArray
-    origin: FloatArray
-    up_axis: int = 2
-
-    def __post_init__(self) -> None:
-        normal = np.asarray(self.normal, dtype=np.float64).reshape(3)
-        norm = float(np.linalg.norm(normal))
-        if norm <= 1e-12:
-            raise ValueError("support plane normal must be non-zero")
-        origin = np.asarray(self.origin, dtype=np.float64).reshape(3)
-        if self.up_axis not in (0, 1, 2):
-            raise ValueError("up_axis must be 0, 1, or 2")
-        object.__setattr__(self, "normal", normal / norm)
-        object.__setattr__(self, "origin", origin)
-
-    def clearance(self, points: ArrayLike) -> FloatArray:
-        """Signed clearance from the support plane."""
-
-        arr = np.asarray(points, dtype=np.float64)
-        return np.asarray((arr.reshape(-1, 3) - self.origin) @ self.normal, dtype=np.float64).reshape(
-            arr.shape[:-1]
-        )
-
-    def height_at(self, points: ArrayLike) -> FloatArray:
-        """Support height at the horizontal coordinates of ``points``."""
-
-        arr = np.asarray(points, dtype=np.float64).reshape(-1, 3)
-        normal_up = float(self.normal[self.up_axis])
-        if abs(normal_up) <= 1e-12:
-            raise ValueError("support plane normal is parallel to the vertical axis")
-        horizontal_axes = [axis for axis in range(3) if axis != self.up_axis]
-        horizontal_delta = arr[:, horizontal_axes] - self.origin[horizontal_axes]
-        horizontal_normal = self.normal[horizontal_axes]
-        heights = self.origin[self.up_axis] - (horizontal_delta @ horizontal_normal) / normal_up
-        return np.asarray(heights, dtype=np.float64).reshape(np.asarray(points).shape[:-1])
-
-    def scaled(self, factor: float) -> SupportPlane:
-        """Return a copy with positional quantities scaled."""
-
-        return SupportPlane(normal=self.normal, origin=self.origin * float(factor), up_axis=self.up_axis)
+from retarget.motion.support import SupportPlane
 
 
 @dataclass(frozen=True)

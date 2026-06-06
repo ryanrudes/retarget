@@ -13,6 +13,7 @@ from retarget.core.array import FloatArray, as_float_array
 from retarget.core.enums import FrameConvention, QuaternionOrder
 from retarget.core.pose import PoseSequence, convert_points_frame
 from retarget.core.timing import resample_linear, resampling_times
+from retarget.motion.support import SupportPlane
 
 
 class MotionFormatSpec(BaseModel):
@@ -73,7 +74,10 @@ class MotionSequence(BaseModel):
         frame (FrameConvention): World-frame convention for ``joint_positions``.
         root_poses (PoseSequence | None): Optional per-frame root transform track.
         contacts (tuple[dict[str, bool], ...]): Optional per-frame contact flags keyed by joint name.
-        metadata (dict[str, Any]): Opaque sidecar fields (height, source paths, resampling notes, …).
+        support (SupportPlane | None): Optional support geometry associated with contact flags.
+        contact_provenance (dict[str, Any]): Provenance for loader-provided contact flags.
+        source_height_m (float | None): Source actor height used by scale-to-robot workflows.
+        metadata (dict[str, Any]): Opaque sidecar fields for provenance and diagnostics.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -85,6 +89,9 @@ class MotionSequence(BaseModel):
     frame: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
     root_poses: PoseSequence | None = None
     contacts: tuple[dict[str, bool], ...] = ()
+    support: SupportPlane | None = None
+    contact_provenance: dict[str, Any] = Field(default_factory=dict)
+    source_height_m: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("joint_positions", mode="before")
@@ -101,6 +108,13 @@ class MotionSequence(BaseModel):
         if value <= 0:
             raise ValueError("fps must be positive")
         return float(value)
+
+    @field_validator("source_height_m")
+    @classmethod
+    def _validate_source_height(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("source_height_m must be positive")
+        return None if value is None else float(value)
 
     @field_validator("contacts", mode="before")
     @classmethod
@@ -189,6 +203,9 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=self.root_poses,
             contacts=tuple(dict(frame) for frame in self.contacts),
+            support=self.support,
+            contact_provenance=dict(self.contact_provenance),
+            source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
 
@@ -203,6 +220,9 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=self.root_poses.scaled(factor) if self.root_poses is not None else None,
             contacts=tuple(dict(frame) for frame in self.contacts),
+            support=self.support.scaled(factor) if self.support is not None else None,
+            contact_provenance=dict(self.contact_provenance),
+            source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
 
@@ -221,6 +241,9 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=self.root_poses.resampled(fps) if self.root_poses is not None else None,
             contacts=_resample_contacts(self.contacts, self.fps, fps),
+            support=self.support,
+            contact_provenance=dict(self.contact_provenance),
+            source_height_m=self.source_height_m,
             metadata=metadata,
         )
 
@@ -236,6 +259,9 @@ class MotionSequence(BaseModel):
                 frame=self.frame,
                 root_poses=self.root_poses,
                 contacts=tuple(dict(frame) for frame in self.contacts),
+                support=self.support,
+                contact_provenance=dict(self.contact_provenance),
+                source_height_m=self.source_height_m,
                 metadata=dict(self.metadata),
             )
         metadata = dict(self.metadata)
@@ -250,6 +276,9 @@ class MotionSequence(BaseModel):
             frame=target,
             root_poses=self.root_poses.to_frame(target) if self.root_poses is not None else None,
             contacts=tuple(dict(frame) for frame in self.contacts),
+            support=self.support.to_frame(self.frame, target) if self.support is not None else None,
+            contact_provenance=dict(self.contact_provenance),
+            source_height_m=self.source_height_m,
             metadata=metadata,
         )
 
@@ -274,6 +303,9 @@ class MotionSequence(BaseModel):
             frame=self.frame,
             root_poses=root_poses,
             contacts=tuple(dict(frame) for frame in self.contacts),
+            support=self.support,
+            contact_provenance=dict(self.contact_provenance),
+            source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
 

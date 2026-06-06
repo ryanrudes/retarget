@@ -5,18 +5,20 @@ from __future__ import annotations
 import numpy as np
 
 from retarget import (
+    MotionFormat,
     ObjectSpec,
     ObjectTrajectory,
     OptimizationProfile,
     Retargeter,
     RetargetingProblem,
+    Robot,
     SceneSpec,
     TaskKind,
 )
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
-fmt = motion_formats.get("minimal")
+fmt = motion_formats.get(MotionFormat.MINIMAL)
 motion = MotionSequence(
     name="object_interaction",
     joint_names=fmt.joint_names,
@@ -39,7 +41,7 @@ object_spec = ObjectSpec(
 problem = RetargetingProblem(
     name="object_interaction",
     task_kind=TaskKind.OBJECT_INTERACTION,
-    robot=robots.get("synthetic_humanoid"),
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
     motion=motion,
     motion_format=fmt,
     scene=SceneSpec.object_interaction(object_spec),

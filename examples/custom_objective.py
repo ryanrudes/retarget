@@ -1,10 +1,10 @@
 """Define a custom objective descriptor."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 
+from retarget import RetargetEnum
 from retarget.optimization import (
     ObjectiveConfig,
     ObjectiveContribution,
@@ -14,14 +14,18 @@ from retarget.optimization import (
 )
 
 
+class DemoObjective(RetargetEnum):
+    ENERGY = "energy"
+
+
 class EnergyObjectiveConfig(ObjectiveConfig):
-    kind: Literal["energy"] = "energy"
+    kind: DemoObjective = DemoObjective.ENERGY
 
 
-@objective_terms.register("energy")
+@objective_terms.register(DemoObjective.ENERGY)
 @dataclass(frozen=True)
 class EnergyObjective:
-    name: str = "energy"
+    name: DemoObjective = DemoObjective.ENERGY
     config_type: type[EnergyObjectiveConfig] = EnergyObjectiveConfig
 
     def describe(self) -> str:
@@ -36,6 +40,6 @@ class EnergyObjective:
         )
 
 
-print(objective_terms.get("energy").describe())
+print(objective_terms.get(DemoObjective.ENERGY).describe())
 profile = OptimizationProfile.defaults().with_objective(EnergyObjectiveConfig(weight=0.1))
 print(profile.objective_names)

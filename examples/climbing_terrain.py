@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import numpy as np
 
-from retarget import OptimizationProfile, Retargeter, RetargetingProblem, SceneSpec, TaskKind, TerrainSpec
+from retarget import (
+    MotionFormat,
+    OptimizationProfile,
+    Retargeter,
+    RetargetingProblem,
+    Robot,
+    SceneSpec,
+    TaskKind,
+    TerrainSpec,
+)
 from retarget.motion import MotionSequence, motion_formats
 from retarget.robots import robots
 
-fmt = motion_formats.get("minimal")
+fmt = motion_formats.get(MotionFormat.MINIMAL)
 motion = MotionSequence(
     name="climbing",
     joint_names=fmt.joint_names,
@@ -18,7 +27,7 @@ motion = MotionSequence(
 problem = RetargetingProblem(
     name="climbing",
     task_kind=TaskKind.CLIMBING,
-    robot=robots.get("synthetic_humanoid"),
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
     motion=motion,
     motion_format=fmt,
     scene=SceneSpec.climbing(

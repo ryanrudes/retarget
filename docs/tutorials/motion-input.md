@@ -3,7 +3,7 @@
 !!! info "Prerequisites"
     Familiarity with [Your first retarget](your-first-retarget.md) helps—you have already loaded a fixture motion and run the CLI.
 
-Retargeting starts from a **`MotionSequence`**: named joints, positions shaped `(frames, joints, 3)`, frame rate, and optional root poses or metadata. This tutorial covers how files become that sequence and how to stay aligned with a **motion format** definition.
+Retargeting starts from a **`MotionSequence`**: named joints, positions shaped `(frames, joints, 3)`, frame rate, optional root poses, and typed source fields such as `source_height_m`. This tutorial covers how files become that sequence and how to stay aligned with a **motion format** definition.
 
 ## Motion formats are contracts
 
@@ -11,7 +11,7 @@ A motion format declares:
 
 - Which joint names appear in files
 - How to parse JSON, NPZ, NPY, or CSV into arrays
-- Optional metadata keys (for example `height_m` for scaling)
+- Typed source fields such as `source_height_m` for scale-to-robot workflows
 
 List registered formats:
 
@@ -43,7 +43,7 @@ The `minimal` format matches the tutorial fixture and the synthetic humanoid map
     print(motion.joint_positions.shape)  # (frames, joints, 3)
     ```
 
-The JSON layout stores `joint_names`, `joint_positions` as nested lists, and `fps`. Optional `height_m` in the file or metadata drives `scale_to_robot` policies in run configs.
+The JSON layout stores `joint_names`, `joint_positions` as nested lists, and `fps`. Optional `height_m` or `source_height_m` fields are loaded into `MotionSequence.source_height_m`, which drives `scale_to_robot` policies in run configs.
 
 ## Supported file types
 
@@ -73,7 +73,7 @@ motion = MotionSequence(
     joint_names=names,
     joint_positions=positions,
     fps=30,
-    metadata={"height_m": 1.7},
+    source_height_m=1.7,
 )
 ```
 

@@ -150,14 +150,14 @@ uv run motion-sync detect foot-support output/synced/my_demo --force
 
 Metadata (`source_frame_count`, `time_fingerprint`) lets `contact_is_fresh` skip redundant work after re-sync.
 
-## 7. `configs/motion_sync.yaml`
+## 7. Vendor `configs/motion_sync.yaml`
 
-Keep **machine-specific** strings in YAML, not in Python:
+Keep **upstream sensor/session** strings in the vendor YAML, not in retarget semantics:
 
 - `bodies.<name>.markers` — Vicon marker lists for rigid-body fitting
 - `time_sync_solver.smplx_joints` — maps Vicon body paths to SMPL-X joint names for foot-speed sync
 
-Python enums must stay consistent with those strings.
+Python enums must stay consistent with those strings at the `motion_sync` boundary. Retargeting recipes should consume typed objects (`MotionSequence`, `SceneSpec`, `ContactPlan`, `PreparedRetargetingInputs`) after that boundary.
 
 ## 8. Wire into retarget
 
@@ -167,8 +167,8 @@ Python enums must stay consistent with those strings.
 2. Run detectors; save clip.
 3. Convert `core_joint_positions()` to Z-up if needed.
 4. Build `MotionSequence`, `SceneSpec`, `ContactPlan`, and `LinkTargetPlan`.
-5. Return a `PreparedRetargetInputs` bundle.
-6. Add a typed run-config `[source]` block when the adapter should be available from `retarget run`.
+5. Return a `PreparedRetargetingInputs` bundle.
+6. Add a typed `RetargetingSource` / `RetargetingRecipe` when the adapter should be available from Python and `retarget run`.
 
 See [End-to-end pipeline](pipeline.md) and [Introduction](../introduction.md).
 

@@ -58,7 +58,7 @@ motion = MotionSequence(
     joint_names=fmt.joint_names,
     joint_positions=np.zeros((12, len(fmt.joint_names), 3)),
     fps=30,
-    metadata={"height_m": 1.7},
+    source_height_m=1.7,
 )
 box_points = np.array(
     [[x, y, z] for x in (-0.2, 0.2) for y in (-0.2, 0.2) for z in (-0.2, 0.2)],

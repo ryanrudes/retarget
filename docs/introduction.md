@@ -123,18 +123,20 @@ Full loader rules: [Add a motion format](adding-a-motion-format.md).
 
 ### Python assembly
 
-`retarget.integrations.motion_sync.skateboarding.from_skateboarding_clip()` is the bridge from the ecosystem output to `retarget`. The runnable example calls it directly:
+`retarget.integrations.motion_sync.skateboarding.SkateboardingClipSource` is the typed bridge from ecosystem output to retargeting intermediates. `SkateboardingRetargetingRecipe` then turns that source into a complete `RetargetingProblem`. The runnable example uses that recipe path:
 
 ```bash
 uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes
 ```
 
-The adapter loads `motion_sync_output/synced/<demo>/synced.npz` with `SKATE_SESSION`, refreshes `SKATE_FOOT_SUPPORT` when the stored contact layer is stale, and returns a `PreparedRetargetInputs` bundle:
+The source loads `motion_sync_output/synced/<demo>/synced.npz` with `SKATE_SESSION`, refreshes `SKATE_FOOT_SUPPORT` when the stored contact layer is stale, and returns a `PreparedRetargetingInputs` bundle:
 
-- `motion` — SMPL-X core joints, root poses, and provenance.
+- `motion` — SMPL-X core joints, root poses, source height, and provenance.
 - `scene` — skateboard object trajectory and deck samples.
 - `contacts` — typed foot-support states and support plane.
 - `targets` — named link-tracking targets.
+
+The recipe adds the reusable optimization profile: link tracking, smoothness, nominal tracking, joint limits, trust region, foot sticking, and non-penetration sources. Run configs are declarative frontends over this same typed path; `[source] kind = "motion_sync_skateboarding"` selects the registered source builder rather than a separate retargeting workflow.
 
 The target plan includes per-frame link targets:
 

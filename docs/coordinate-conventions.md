@@ -23,6 +23,6 @@ Upstream [motion_sync](https://github.com/ryanrudes/motion_sync) clips keep sens
 
 - **Vicon** rigid bodies and markers in a `synced.npz` clip are **Z-up** (meters).
 - **Video / SMPL-X** body joints on the same clip are typically **Y-up** (meters).
-- Integration adapters (for example `retarget.integrations.motion_sync.skateboarding`) convert packed human motion to Z-up while building `PreparedRetargetInputs`.
+- Integration sources (for example `retarget.integrations.motion_sync.skateboarding`) convert packed human motion to Z-up while building `PreparedRetargetingInputs`.
 
 See [Custom schemas](ecosystem/custom-schemas.md) for body/marker naming and [Introduction — Step 3](introduction.md#step-3-time-align-and-build-motionsequence) for the full align → convert → pack workflow. Register or adapt a motion format so `load_motion` applies the same Z-up boundary as the rest of the library ([Add a motion format](adding-a-motion-format.md)).

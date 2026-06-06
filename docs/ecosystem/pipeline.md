@@ -83,5 +83,5 @@ Tune objectives and constraints in the TOML ([Run configs](../tutorials/run-conf
 | FK before sync | `joints.npy` in GVHMR folder | Sync refuses to run |
 | Sync quality | `lag`, `corr` in metadata | Wrong foot alignment in fuse |
 | Detect | `contact__foot_support__*` keys in `synced.npz` | Stale layer after re-sync—re-run `detect --force` |
-| Adapter | `PreparedRetargetInputs` frame counts align | Trim/crop mismatch |
+| Source/recipe | `PreparedRetargetingInputs` frame counts align | Trim/crop mismatch |
 | Retarget | `[source] kind = "motion_sync_skateboarding"` in config | Missing synced clip or stale contact layer |

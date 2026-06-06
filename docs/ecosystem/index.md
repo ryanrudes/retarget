@@ -29,15 +29,17 @@ flowchart TB
     detect -.->|classify_foot_support_states| algo[Algorithms]
   end
   subgraph adapter [retarget integrations]
-    clip --> prepared[PreparedRetargetInputs]
+    clip --> source[RetargetingSource]
+    source --> prepared[PreparedRetargetingInputs]
+    prepared --> recipe[RetargetingRecipe]
   end
   subgraph rt [retarget]
+    recipe --> problem[RetargetingProblem]
     prepared --> motion[MotionSequence]
     prepared --> scene[SceneSpec object]
     prepared --> contacts[ContactPlan]
     prepared --> targets[LinkTargetPlan]
-    motion --> result[RetargetingResult]
-    scene --> result
+    problem --> result[RetargetingResult]
     contacts --> result
     targets --> result
   end

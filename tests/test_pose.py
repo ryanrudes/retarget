@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 
 from retarget.core.enums import FrameConvention, QuaternionOrder
-from retarget.core.pose import Pose, PoseSequence, convert_points_frame, reorder_quaternion
+from retarget.core.pose import Pose, PoseSequence, convert_points_frame, reorder_quaternion, reorder_quaternions
 
 
 def test_quaternion_reorder_round_trip():
@@ -9,6 +10,49 @@ def test_quaternion_reorder_round_trip():
     xyzw = reorder_quaternion(wxyz, QuaternionOrder.WXYZ, QuaternionOrder.XYZW)
     assert np.allclose(xyzw, [0.0, 0.0, 0.0, 1.0])
     assert np.allclose(reorder_quaternion(xyzw, QuaternionOrder.XYZW, QuaternionOrder.WXYZ), wxyz)
+
+
+def test_quaternions_reorder_vectorized_last_axis():
+    wxyz = np.asarray(
+        [
+            [[1.0, 0.0, 0.0, 0.0], [0.5, 0.1, 0.2, 0.3]],
+            [[0.4, 0.5, 0.6, 0.7], [0.8, 0.9, 1.0, 1.1]],
+        ],
+        dtype=np.float64,
+    )
+
+    xyzw = reorder_quaternions(wxyz, QuaternionOrder.WXYZ, QuaternionOrder.XYZW)
+
+    assert xyzw.shape == wxyz.shape
+    assert np.allclose(xyzw[..., 0], wxyz[..., 1])
+    assert np.allclose(xyzw[..., 1], wxyz[..., 2])
+    assert np.allclose(xyzw[..., 2], wxyz[..., 3])
+    assert np.allclose(xyzw[..., 3], wxyz[..., 0])
+    assert np.allclose(reorder_quaternions(xyzw, QuaternionOrder.XYZW, QuaternionOrder.WXYZ), wxyz)
+
+
+def test_quaternions_reorder_custom_axis_and_copy_behavior():
+    wxyz = np.asarray(
+        [
+            [[1.0, 0.5], [0.0, 0.1], [0.0, 0.2], [0.0, 0.3]],
+            [[0.4, 0.8], [0.5, 0.9], [0.6, 1.0], [0.7, 1.1]],
+        ],
+        dtype=np.float64,
+    )
+
+    xyzw = reorder_quaternions(wxyz, QuaternionOrder.WXYZ, QuaternionOrder.XYZW, axis=1)
+    same = reorder_quaternions(wxyz, QuaternionOrder.WXYZ, QuaternionOrder.WXYZ, axis=1)
+    same[0, 0, 0] = 99.0
+
+    assert xyzw.shape == wxyz.shape
+    assert np.allclose(xyzw[:, 0, :], wxyz[:, 1, :])
+    assert np.allclose(xyzw[:, 3, :], wxyz[:, 0, :])
+    assert wxyz[0, 0, 0] == 1.0
+
+
+def test_quaternions_reorder_rejects_non_quaternion_axis():
+    with pytest.raises(ValueError, match="axis must have length 4"):
+        reorder_quaternions(np.zeros((2, 3)), QuaternionOrder.WXYZ, QuaternionOrder.XYZW)
 
 
 def test_pose_transform_inverse():

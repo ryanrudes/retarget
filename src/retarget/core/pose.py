@@ -38,14 +38,43 @@ def reorder_quaternion(
         np.ndarray: Quaternion with the same rotation in ``target`` layout.
     """
 
-    q = np.asarray(quaternion, dtype=np.float64)
+    return reorder_quaternions(quaternion, source, target, axis=-1).reshape(4)
+
+
+def reorder_quaternions(
+    quaternions: Any,
+    source: QuaternionOrder,
+    target: QuaternionOrder,
+    *,
+    axis: int = -1,
+) -> FloatArray:
+    """Convert quaternion storage order along one array axis.
+
+    Args:
+        quaternions (Any): Array-like quaternion components with length 4 along ``axis``.
+        source (QuaternionOrder): Storage order of ``quaternions``.
+        target (QuaternionOrder): Desired storage order.
+        axis (int): Axis containing quaternion components.
+
+    Returns:
+        FloatArray: Copy with the same rotations in ``target`` layout.
+    """
+
+    q = np.asarray(quaternions, dtype=np.float64)
+    if q.ndim == 0:
+        raise ValueError("quaternions must have at least one dimension")
+    normalized_axis = axis % q.ndim
+    if q.shape[normalized_axis] != 4:
+        raise ValueError(f"quaternion axis must have length 4, got {q.shape[normalized_axis]}")
     if source == target:
         return q.copy()
     if source == QuaternionOrder.WXYZ and target == QuaternionOrder.XYZW:
-        return q[[1, 2, 3, 0]]
-    if source == QuaternionOrder.XYZW and target == QuaternionOrder.WXYZ:
-        return q[[3, 0, 1, 2]]
-    raise ValueError(f"Unsupported quaternion conversion: {source} -> {target}")
+        order = (1, 2, 3, 0)
+    elif source == QuaternionOrder.XYZW and target == QuaternionOrder.WXYZ:
+        order = (3, 0, 1, 2)
+    else:
+        raise ValueError(f"Unsupported quaternion conversion: {source} -> {target}")
+    return cast(FloatArray, np.take(q, order, axis=normalized_axis))
 
 
 def frame_transform_matrix(source: FrameConvention, target: FrameConvention) -> FloatArray:

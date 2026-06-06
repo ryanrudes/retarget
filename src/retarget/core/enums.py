@@ -5,6 +5,42 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+class RetargetEnum(StrEnum):
+    """Base class for string-valued retarget enums."""
+
+
+class NameEnum(RetargetEnum):
+    """Base class for user-defined symbolic vocabularies."""
+
+
+class RobotJoint(NameEnum):
+    """Base enum for robot joint names."""
+
+
+class RobotLink(NameEnum):
+    """Base enum for robot link names."""
+
+
+class MotionJoint(NameEnum):
+    """Base enum for source motion joint names."""
+
+
+class ContactSubject(NameEnum):
+    """Base enum for contact subjects such as feet, shoes, or hands."""
+
+
+class ContactState(NameEnum):
+    """Base enum for symbolic contact state labels."""
+
+
+class ContactPatch(NameEnum):
+    """Base enum for contact patch labels."""
+
+
+class GeometryName(NameEnum):
+    """Base enum for collision or visual geometry names."""
+
+
 class TaskKind(StrEnum):
     """Supported high-level retargeting workflows.
 
@@ -57,6 +93,14 @@ class SolverBackend(StrEnum):
     CVXPY_CLARABEL = "cvxpy_clarabel"
 
 
+class ConvergenceMode(RetargetEnum):
+    """SQP inner-loop convergence policy."""
+
+    STEP_NORM = "step_norm"
+    COST_PLATEAU = "cost_plateau"
+    NONE = "none"
+
+
 class Robot(StrEnum):
     """Built-in robot registry keys.
 
@@ -83,6 +127,13 @@ class RobotProviderName(StrEnum):
     REGISTRY = "registry"
     FILE = "file"
     ASSET_STORE = "asset_store"
+
+
+class RunSourceKind(RetargetEnum):
+    """Built-in run-source kinds for declarative run configs."""
+
+    MOTION_FILE = "motion_file"
+    MOTION_SYNC_SKATEBOARDING = "motion_sync_skateboarding"
 
 
 class MotionFormat(StrEnum):
@@ -205,6 +256,59 @@ class ContactMode(StrEnum):
     VELOCITY = "velocity"
     HEIGHT = "height"
     EXPLICIT_WINDOWS = "explicit_windows"
+
+
+class ObjectQposMode(RetargetEnum):
+    """How a dynamic object trajectory participates in qpos."""
+
+    APPENDED = "appended"
+    EXTERNAL = "external"
+
+
+class ObjectSampleSpace(RetargetEnum):
+    """Coordinate space for object sample points."""
+
+    OBJECT_LOCAL = "object_local"
+    OBJECT_ASSET_LOCAL = "object_asset_local"
+    SCALED_OBJECT_LOCAL = "scaled_object_local"
+    WORLD = "world"
+
+
+class QposVariableKind(RetargetEnum):
+    """Which qpos coordinates the optimizer may change."""
+
+    ACTUATED = "actuated"
+    QPOS_SLICE = "qpos_slice"
+    QPOS_INDICES = "qpos_indices"
+
+
+class NonPenetrationSource(RetargetEnum):
+    """Sources used by the non-penetration constraint."""
+
+    SUPPORT = "support"
+    SCENE_POINTS = "scene_points"
+    GEOMETRY = "geometry"
+
+
+class GeometrySource(RetargetEnum):
+    """How geometry-pair constraints are resolved."""
+
+    EXPLICIT = "explicit"
+    BACKEND_CANDIDATES = "backend_candidates"
+
+
+class NominalFallback(RetargetEnum):
+    """Fallback target for nominal qpos tracking."""
+
+    ZERO = "zero"
+    CURRENT = "current"
+
+
+class ContactLayerKind(RetargetEnum):
+    """Persisted contact layer storage kind."""
+
+    BINARY = "binary"
+    CATEGORICAL = "categorical"
 
 
 class AssetKind(StrEnum):

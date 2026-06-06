@@ -21,7 +21,7 @@ motion = MotionSequence(
     name="object_interaction",
     joint_names=fmt.joint_names,
     joint_positions=np.zeros((12, len(fmt.joint_names), 3)),
-    metadata={"height_m": 1.7},
+    source_height_m=1.7,
 )
 object_spec = ObjectSpec(
     name="box",

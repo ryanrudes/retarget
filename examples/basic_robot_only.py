@@ -19,7 +19,7 @@ motion = MotionSequence(
     joint_names=joint_names,
     joint_positions=positions,
     fps=30,
-    metadata={"height_m": 1.7},
+    source_height_m=1.7,
 )
 problem = RetargetingProblem(
     name="basic",

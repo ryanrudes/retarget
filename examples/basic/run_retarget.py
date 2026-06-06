@@ -123,7 +123,7 @@ def _load_motion(args: argparse.Namespace) -> MotionSequence:
         if motion.contacts:
             motion = motion.model_copy(update={"contacts": motion.contacts[:end]})
     if args.height_m is not None:
-        motion = motion.model_copy(update={"metadata": {**motion.metadata, "height_m": args.height_m}})
+        motion = motion.model_copy(update={"source_height_m": args.height_m})
     return motion
 
 

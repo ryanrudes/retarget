@@ -13,7 +13,7 @@ motion = MotionSequence(
     name="climbing",
     joint_names=fmt.joint_names,
     joint_positions=np.zeros((10, len(fmt.joint_names), 3)),
-    metadata={"height_m": 1.7},
+    source_height_m=1.7,
 )
 problem = RetargetingProblem(
     name="climbing",

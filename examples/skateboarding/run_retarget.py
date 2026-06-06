@@ -10,21 +10,10 @@ from pathlib import Path
 from rich.console import Console
 
 from retarget import (
-    FootStickingConstraintConfig,
-    JointLimitsConstraintConfig,
-    LinkTrackingObjectiveConfig,
-    NominalTrackingObjectiveConfig,
-    NonPenetrationConstraintConfig,
     Retargeter,
     RetargetingProblem,
-    SmoothnessObjectiveConfig,
-    SolverBackend,
-    SolverSpec,
-    TaskKind,
-    TrustRegionConstraintConfig,
-    motion_formats,
 )
-from retarget.integrations.motion_sync.skateboarding import DEFAULT_DEMO, from_skateboarding_clip
+from retarget.integrations.motion_sync.skateboarding import DEFAULT_DEMO, SkateboardingRetargetingRecipe
 from retarget.kinematics.backends import MuJoCoKinematicsBackend, SimpleKinematicsBackend
 from retarget.pipeline.engine import InteractionMeshRetargetingEngine
 from retarget.robots import robot_providers
@@ -135,45 +124,16 @@ def _build_problem(args: argparse.Namespace, robot: RobotSpec) -> RetargetingPro
         if args.synced
         else (args.synced_root.expanduser() / args.demo).resolve()
     )
-    prepared = from_skateboarding_clip(
+    recipe = SkateboardingRetargetingRecipe.from_clip(
         synced,
         name=args.demo,
         max_frames=args.max_frames,
         height_m=args.height_m,
         force_contacts=args.force_contacts,
-        contact_links=robot.contact_links,
-    )
-    return RetargetingProblem(
-        name=args.demo,
-        task_kind=TaskKind.OBJECT_INTERACTION,
-        robot=robot,
-        motion=prepared.motion,
-        contacts=prepared.contacts,
-        targets=prepared.targets,
-        motion_format=motion_formats.get("smplx"),
-        scene=prepared.scene,
-        solver=SolverSpec(backend=SolverBackend.CVXPY_CLARABEL, max_iterations=10, trust_radius=0.2),
-        objectives=(
-            LinkTrackingObjectiveConfig(weight=1.0),
-            SmoothnessObjectiveConfig(weight=0.2),
-            NominalTrackingObjectiveConfig(weight=5.0),
-        ),
-        constraints=(
-            JointLimitsConstraintConfig(),
-            TrustRegionConstraintConfig(),
-            FootStickingConstraintConfig(tolerance=1e-3),
-            NonPenetrationConstraintConfig(
-                sources=("support", "scene_points"),
-                links=robot.contact_links,
-                scene_clearance=0.015,
-                activation_distance=0.05,
-            ),
-        ),
         scale_to_robot=args.scale_to_robot,
-        output_fps=prepared.motion.fps,
         show_progress=args.progress,
-        metadata={"example": "skateboarding", **prepared.metadata},
     )
+    return recipe.build_problem(robot)
 
 
 if __name__ == "__main__":

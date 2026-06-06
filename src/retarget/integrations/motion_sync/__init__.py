@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -11,30 +10,20 @@ from numpy.typing import ArrayLike
 
 from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
 from retarget.core.pose import PoseSequence
-from retarget.motion.contact import ContactPlan, ContactTrack, SupportPlane
+from retarget.motion.contact import ContactPlan, ContactTrack
 from retarget.motion.qpos import NominalQposPlan
 from retarget.motion.spec import MotionSequence
+from retarget.motion.support import SupportPlane
 from retarget.motion.targets import LinkTargetPlan
+from retarget.pipeline.recipe import PreparedRetargetingInputs
 from retarget.scene.spec import ObjectSpec, ObjectTrajectory, SceneSpec, TerrainSpec
 
 __all__ = [
-    "PreparedRetargetInputs",
+    "PreparedRetargetingInputs",
     "contact_plan_from_sync_clip",
     "from_sync_clip",
     "scene_from_sync_clip",
 ]
-
-
-@dataclass(frozen=True)
-class PreparedRetargetInputs:
-    """Retarget-ready bundle derived from a synchronized capture clip."""
-
-    motion: MotionSequence
-    scene: SceneSpec
-    contacts: ContactPlan | None = None
-    targets: LinkTargetPlan | None = None
-    nominal_qpos: NominalQposPlan | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def from_sync_clip(
@@ -63,7 +52,7 @@ def from_sync_clip(
     terrain: TerrainSpec | None = None,
     task_kind: TaskKind | None = None,
     metadata: Mapping[str, Any] | None = None,
-) -> PreparedRetargetInputs:
+) -> PreparedRetargetingInputs:
     """Build retargeting inputs from a synchronized capture clip."""
 
     positions = np.asarray(joint_positions, dtype=np.float64)
@@ -74,8 +63,6 @@ def from_sync_clip(
         raise ValueError("joint_names length must match joint_positions")
     clip_fps = _clip_fps(clip) if fps is None else float(fps)
     motion_metadata: dict[str, Any] = dict(metadata or {})
-    if height_m is not None:
-        motion_metadata["height_m"] = float(height_m)
 
     root_poses = None
     if root_positions is not None or root_quaternions is not None:
@@ -96,6 +83,7 @@ def from_sync_clip(
         fps=clip_fps,
         frame=frame,
         root_poses=root_poses,
+        source_height_m=height_m,
         metadata=motion_metadata,
     )
     contact_plan = contact_plan_from_sync_clip(
@@ -122,7 +110,7 @@ def from_sync_clip(
         terrain=terrain,
         task_kind=task_kind,
     )
-    return PreparedRetargetInputs(
+    return PreparedRetargetingInputs(
         motion=motion,
         scene=scene,
         contacts=contact_plan,

@@ -5,8 +5,13 @@ from typing import Any
 
 import numpy as np
 
-from retarget import LinkTargetPlan, TaskKind
+from retarget import LinkTargetPlan, ObjectSpec, ObjectTrajectory, SceneSpec, TaskKind
+from retarget.core.enums import MotionFormat, NonPenetrationSource
 from retarget.integrations.motion_sync import contact_plan_from_sync_clip, from_sync_clip
+from retarget.integrations.motion_sync.skateboarding import SkateboardingRetargetingRecipe
+from retarget.motion import MotionSequence, motion_formats
+from retarget.pipeline import PreparedRetargetingInputs
+from retarget.robots import robots
 
 
 @dataclass(frozen=True)
@@ -89,7 +94,8 @@ def test_from_sync_clip_returns_motion_scene_contacts_and_metadata() -> None:
     )
 
     assert prepared.motion.name == "fake_clip"
-    assert prepared.motion.metadata["height_m"] == 1.8
+    assert prepared.motion.source_height_m == 1.8
+    assert "height_m" not in prepared.motion.metadata
     assert prepared.targets is not None
     assert prepared.targets.link_names == ("left_toe",)
     assert prepared.contacts is not None
@@ -98,3 +104,44 @@ def test_from_sync_clip_returns_motion_scene_contacts_and_metadata() -> None:
     assert prepared.scene.object.name == "board"
     assert prepared.scene.object.trajectory is not None
     assert prepared.metadata["source"] == "motion_sync"
+
+
+def test_skateboarding_recipe_builds_problem_from_typed_source() -> None:
+    robot = robots.get("synthetic_humanoid")
+    fmt = motion_formats.get(MotionFormat.MINIMAL)
+
+    @dataclass(frozen=True)
+    class FakeSkateboardingSource:
+        name: str = "fake_skate"
+
+        def prepare(self, _robot) -> PreparedRetargetingInputs:
+            motion = MotionSequence(
+                name=self.name,
+                joint_names=fmt.joint_names,
+                joint_positions=np.zeros((2, len(fmt.joint_names), 3), dtype=np.float64),
+                source_height_m=1.7,
+            )
+            scene = SceneSpec.object_interaction(
+                ObjectSpec(
+                    name="board",
+                    sample_points=np.zeros((1, 3), dtype=np.float64),
+                    trajectory=ObjectTrajectory.identity(motion.frame_count, fps=motion.fps, name="board"),
+                )
+            )
+            return PreparedRetargetingInputs(
+                motion=motion,
+                scene=scene,
+                motion_format=fmt,
+                metadata={"source": "fake"},
+            )
+
+    recipe = SkateboardingRetargetingRecipe(source=FakeSkateboardingSource())
+
+    problem = recipe.build_problem(robot)
+
+    assert problem.name == "fake_skate"
+    assert problem.motion_format is fmt
+    assert problem.scene.task_kind == TaskKind.OBJECT_INTERACTION
+    assert problem.scale_to_robot is False
+    non_penetration = problem.constraints[-1]
+    assert non_penetration.sources == (NonPenetrationSource.SUPPORT, NonPenetrationSource.SCENE_POINTS)

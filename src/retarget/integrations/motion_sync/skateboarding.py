@@ -3,15 +3,42 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from retarget.core.enums import FrameConvention, QuaternionOrder, TaskKind
+from retarget.core.enums import (
+    ContactPatch,
+    ContactState,
+    ContactSubject,
+    FrameConvention,
+    GeometryName,
+    MotionFormat,
+    MotionJoint,
+    NonPenetrationSource,
+    QuaternionOrder,
+    SolverBackend,
+    TaskKind,
+)
 from retarget.core.pose import convert_points_frame, reorder_quaternion
-from retarget.integrations.motion_sync import PreparedRetargetInputs, contact_plan_from_sync_clip, from_sync_clip
+from retarget.integrations.motion_sync import contact_plan_from_sync_clip, from_sync_clip
+from retarget.motion import motion_formats
 from retarget.motion.targets import LinkTargetPlan
+from retarget.optimization.spec import (
+    FootStickingConstraintConfig,
+    JointLimitsConstraintConfig,
+    LinkTrackingObjectiveConfig,
+    NominalTrackingObjectiveConfig,
+    NonPenetrationConstraintConfig,
+    SmoothnessObjectiveConfig,
+    SolverSpec,
+    TrustRegionConstraintConfig,
+)
+from retarget.pipeline.problem import RetargetingProblem
+from retarget.pipeline.recipe import PreparedRetargetingInputs
+from retarget.robots.spec import RobotSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DEMO = "pushoff5_twoshoes"
@@ -43,6 +70,146 @@ DECK_SAMPLE_POINTS = np.asarray(
 )
 
 
+class SkateboardingMotionJoint(MotionJoint):
+    """SMPL-X/core joints used by the skateboarding recipe."""
+
+    PELVIS = "Pelvis"
+    LEFT_FOOT = "L_Foot"
+    RIGHT_FOOT = "R_Foot"
+    LEFT_TOE = "L_Toe"
+    RIGHT_TOE = "R_Toe"
+
+
+class SkateboardingContactSubject(ContactSubject):
+    """Synchronized contact subjects used by the skateboarding recipe."""
+
+    LEFT_SHOE = "left_shoe"
+    RIGHT_SHOE = "right_shoe"
+    SKATEBOARD = "skateboard"
+
+
+class SkateboardingContactState(ContactState):
+    """Contact state labels expected from the foot-support layer."""
+
+    AIR = "air"
+    GROUND = "ground"
+    SKATEBOARD = "skateboard"
+
+
+class SkateboardingContactPatch(ContactPatch):
+    """Named contact patches for skateboarding tasks."""
+
+    LEFT_SHOE_SOLE = "left_shoe_sole"
+    RIGHT_SHOE_SOLE = "right_shoe_sole"
+    DECK = "deck"
+
+
+class SkateboardingGeometryName(GeometryName):
+    """Geometry groups owned by the retarget skateboarding recipe."""
+
+    DECK = "skateboard_deck"
+    GROUND = "ground"
+
+
+@dataclass(frozen=True)
+class SkateboardingClipSource:
+    """Typed loader for a synchronized skateboarding capture clip."""
+
+    synced_path: Path
+    name: str = ""
+    max_frames: int | None = None
+    height_m: float | None = None
+    force_contacts: bool = False
+    save_contact_layer: bool = False
+
+    def prepare(self, robot: RobotSpec) -> PreparedRetargetingInputs:
+        """Load source data and map contact subjects to ``robot`` contact links."""
+
+        return from_skateboarding_clip(
+            self.synced_path,
+            name=self.name,
+            max_frames=self.max_frames,
+            height_m=self.height_m,
+            force_contacts=self.force_contacts,
+            save_contact_layer=self.save_contact_layer,
+            contact_links=robot.contact_links,
+        )
+
+
+@dataclass(frozen=True)
+class SkateboardingRetargetingRecipe:
+    """Build the standard skateboarding retargeting problem from a typed source."""
+
+    source: SkateboardingClipSource
+    scale_to_robot: bool = False
+    output_fps: float | None = None
+    show_progress: bool = False
+    solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL
+
+    @classmethod
+    def from_clip(
+        cls,
+        synced_path: Path,
+        *,
+        name: str = "",
+        max_frames: int | None = None,
+        height_m: float | None = None,
+        force_contacts: bool = False,
+        save_contact_layer: bool = False,
+        scale_to_robot: bool = False,
+        output_fps: float | None = None,
+        show_progress: bool = False,
+        solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL,
+    ) -> SkateboardingRetargetingRecipe:
+        """Construct the recipe from a synced clip path."""
+
+        return cls(
+            source=SkateboardingClipSource(
+                synced_path=synced_path,
+                name=name,
+                max_frames=max_frames,
+                height_m=height_m,
+                force_contacts=force_contacts,
+                save_contact_layer=save_contact_layer,
+            ),
+            scale_to_robot=scale_to_robot,
+            output_fps=output_fps,
+            show_progress=show_progress,
+            solver_backend=solver_backend,
+        )
+
+    def build_problem(self, robot: RobotSpec) -> RetargetingProblem:
+        """Return the complete skateboarding retargeting problem for ``robot``."""
+
+        prepared = self.source.prepare(robot)
+        return prepared.build_problem(
+            name=self.source.name or prepared.motion.name,
+            task_kind=TaskKind.OBJECT_INTERACTION,
+            robot=robot,
+            solver=SolverSpec(backend=self.solver_backend, max_iterations=10, trust_radius=0.2),
+            objectives=(
+                LinkTrackingObjectiveConfig(weight=1.0),
+                SmoothnessObjectiveConfig(weight=0.2),
+                NominalTrackingObjectiveConfig(weight=5.0),
+            ),
+            constraints=(
+                JointLimitsConstraintConfig(),
+                TrustRegionConstraintConfig(),
+                FootStickingConstraintConfig(tolerance=1e-3),
+                NonPenetrationConstraintConfig(
+                    sources=(NonPenetrationSource.SUPPORT, NonPenetrationSource.SCENE_POINTS),
+                    links=robot.contact_links,
+                    scene_clearance=0.015,
+                    activation_distance=0.05,
+                ),
+            ),
+            scale_to_robot=self.scale_to_robot,
+            output_fps=self.output_fps or prepared.motion.fps,
+            show_progress=self.show_progress,
+            metadata={"example": "skateboarding"},
+        )
+
+
 def from_skateboarding_clip(
     synced_path: Path,
     *,
@@ -52,7 +219,7 @@ def from_skateboarding_clip(
     force_contacts: bool = False,
     save_contact_layer: bool = False,
     contact_links: tuple[str, ...] = (),
-) -> PreparedRetargetInputs:
+) -> PreparedRetargetingInputs:
     """Build retarget-ready inputs from a synchronized skateboarding clip."""
 
     ecosystem = _load_ecosystem()
@@ -134,18 +301,19 @@ def from_skateboarding_clip(
         targets=targets,
         contact_layer=None,
         support=contact_plan.support if contact_plan is not None else None,
-        object_name="skateboard",
+        object_name=SkateboardingContactSubject.SKATEBOARD.value,
         object_positions=board_positions,
         object_quaternions=board_quaternions,
         object_sample_points=DECK_SAMPLE_POINTS,
         task_kind=TaskKind.OBJECT_INTERACTION,
         metadata=metadata,
     )
-    return PreparedRetargetInputs(
+    return PreparedRetargetingInputs(
         motion=prepared.motion,
         scene=prepared.scene.model_copy(update={"ground_range": (-3.0, 3.0), "ground_size": 15}),
         contacts=contact_plan,
         targets=targets,
+        motion_format=motion_formats.get(MotionFormat.SMPLX),
         metadata={**prepared.metadata, **metadata},
     )
 

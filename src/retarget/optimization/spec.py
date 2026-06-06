@@ -7,10 +7,15 @@ from typing import Annotated, Literal, Self, TypeAlias, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from retarget.core.enums import Constraint, Objective, SolverBackend
-
-ConvergenceMode: TypeAlias = Literal["step_norm", "cost_plateau", "none"]
-NonPenetrationSource: TypeAlias = Literal["support", "scene_points", "geometry"]
+from retarget.core.enums import (
+    Constraint,
+    ConvergenceMode,
+    GeometrySource,
+    NominalFallback,
+    NonPenetrationSource,
+    Objective,
+    SolverBackend,
+)
 
 
 class SolverSpec(BaseModel):
@@ -23,7 +28,7 @@ class SolverSpec(BaseModel):
     first_frame_iterations: int | None = None
     trust_radius: float = 0.2
     tolerance: float = 1e-6
-    convergence: ConvergenceMode = "step_norm"
+    convergence: ConvergenceMode = ConvergenceMode.STEP_NORM
     cost_atol: float = 1e-8
     cost_rtol: float = 1e-5
     verbose: bool = False
@@ -123,7 +128,7 @@ class NominalTrackingObjectiveConfig(ObjectiveConfig):
     weight: float = 5.0
     joint_names: tuple[str, ...] = ()
     qpos_indices: tuple[int, ...] = ()
-    fallback: Literal["zero", "current"] = "zero"
+    fallback: NominalFallback = NominalFallback.ZERO
 
     @field_validator("joint_names", mode="before")
     @classmethod
@@ -311,8 +316,12 @@ class NonPenetrationConstraintConfig(ConstraintConfig):
 
     kind: Literal["non_penetration"] = Constraint.NON_PENETRATION.value
     links: tuple[str, ...] = ()
-    sources: tuple[NonPenetrationSource, ...] = ("support", "scene_points", "geometry")
-    geometry_source: Literal["explicit", "backend_candidates"] = "explicit"
+    sources: tuple[NonPenetrationSource, ...] = (
+        NonPenetrationSource.SUPPORT,
+        NonPenetrationSource.SCENE_POINTS,
+        NonPenetrationSource.GEOMETRY,
+    )
+    geometry_source: GeometrySource = GeometrySource.EXPLICIT
     geometry_pairs: tuple[tuple[str, str], ...] = ()
     scene_geometry_keywords: tuple[str, ...] = ()
     excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...] = ()
@@ -341,21 +350,16 @@ class NonPenetrationConstraintConfig(ConstraintConfig):
             value = (value,)
         if not isinstance(value, Iterable):
             raise ValueError("sources must be a string or iterable of strings")
-        valid = {"support", "scene_points", "geometry"}
         normalized: list[NonPenetrationSource] = []
         for item in value:
-            source = str(item)
-            if source not in valid:
+            try:
+                source = NonPenetrationSource(str(item))
+            except ValueError as exc:
                 raise ValueError(
                     "non-penetration sources must be one of 'support', 'scene_points', or 'geometry'"
-                )
+                ) from exc
             if source not in normalized:
-                if source == "support":
-                    normalized.append("support")
-                elif source == "scene_points":
-                    normalized.append("scene_points")
-                else:
-                    normalized.append("geometry")
+                normalized.append(source)
         return tuple(normalized)
 
     @field_validator("geometry_pairs", mode="before")
@@ -565,7 +569,7 @@ class OptimizationProfile(BaseModel):
             objectives=(
                 LaplacianObjectiveConfig(weight=10.0),
                 SmoothnessObjectiveConfig(weight=0.2),
-                NominalTrackingObjectiveConfig(weight=5.0, fallback="current"),
+                NominalTrackingObjectiveConfig(weight=5.0, fallback=NominalFallback.CURRENT),
                 DiagonalRegularizationObjectiveConfig(
                     weight=1.0,
                     qpos_weights=qpos_weights,
@@ -577,7 +581,7 @@ class OptimizationProfile(BaseModel):
                 TrustRegionConstraintConfig(radius=0.2),
                 FootStickingConstraintConfig(tolerance=1e-3),
                 NonPenetrationConstraintConfig(
-                    sources=("geometry",),
+                    sources=(NonPenetrationSource.GEOMETRY,),
                     tolerance=1e-3,
                     scene_clearance=1e-3,
                     geometry_pairs=geometry_pairs,

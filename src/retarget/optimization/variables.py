@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from retarget.core.array import FloatArray
+from retarget.core.enums import QposVariableKind
 from retarget.robots.spec import RobotSpec
-
-QposVariableKind = Literal["actuated", "qpos_slice", "qpos_indices"]
 
 
 @dataclass(frozen=True)
@@ -99,7 +98,7 @@ class QposVariableSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: QposVariableKind = "actuated"
+    kind: QposVariableKind = QposVariableKind.ACTUATED
     start: int | None = None
     stop: int | None = None
     indices: tuple[int, ...] = ()
@@ -111,7 +110,7 @@ class QposVariableSpec(BaseModel):
     def actuated(cls) -> Self:
         """Return the default actuated-joint variable policy."""
 
-        return cls(kind="actuated")
+        return cls(kind=QposVariableKind.ACTUATED)
 
     @classmethod
     def qpos_slice(
@@ -123,13 +122,13 @@ class QposVariableSpec(BaseModel):
     ) -> Self:
         """Return a contiguous qpos variable policy."""
 
-        return cls(kind="qpos_slice", start=start, stop=stop, normalize_quaternion=normalize_quaternion)
+        return cls(kind=QposVariableKind.QPOS_SLICE, start=start, stop=stop, normalize_quaternion=normalize_quaternion)
 
     @classmethod
     def qpos_indices(cls, indices: tuple[int, ...], *, normalize_quaternion: bool = True) -> Self:
         """Return an explicit qpos-index variable policy."""
 
-        return cls(kind="qpos_indices", indices=indices, normalize_quaternion=normalize_quaternion)
+        return cls(kind=QposVariableKind.QPOS_INDICES, indices=indices, normalize_quaternion=normalize_quaternion)
 
     @classmethod
     def from_actuated_start_offset(cls, offset: int, *, stop: int | None = None) -> Self:
@@ -141,7 +140,7 @@ class QposVariableSpec(BaseModel):
         joints.
         """
 
-        return cls(kind="qpos_slice", actuated_start_offset=offset, stop=stop)
+        return cls(kind=QposVariableKind.QPOS_SLICE, actuated_start_offset=offset, stop=stop)
 
     @classmethod
     def holosoma_q_a(cls, q_a_init_idx: int = -7) -> Self:
@@ -151,7 +150,7 @@ class QposVariableSpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate_policy(self) -> QposVariableSpec:
-        if self.kind == "actuated":
+        if self.kind == QposVariableKind.ACTUATED:
             has_extra_fields = (
                 self.start is not None
                 or self.stop is not None
@@ -160,7 +159,7 @@ class QposVariableSpec(BaseModel):
             )
             if has_extra_fields:
                 raise ValueError("actuated variables do not accept start, stop, indices, or actuated_start_offset")
-        elif self.kind == "qpos_slice":
+        elif self.kind == QposVariableKind.QPOS_SLICE:
             if self.indices:
                 raise ValueError("qpos_slice variables do not accept explicit indices")
             if self.start is None and self.actuated_start_offset is None:
@@ -219,9 +218,9 @@ class QposVariableSpec(BaseModel):
         layout = robot.qpos_layout
         joint_stop = layout.joint_start + robot.dof
         raw: Iterable[int]
-        if self.kind == "actuated":
+        if self.kind == QposVariableKind.ACTUATED:
             raw = range(layout.joint_start, joint_stop)
-        elif self.kind == "qpos_slice":
+        elif self.kind == QposVariableKind.QPOS_SLICE:
             start = (
                 layout.joint_start + self.actuated_start_offset
                 if self.actuated_start_offset is not None

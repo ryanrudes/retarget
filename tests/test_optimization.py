@@ -4,6 +4,7 @@ import numpy as np
 
 import retarget.optimization.solvers as solver_module
 from retarget import RetargetingProblem, SceneSpec, TaskKind
+from retarget.core.enums import NominalFallback, NonPenetrationSource, SolverBackend
 from retarget.kinematics.backends import SimpleKinematicsBackend
 from retarget.motion import ContactPlan, ContactTrack, LinkTargetPlan, MotionSequence, SupportPlane
 from retarget.optimization import (
@@ -140,7 +141,7 @@ def test_optimization_profile_builders_replace_and_validate_terms():
     non_penetration = profile.constraint("non_penetration")
     assert isinstance(non_penetration, NonPenetrationConstraintConfig)
     assert non_penetration.scene_clearance == 0.03
-    profile.validate_registry_references(SolverSpec(backend="numpy_least_squares"))
+    profile.validate_registry_references(SolverSpec(backend=SolverBackend.NUMPY_LEAST_SQUARES))
 
 
 def test_task_profile_presets_include_scene_constraints():
@@ -268,11 +269,14 @@ def test_nominal_tracking_current_fallback_penalizes_step_not_absolute_pose():
 
     zero_target = NominalTrackingObjective().build(
         context,
-        NominalTrackingObjectiveConfig(qpos_indices=(robot.qpos_layout.joint_start,), fallback="zero"),
+        NominalTrackingObjectiveConfig(qpos_indices=(robot.qpos_layout.joint_start,), fallback=NominalFallback.ZERO),
     )[0]
     current_target = NominalTrackingObjective().build(
         context,
-        NominalTrackingObjectiveConfig(qpos_indices=(robot.qpos_layout.joint_start,), fallback="current"),
+        NominalTrackingObjectiveConfig(
+            qpos_indices=(robot.qpos_layout.joint_start,),
+            fallback=NominalFallback.CURRENT,
+        ),
     )[0]
 
     assert np.allclose(zero_target.target, [-0.75])
@@ -459,8 +463,11 @@ def test_non_penetration_sources_gate_constraint_builders():
     )
     context = replace(_basic_context(problem, backend, qpos), contact_frame=contacts.frame(0))
 
-    config = NonPenetrationConstraintConfig(links=("left_toe",), sources=("geometry", "geometry"))
+    config = NonPenetrationConstraintConfig(
+        links=("left_toe",),
+        sources=(NonPenetrationSource.GEOMETRY, NonPenetrationSource.GEOMETRY),
+    )
     contribution = NonPenetrationConstraint().build(context, config)
 
-    assert config.sources == ("geometry",)
+    assert config.sources == (NonPenetrationSource.GEOMETRY,)
     assert contribution.linear_constraints == ()

@@ -10,10 +10,10 @@ from numpy.typing import NDArray
 from scipy import sparse
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import Constraint, Objective
+from retarget.core.enums import Constraint, GeometrySource, NominalFallback, NonPenetrationSource, Objective
 from retarget.kinematics.types import GeometryDistanceJacobian
 from retarget.mesh.interaction import laplacian_matrix
-from retarget.motion.contact import SupportPlane
+from retarget.motion.support import SupportPlane
 from retarget.optimization.problem import (
     ConstraintContribution,
     LinearConstraint,
@@ -294,11 +294,11 @@ class NonPenetrationConstraint:
         """Constrain robot contacts away from ground and sampled scene geometry."""
 
         constraints: list[LinearConstraint] = []
-        if "support" in config.sources:
+        if NonPenetrationSource.SUPPORT in config.sources:
             constraints.extend(ground_non_penetration_constraints(context=context, config=config))
-        if "scene_points" in config.sources:
+        if NonPenetrationSource.SCENE_POINTS in config.sources:
             constraints.extend(scene_non_penetration_constraints(context=context, config=config))
-        if "geometry" in config.sources:
+        if NonPenetrationSource.GEOMETRY in config.sources:
             constraints.extend(geometry_non_penetration_constraints(context=context, config=config))
         return ConstraintContribution(linear_constraints=tuple(constraints))
 
@@ -474,7 +474,7 @@ def geometry_non_penetration_constraints(
     """Build backend geometry non-penetration constraints."""
 
     max_distance = config.activation_distance or config.scene_clearance
-    if config.geometry_source == "backend_candidates":
+    if config.geometry_source == GeometrySource.BACKEND_CANDIDATES:
         distances = _candidate_geom_distance_jacobians_for_context(
             context,
             max_distance=max_distance,
@@ -744,7 +744,9 @@ def _nominal_qpos_rows(
         if col is None:
             continue
         if frame is None:
-            target_value = context.current_variable_values[col] if config.fallback == "current" else 0.0
+            target_value = (
+                context.current_variable_values[col] if config.fallback == NominalFallback.CURRENT else 0.0
+            )
             rows.append((col, float(target_value), 1.0))
             continue
         if qpos_idx >= frame.plan.qpos_size or not frame.active_at(qpos_idx):

@@ -1,5 +1,12 @@
 """Optimization models and solvers."""
 
+from retarget.core.enums import (
+    ConvergenceMode,
+    GeometrySource,
+    NominalFallback,
+    NonPenetrationSource,
+    QposVariableKind,
+)
 from retarget.optimization.problem import (
     ConstraintContribution,
     LinearConstraint,
@@ -18,7 +25,6 @@ from retarget.optimization.solvers import (
 from retarget.optimization.spec import (
     ConstraintConfig,
     ConstraintConfigUnion,
-    ConvergenceMode,
     DiagonalRegularizationObjectiveConfig,
     FootLockConstraintConfig,
     FootStickingConstraintConfig,
@@ -27,7 +33,6 @@ from retarget.optimization.spec import (
     LinkTrackingObjectiveConfig,
     NominalTrackingObjectiveConfig,
     NonPenetrationConstraintConfig,
-    NonPenetrationSource,
     ObjectiveConfig,
     ObjectiveConfigUnion,
     OptimizationProfile,
@@ -50,7 +55,7 @@ from retarget.optimization.terms import (
     TrustRegionConstraint,
 )
 from retarget.optimization.validation import validate_optimization_references
-from retarget.optimization.variables import QposVariableKind, QposVariableSpec, ResolvedQposVariables
+from retarget.optimization.variables import QposVariableSpec, ResolvedQposVariables
 
 __all__ = [
     "ConstraintConfig",
@@ -64,6 +69,7 @@ __all__ = [
     "FootLockConstraintConfig",
     "FootStickingConstraint",
     "FootStickingConstraintConfig",
+    "GeometrySource",
     "JointLimitConstraint",
     "JointLimitsConstraintConfig",
     "LaplacianObjective",
@@ -71,6 +77,7 @@ __all__ = [
     "LinearConstraint",
     "LinkTrackingObjective",
     "LinkTrackingObjectiveConfig",
+    "NominalFallback",
     "NominalTrackingObjective",
     "NominalTrackingObjectiveConfig",
     "NonPenetrationConstraint",

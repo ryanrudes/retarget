@@ -156,12 +156,11 @@ def _export_entries() -> list[tuple[str, bool]]:
     entries: list[tuple[str, bool]] = []
     for name in retarget.__all__:
         obj = getattr(retarget, name)
-        full = (
-            _qualname(obj)
-            or REGISTRY_EXPORT_ANCHORS.get(name)
-            or f"retarget.{name}"
-        )
-        entries.append((full, True))
+        canonical = _qualname(obj) or REGISTRY_EXPORT_ANCHORS.get(name)
+        if canonical:
+            entries.append((canonical, True))
+        if name not in REGISTRY_EXPORT_ANCHORS:
+            entries.append((f"retarget.{name}", True))
     for module in (retarget.motion,):
         for name in getattr(module, "__all__", ()):
             obj = getattr(module, name)

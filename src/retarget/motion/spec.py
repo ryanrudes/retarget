@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -10,10 +9,9 @@ from numpy.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.array import FloatArray, as_float_array
-from retarget.core.enums import FrameConvention, QuaternionOrder
+from retarget.core.enums import FrameConvention, MotionJoint, QuaternionOrder
 from retarget.core.pose import PoseSequence, convert_points_frame
-from retarget.core.timing import resample_linear, resampling_times
-from retarget.motion.support import SupportPlane
+from retarget.core.timing import resample_linear
 
 
 class MotionFormatSpec(BaseModel):
@@ -21,9 +19,8 @@ class MotionFormatSpec(BaseModel):
 
     Attributes:
         name (str): Registry key and display name for the format.
-        joint_names (tuple[str, ...]): Ordered joint labels expected in motion data.
+        joint_vocabulary (type[MotionJoint]): Ordered enum defining the motion joints.
         root_joint (str): Kinematic root joint (must appear in ``joint_names``).
-        contact_joints (tuple[str, ...]): Joints used for foot/contact inference.
         quaternion_order (QuaternionOrder): Expected root-rotation storage order.
         frame_convention (FrameConvention): World-frame axis convention for positions.
         default_fps (float): Fallback sampling rate when a file omits ``fps``.
@@ -31,36 +28,60 @@ class MotionFormatSpec(BaseModel):
         description (str): Human-readable format notes.
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
-    joint_names: tuple[str, ...]
-    root_joint: str
-    contact_joints: tuple[str, ...] = ()
+    joint_vocabulary: type[MotionJoint]
+    root_joint: MotionJoint
     quaternion_order: QuaternionOrder = QuaternionOrder.WXYZ
     frame_convention: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
     default_fps: float = 30.0
     default_height_m: float | None = None
     description: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_vocabulary_members(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        vocabulary = value.get("joint_vocabulary")
+        if not isinstance(vocabulary, type) or not issubclass(vocabulary, MotionJoint):
+            return value
+        normalized = dict(value)
+        if "root_joint" in normalized:
+            normalized["root_joint"] = vocabulary(normalized["root_joint"])
+        return normalized
+
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        """Ordered serialized values from the declared joint vocabulary."""
+
+        return tuple(joint.value for joint in self.joint_vocabulary)
+
     @model_validator(mode="after")
     def _validate_names(self) -> MotionFormatSpec:
         if not self.name:
             raise ValueError("name must not be empty")
-        if len(set(self.joint_names)) != len(self.joint_names):
-            raise ValueError("joint_names must be unique")
-        for required in (self.root_joint, *self.contact_joints):
-            if required not in self.joint_names:
-                raise ValueError(f"{required!r} is not present in joint_names")
+        if not issubclass(self.joint_vocabulary, MotionJoint):
+            raise TypeError("joint_vocabulary must subclass MotionJoint")
+        if not self.joint_names:
+            raise ValueError("joint_vocabulary must declare at least one joint")
+        vocabulary_type = self.joint_vocabulary
+        if not isinstance(self.root_joint, vocabulary_type):
+            raise ValueError(f"{self.root_joint.value!r} is not a member of {vocabulary_type.__name__}")
         if self.default_fps <= 0:
             raise ValueError("default_fps must be positive")
         return self
 
-    def joint_index(self, name: str) -> int:
+    def joint_index(self, name: MotionJoint) -> int:
         """Return the index for a named joint."""
 
+        if not isinstance(name, self.joint_vocabulary):
+            raise KeyError(f"{name.value!r} is not a member of motion format {self.name!r}")
         try:
-            return self.joint_names.index(name)
+            return tuple(self.joint_vocabulary).index(name)
         except ValueError as exc:
-            raise KeyError(f"Unknown joint {name!r} for motion format {self.name!r}") from exc
+            raise KeyError(f"Unknown joint {name.value!r} for motion format {self.name!r}") from exc
 
 
 class MotionSequence(BaseModel):
@@ -73,9 +94,6 @@ class MotionSequence(BaseModel):
         fps (float): Sampling rate in Hz.
         frame (FrameConvention): World-frame convention for ``joint_positions``.
         root_poses (PoseSequence | None): Optional per-frame root transform track.
-        contacts (tuple[dict[str, bool], ...]): Optional per-frame contact flags keyed by joint name.
-        support (SupportPlane | None): Optional support geometry associated with contact flags.
-        contact_provenance (dict[str, Any]): Provenance for loader-provided contact flags.
         source_height_m (float | None): Source actor height used by scale-to-robot workflows.
         metadata (dict[str, Any]): Opaque sidecar fields for provenance and diagnostics.
     """
@@ -88,9 +106,6 @@ class MotionSequence(BaseModel):
     fps: float = 30.0
     frame: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
     root_poses: PoseSequence | None = None
-    contacts: tuple[dict[str, bool], ...] = ()
-    support: SupportPlane | None = None
-    contact_provenance: dict[str, Any] = Field(default_factory=dict)
     source_height_m: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -116,19 +131,28 @@ class MotionSequence(BaseModel):
             raise ValueError("source_height_m must be positive")
         return None if value is None else float(value)
 
-    @field_validator("contacts", mode="before")
+    @field_validator("metadata")
     @classmethod
-    def _validate_contacts(cls, value: Any) -> tuple[dict[str, bool], ...]:
-        if value is None or value == ():
-            return ()
-        if isinstance(value, Mapping):
-            return _contacts_from_columns(value)
-        frames: list[dict[str, bool]] = []
-        for frame in value:
-            if not isinstance(frame, Mapping):
-                raise ValueError("contacts must be a sequence of mappings or a mapping of contact columns")
-            frames.append({str(name): _coerce_bool(state) for name, state in frame.items()})
-        return tuple(frames)
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {
+            "contacts",
+            "fps",
+            "frame",
+            "height_m",
+            "joint_names",
+            "joint_positions",
+            "link_targets",
+            "root_poses",
+            "source_height_m",
+            "support",
+            "support_plane",
+        }
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError(
+                "MotionSequence metadata is provenance-only; use typed fields instead: " + ", ".join(present)
+            )
+        return dict(value)
 
     @model_validator(mode="after")
     def _validate_lengths(self) -> MotionSequence:
@@ -144,8 +168,6 @@ class MotionSequence(BaseModel):
             raise ValueError("root_poses frame count must match joint_positions")
         if self.root_poses is not None and self.root_poses.frame != self.frame:
             raise ValueError("root_poses frame must match motion frame")
-        if self.contacts and len(self.contacts) != self.frame_count:
-            raise ValueError("contacts length must match joint_positions frame count")
         return self
 
     @property
@@ -192,7 +214,7 @@ class MotionSequence(BaseModel):
             name (str | None): Optional new sequence name; keeps the current name when omitted.
 
         Returns:
-            MotionSequence: Copy sharing metadata, contacts, and timing with updated positions.
+            MotionSequence: Copy sharing metadata and timing with updated positions.
         """
 
         return MotionSequence(
@@ -202,9 +224,6 @@ class MotionSequence(BaseModel):
             fps=self.fps,
             frame=self.frame,
             root_poses=self.root_poses,
-            contacts=tuple(dict(frame) for frame in self.contacts),
-            support=self.support,
-            contact_provenance=dict(self.contact_provenance),
             source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
@@ -219,9 +238,6 @@ class MotionSequence(BaseModel):
             fps=self.fps,
             frame=self.frame,
             root_poses=self.root_poses.scaled(factor) if self.root_poses is not None else None,
-            contacts=tuple(dict(frame) for frame in self.contacts),
-            support=self.support.scaled(factor) if self.support is not None else None,
-            contact_provenance=dict(self.contact_provenance),
             source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
@@ -240,9 +256,6 @@ class MotionSequence(BaseModel):
             fps=fps,
             frame=self.frame,
             root_poses=self.root_poses.resampled(fps) if self.root_poses is not None else None,
-            contacts=_resample_contacts(self.contacts, self.fps, fps),
-            support=self.support,
-            contact_provenance=dict(self.contact_provenance),
             source_height_m=self.source_height_m,
             metadata=metadata,
         )
@@ -258,9 +271,6 @@ class MotionSequence(BaseModel):
                 fps=self.fps,
                 frame=self.frame,
                 root_poses=self.root_poses,
-                contacts=tuple(dict(frame) for frame in self.contacts),
-                support=self.support,
-                contact_provenance=dict(self.contact_provenance),
                 source_height_m=self.source_height_m,
                 metadata=dict(self.metadata),
             )
@@ -275,9 +285,6 @@ class MotionSequence(BaseModel):
             fps=self.fps,
             frame=target,
             root_poses=self.root_poses.to_frame(target) if self.root_poses is not None else None,
-            contacts=tuple(dict(frame) for frame in self.contacts),
-            support=self.support.to_frame(self.frame, target) if self.support is not None else None,
-            contact_provenance=dict(self.contact_provenance),
             source_height_m=self.source_height_m,
             metadata=metadata,
         )
@@ -290,8 +297,7 @@ class MotionSequence(BaseModel):
         if self.root_poses is not None:
             root_poses = PoseSequence(
                 poses=tuple(
-                    pose.model_copy(update={"translation": pose.translation - root0})
-                    for pose in self.root_poses.poses
+                    pose.model_copy(update={"translation": pose.translation - root0}) for pose in self.root_poses.poses
                 ),
                 fps=self.root_poses.fps,
             )
@@ -302,9 +308,6 @@ class MotionSequence(BaseModel):
             fps=self.fps,
             frame=self.frame,
             root_poses=root_poses,
-            contacts=tuple(dict(frame) for frame in self.contacts),
-            support=self.support,
-            contact_provenance=dict(self.contact_provenance),
             source_height_m=self.source_height_m,
             metadata=dict(self.metadata),
         )
@@ -328,42 +331,3 @@ class MotionSequence(BaseModel):
             fps=fps,
             frame=frame,
         )
-
-
-def _contacts_from_columns(value: Mapping[Any, Any]) -> tuple[dict[str, bool], ...]:
-    columns = {str(name): tuple(states) for name, states in value.items()}
-    lengths = {len(states) for states in columns.values()}
-    if len(lengths) != 1:
-        raise ValueError("contact columns must have matching lengths")
-    if not lengths:
-        return ()
-    frame_count = lengths.pop()
-    return tuple(
-        {name: _coerce_bool(states[frame_idx]) for name, states in columns.items()}
-        for frame_idx in range(frame_count)
-    )
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "t", "yes", "y", "contact", "contacting"}:
-            return True
-        if normalized in {"0", "false", "f", "no", "n", "none", "off", ""}:
-            return False
-    return bool(value)
-
-
-def _resample_contacts(
-    contacts: tuple[dict[str, bool], ...],
-    source_fps: float,
-    target_fps: float,
-) -> tuple[dict[str, bool], ...]:
-    if not contacts:
-        return ()
-    source_times, target_times = resampling_times(len(contacts), source_fps, target_fps)
-    indices = np.asarray(
-        [int(np.argmin(np.abs(source_times - target_time))) for target_time in target_times],
-        dtype=int,
-    )
-    return tuple(dict(contacts[int(index)]) for index in indices)

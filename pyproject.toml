@@ -27,6 +27,9 @@ viz = ["viser>=0.2", "yourdfpy>=0.0.56", "trimesh>=4.4"]
 torch = ["torch>=2.3"]
 smpl = ["smplx>=0.1.28"]
 eval = ["libigl>=2.5"]
+capture-ros = ["rosbags>=0.10"]
+capture-video = ["opencv-python-headless>=4.10"]
+capture-gvhmr = ["torch>=2.3", "smplx>=0.1.28"]
 all = [
   "cvxpy>=1.5",
   "clarabel>=0.9",
@@ -37,6 +40,8 @@ all = [
   "torch>=2.3",
   "smplx>=0.1.28",
   "libigl>=2.5",
+  "rosbags>=0.10",
+  "opencv-python-headless>=4.10",
 ]
 dev = [
   "pytest>=8.2",
@@ -85,6 +90,7 @@ module = [
   "viser",
   "viser.extras",
   "yaml",
+  "rosbags.*",
 ]
 ignore_missing_imports = true
 

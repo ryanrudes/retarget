@@ -1,128 +1,97 @@
-# Run configs
+# Run Configs
 
-Config files capture everything needed to reproduce a retargeting experiment: source, robot, scene, mesh topology, solver settings, typed objectives, and typed constraints. The CLI loads TOML, YAML, or JSON and resolves relative paths against the config file's directory.
-
-## Start from the example
-
-The repository ships `examples/run_config.toml`:
-
-```bash
-cd examples
-uv run retarget run --config run_config.toml
-uv run retarget evaluate --result configured_fixture.npz --config run_config.toml
-```
-
-The evaluate step reloads the same scene and metric context as the run, which matters when you set `output_fps` or scene geometry in the config.
-
-## Anatomy of a run config
-
-A minimal config names inputs and outputs:
+A run config serializes a `RetargetingExperiment`. Observation and adaptation
+are separate typed blocks.
 
 ```toml
-name = "my_run"
+name = "basic"
 robot = "synthetic_humanoid"
-task_kind = "robot_only"
-output = "my_run.npz"
+output = "basic.npz"
 
-[source]
+[observation]
 kind = "motion_file"
 path = "../tests/fixtures/minimal_motion.json"
 format = "minimal"
+
+[recipe]
+kind = "role_mapping"
+task_kind = "robot_only"
+
+[recipe.link_roles]
+Pelvis = "pelvis"
+L_Toe = "left_foot"
+R_Toe = "right_foot"
 ```
 
-Add tuning sections as experiments grow:
+`[observation]` is deserialized into an `ObservationRecipe`. `[recipe]` is
+deserialized into a `RetargetingRecipe`. Robot-role strings validate through the
+robot's declared `RobotRole` enum.
 
-| Key / section | Purpose |
-|---------------|---------|
-| `[source]` | Typed input source such as `motion_file` or `motion_sync_skateboarding` |
-| `show_progress` | Rich per-frame progress bar during optimization (also `retarget run --progress`) |
-| `[mesh]` | Interaction mesh topology (`delaunay`, `k_neighbors`, …) |
-| `[solver]` | Backend (`auto`, `numpy_least_squares`, `cvxpy_clarabel`), iterations, trust region |
-| `[scene]` | Ground grid for robot-only tasks; nested `[scene.object]` / `[scene.terrain]` for other task kinds |
-| `[[objectives]]` | Typed objective config tables with `kind` and config fields |
-| `[[constraints]]` | Typed constraint config tables with `kind` and config fields |
+## Optimization Fields
 
-The full example in `examples/run_config.toml` sets Laplacian and smoothness objectives plus joint limits, trust region, and foot-sticking constraints:
+Role-mapping recipes expose scene and optimization fields under `[recipe]`:
 
 ```toml
-scale_to_robot = true
-output_fps = 30
-
-[mesh]
+[recipe.mesh]
 topology = "delaunay"
 k_neighbors = 4
 
-[solver]
+[recipe.solver]
 backend = "auto"
 max_iterations = 8
-trust_radius = 0.2
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "laplacian"
 weight = 10.0
 
-[[constraints]]
-kind = "foot_sticking"
-tolerance = 0.001
+[[recipe.constraints]]
+kind = "joint_limits"
 ```
 
-See [Interaction mesh](../interaction-mesh.md) for how mesh settings affect the optimization geometry.
-
-## Override flags on the CLI
-
-Keep a base config in git and override paths per machine or sweep:
-
-```bash
-uv run retarget run \
-  --config examples/run_config.toml \
-  --motion /data/subject01/walk.json \
-  --output /tmp/subject01_walk.npz \
-  --name subject01_walk
-```
-
-CLI flags win over file values. This pattern is useful in Slurm or Make targets that only change `motion` and `output`.
-
-## Object and terrain scenes in config
-
-For `task_kind = "object_interaction"` or `"climbing"`, add scene blocks. Object meshes can be referenced by path; the CLI samples points when `sample_points` are omitted:
+Specialized recipes serialize their own public constructor fields:
 
 ```toml
-task_kind = "object_interaction"
+[observation]
+kind = "skateboarding"
+vicon = "/data/vicon/demo"
+gvhmr = "/data/gvhmr/demo"
+video_fps = 59.942
+timeline_selection = "human_pose"
+crop_policy = "overlap"
 
-[scene.object]
-name = "box"
-mesh_path = "/path/to/box.obj"
-mesh_sample_count = 128
-identity_trajectory = true
+[recipe]
+kind = "skateboarding"
+output_fps = 30
 ```
 
-Terrain climbing configs use `[scene.terrain]` similarly. Programmatic equivalents are in [Scenes and task kinds](scene-tasks.md) and `examples/climbing_terrain.py`.
+`timeline_selection = "uniform"` requires a `uniform_fps` value in the same
+observation block. These fields construct the same `TimelineSelection` and
+`CropPolicy` values used by the Python recipe.
 
-## Custom robots from config
+No config section implements a hidden synchronization or preparation workflow.
 
-Point `robot` at a registry name **or** provide a spec file:
+## Providers And Paths
+
+Robot providers are unchanged:
 
 ```toml
-robot = { path = "custom_robot.toml" }
+robot = "g1"
+robot_provider = "asset_store"
+
+[robot_options]
+store = "../.retarget_assets"
 ```
 
-`examples/custom_robot.toml` shows the layout. External specs work the same in Python via `RobotSpec.load`.
+Relative source, asset, output, and import paths resolve against the config
+file. CLI overrides can replace motion-file paths, output, run name, robot, or
+progress settings.
 
-## Validate before a long batch
-
-Check that paths, format names, and constraint references resolve:
+Validate a config without running optimization:
 
 ```bash
-uv run retarget doctor
-# Dry-run a single config build in Python:
 uv run python -c "
 from retarget.cli.config import RetargetingRunConfig
-cfg = RetargetingRunConfig.load('examples/run_config.toml')
-print(cfg.build_problem().name)
+cfg = RetargetingRunConfig.load('examples/basic/run_config.toml')
+print(cfg.build_experiment().build_problem().name)
 "
 ```
-
-## Next steps
-
-- Wire configs into directory sweeps: [Batch and metrics](batch-and-metrics.md)
-- Register local URDF/MJCF assets: [Assets](../assets.md)

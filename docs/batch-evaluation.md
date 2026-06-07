@@ -40,7 +40,7 @@ Built-in evaluation reports:
 
 - `optimization_cost`: mean per-frame solver objective.
 - `foot_sliding`: stance-contact xy speed when a `RetargetingProblem` is supplied; otherwise a root-motion proxy.
-- `contact_preservation`: agreement between explicit or inferred source contacts and retargeted contact-link contacts.
+- `contact_preservation`: agreement between an explicit `ContactPlan` and retargeted contact-link contacts.
 - `penetration`: ground penetration depth plus object/terrain sample-point clearance violations when a `RetargetingProblem` is supplied.
 
 Reports include result identity, frame count, qpos dimension, fps, metric units, result/problem details, and warnings. If a registered metric plugin fails or returns a non-finite value, evaluation records a warning and marks the report `partial` instead of stopping a batch run.

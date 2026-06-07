@@ -6,8 +6,6 @@ Stable `StrEnum` values used in configs, registries, results, and CLI resolution
 
 ::: retarget.core.enums.TaskKind
 
-::: retarget.core.enums.ContactMode
-
 ## Frames & rotation
 
 ::: retarget.core.enums.FrameConvention

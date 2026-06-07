@@ -1,51 +1,54 @@
 # Humanoid Skateboarding Retargeting
 
-Runnable code for the research skateboarding walkthrough. This example starts from
-`motion_sync` synced clips, uses `contact_detection` foot-support labels as
-retargeter hints, and renders the retargeted humanoid with a real URDF-backed G1
-model.
+This example runs native Vicon and GVHMR recordings through one in-memory
+`RetargetingExperiment`:
 
-Results are written under `examples/skateboarding/generated/` and are ignored by git.
+```text
+ViconRecordingSource + GvhmrOutputSource
+-> SkateboardingObservationRecipe
+-> SceneObservation
+-> SkateboardingRetargetingRecipe
+-> RetargetingResult
+```
 
-| Script | Purpose |
-|--------|---------|
-| `run_retarget.py` | Load a synced `motion_sync` clip, build typed contacts and link targets, solve, and save the result |
-| `run_config.toml` | CLI equivalent using the same `motion_sync_skateboarding` source |
+No synchronization command or synchronized archive is required. Contact
+classification produces robot-independent semantic tracks; the adaptation
+recipe resolves those tracks through robot roles.
 
 ## Setup
 
 ```bash
 uv sync --extra dev
-git submodule update --init
 uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
 ```
 
-The bootstrap script copies Holosoma's G1 URDF/MJCF assets into
-`.retarget_assets/robot/g1`, writes `.retarget_assets/robot/g1/robot.toml`, and
-registers the asset-store manifest.
-
 ## Run
 
+Pass the native recording locations directly:
+
 ```bash
-uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
+uv run python examples/skateboarding/run_retarget.py \
+  --demo pushoff5_twoshoes \
+  --vicon-root /path/to/vicon-recordings \
+  --gvhmr-root /path/to/gvhmr-output
 ```
 
-For MuJoCo-backed kinematics, install the optional stack:
+The declarative equivalent uses `run_config.toml`. It is deserialized into the
+same two recipes and experiment:
+
+```bash
+uv run retarget run --config examples/skateboarding/run_config.toml
+```
+
+For MuJoCo-backed kinematics:
 
 ```bash
 uv sync --extra mujoco
-uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --kinematics mujoco
+uv run python examples/skateboarding/run_retarget.py \
+  --demo pushoff5_twoshoes \
+  --vicon-root /path/to/vicon-recordings \
+  --gvhmr-root /path/to/gvhmr-output \
+  --kinematics mujoco
 ```
 
-## View
-
-```bash
-uv sync --extra viz
-uv run retarget view \
-  --result examples/skateboarding/generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz \
-  --live \
-  --robot-spec .retarget_assets/robot/g1/robot.toml
-```
-
-Live robot playback requires a valid URDF. Missing robot assets are treated as a
-setup error rather than drawn as point or line primitives.
+Results are written under `examples/skateboarding/generated/`.

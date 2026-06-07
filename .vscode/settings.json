@@ -1,8 +1,7 @@
 {
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.analysis.extraPaths": [
-        "${workspaceFolder}/vendor/motion_sync",
-        "${workspaceFolder}/vendor/event_detection/src"
+        "${workspaceFolder}/src"
     ],
     "python.testing.pytestArgs": [
         "tests"

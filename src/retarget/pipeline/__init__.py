@@ -2,8 +2,9 @@
 
 from retarget.pipeline.batch import BatchJob, BatchManifest, BatchRunner, BatchRunRecord, BatchWorker
 from retarget.pipeline.engine import EngineOutput, InteractionMeshRetargetingEngine
+from retarget.pipeline.experiment import RetargetingExperiment
 from retarget.pipeline.problem import RetargetingProblem
-from retarget.pipeline.recipe import PreparedRetargetingInputs, RetargetingRecipe, RetargetingSource
+from retarget.pipeline.recipe import ObservationRecipe, RetargetingRecipe, SceneRecipe
 from retarget.pipeline.retargeter import Retargeter
 
 __all__ = [
@@ -14,9 +15,10 @@ __all__ = [
     "BatchWorker",
     "EngineOutput",
     "InteractionMeshRetargetingEngine",
-    "PreparedRetargetingInputs",
+    "ObservationRecipe",
     "Retargeter",
+    "RetargetingExperiment",
     "RetargetingProblem",
     "RetargetingRecipe",
-    "RetargetingSource",
+    "SceneRecipe",
 ]

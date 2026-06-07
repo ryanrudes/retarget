@@ -18,9 +18,8 @@ class DemoMotionJoint(MotionJoint):
 def my_format() -> MotionFormatSpec:
     return MotionFormatSpec(
         name=DemoMotionFormat.MINIMAL_LOWER_BODY,
-        joint_names=(DemoMotionJoint.ROOT, DemoMotionJoint.LEFT_TOE, DemoMotionJoint.RIGHT_TOE),
+        joint_vocabulary=DemoMotionJoint,
         root_joint=DemoMotionJoint.ROOT,
-        contact_joints=(DemoMotionJoint.LEFT_TOE, DemoMotionJoint.RIGHT_TOE),
         default_height_m=1.75,
     )
 

@@ -1,84 +1,92 @@
 # Add A Robot
 
-Create a `RobotSpec` with joint names, height, limits, contact links, optional asset paths, and mappings for both actuated joints and retargeted links. For manifests and installing URDF/MJCF into a local store, see [Assets](assets.md).
-
-`default_joint_mapping` maps motion joints to actuated robot joints for nominal tracking or simple IK-style terms. `default_link_mapping` maps motion joints to robot body/link points used by the interaction mesh.
+`RobotSpec` binds a robot-specific joint and link vocabulary to semantic roles.
+Observation and retargeting recipes depend on roles, not spelling conventions
+or side-name heuristics.
 
 ```python
+from retarget import RobotJoint, RobotLink, RobotRole
 from retarget.robots import RobotSpec, robots
 
-@robots.register("my_robot")
-def my_robot() -> RobotSpec:
+
+class LabRole(RobotRole):
+    PELVIS = "pelvis"
+    LEFT_FOOT = "left_foot"
+
+
+class LabJoint(RobotJoint):
+    HIP = "hip"
+    KNEE = "knee"
+
+
+class LabLink(RobotLink):
+    PELVIS = "pelvis_link"
+    LEFT_FOOT = "left_foot_link"
+
+
+@robots.register("lab_robot")
+def lab_robot() -> RobotSpec:
     return RobotSpec(
-        name="my_robot",
+        name="lab_robot",
         dof=2,
         height_m=1.0,
-        joint_names=("hip", "knee"),
-        link_names=("pelvis", "left_foot"),
-        contact_links=("left_foot",),
-        joint_limits={"hip": (-1.0, 1.0), "knee": (-2.0, 0.0)},
+        joint_names=tuple(LabJoint),
+        link_names=tuple(LabLink),
+        contact_links=(LabLink.LEFT_FOOT,),
+        joint_limits={
+            LabJoint.HIP: (-1.0, 1.0),
+            LabJoint.KNEE: (-2.0, 0.0),
+        },
+        role_vocabulary=LabRole,
+        joint_roles={LabRole.PELVIS: LabJoint.HIP},
+        link_roles={
+            LabRole.PELVIS: LabLink.PELVIS,
+            LabRole.LEFT_FOOT: LabLink.LEFT_FOOT,
+        },
     )
 ```
 
-For asset-backed families, implement `RobotProvider` and register it in `robot_providers` so the provider can resolve local manifests or optional downloads while the high-level API still receives a validated `RobotSpec`.
+`RobotSpec` normalizes enum values for serialization while retaining and
+validating the declared `role_vocabulary`. A retargeting recipe must pass
+members of that exact role enum to `joint_for_role`, `link_for_role`, and
+`links_for_role`.
 
-Built-in `g1_like` and `t1_like` specs are readable humanoid templates with named joints, contact links, default motion mappings, and conservative limits. They are useful for experiments with the simple backend or as starting points for local asset-backed specs; for real simulator runs, load a project-specific spec that points at your URDF or MJCF.
+Geometry names, MuJoCo body aliases, asset paths, qpos layout, and nominal joint
+selection are explicit fields. `metadata` is provenance-only and must not
+control behavior.
 
-When using the MuJoCo backend, limited hinge and slide ranges are read from the MJCF model. `joint_limits` in the `RobotSpec` act as explicit overrides, so you can tighten simulator ranges or patch an asset without editing the upstream file.
+## File Specs
 
-Robot specs can also live outside Python code:
+TOML and YAML cannot serialize Python enum classes, so file-backed specs use
+the standard `HumanoidRobotRole` vocabulary and its string values:
 
 ```toml
-name = "my_robot"
+name = "two_joint_bot"
 dof = 2
 height_m = 1.0
 joint_names = ["hip", "knee"]
 link_names = ["pelvis", "left_foot"]
 contact_links = ["left_foot"]
 
-[joint_limits]
-hip = [-1.0, 1.0]
-knee = [-2.0, 0.0]
+[joint_roles]
+pelvis = "hip"
+left_knee = "knee"
+
+[link_roles]
+pelvis = "pelvis"
+left_foot = "left_foot"
 ```
 
-Load one directly:
+Load file and asset-store specs through the same provider API:
 
 ```python
 from retarget.robots import robot_providers
 
-robot = robot_providers.get("file").load("my_robot", path="examples/custom_robot.toml")
+robot = robot_providers.get("file").load(
+    "two_joint_bot",
+    path="examples/custom_robot.toml",
+)
 ```
 
-Or install a robot directory/file into an asset store and resolve it by name:
-
-```bash
-retarget assets import /path/to/robot_dir --name my_robot --kind robot
-```
-
-```python
-robot = robot_providers.get("asset_store").load("my_robot", store=".retarget_assets")
-```
-
-For directories, the asset-store provider looks for `robot.toml`, `robot.yaml`, `robot.yml`, or `robot.json` unless `spec_filename` is supplied.
-
-CLI run specs use the same provider system:
-
-```toml
-robot = "my_robot"
-robot_provider = "file"
-
-[robot_options]
-path = "examples/custom_robot.toml"
-```
-
-For an asset store:
-
-```toml
-robot = "my_robot"
-robot_provider = "asset_store"
-
-[robot_options]
-store = ".retarget_assets"
-```
-
-Relative provider paths are resolved against the run config file.
+Use a custom Python `RobotSpec` when the standard humanoid role vocabulary is
+not appropriate. Asset paths remain explicit fields regardless of provider.

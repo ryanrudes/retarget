@@ -25,6 +25,40 @@ class MotionJoint(NameEnum):
     """Base enum for source motion joint names."""
 
 
+class MocapRigidBody(NameEnum):
+    """Base enum for native motion-capture rigid-body names."""
+
+
+class MocapMarker(NameEnum):
+    """Base enum for native motion-capture marker names."""
+
+
+class ObservationRole(NameEnum):
+    """Base enum for target-independent semantic observation roles."""
+
+
+class RobotRole(NameEnum):
+    """Base enum for semantic roles resolved by a robot specification."""
+
+
+class HumanoidRobotRole(RobotRole):
+    """Standard semantic roles exposed by humanoid robot specs."""
+
+    PELVIS = "pelvis"
+    TORSO = "torso"
+    HEAD = "head"
+    LEFT_HIP = "left_hip"
+    LEFT_KNEE = "left_knee"
+    LEFT_ANKLE = "left_ankle"
+    LEFT_FOOT = "left_foot"
+    RIGHT_HIP = "right_hip"
+    RIGHT_KNEE = "right_knee"
+    RIGHT_ANKLE = "right_ankle"
+    RIGHT_FOOT = "right_foot"
+    LEFT_HAND = "left_hand"
+    RIGHT_HAND = "right_hand"
+
+
 class ContactSubject(NameEnum):
     """Base enum for contact subjects such as feet, shoes, or hands."""
 
@@ -127,13 +161,38 @@ class RobotProviderName(StrEnum):
     REGISTRY = "registry"
     FILE = "file"
     ASSET_STORE = "asset_store"
+    HOLOSOMA = "holosoma"
 
 
-class RunSourceKind(RetargetEnum):
-    """Built-in run-source kinds for declarative run configs."""
+class ObservationRecipeKind(RetargetEnum):
+    """Built-in observation-recipe kinds for declarative run configs."""
 
     MOTION_FILE = "motion_file"
-    MOTION_SYNC_SKATEBOARDING = "motion_sync_skateboarding"
+    SKATEBOARDING = "skateboarding"
+    HOLOSOMA_CLIMB = "holosoma_climb"
+
+
+class RetargetingRecipeKind(RetargetEnum):
+    """Built-in robot-adaptation recipe kinds for declarative run configs."""
+
+    ROLE_MAPPING = "role_mapping"
+    SKATEBOARDING = "skateboarding"
+    HOLOSOMA_CLIMB = "holosoma_climb"
+
+
+class TimelineSelection(RetargetEnum):
+    """Native timeline selected as the observation sampling grid."""
+
+    HUMAN_POSE = "human_pose"
+    MOCAP = "mocap"
+    UNIFORM = "uniform"
+
+
+class CropPolicy(RetargetEnum):
+    """How a shared observation timeline handles source support."""
+
+    OVERLAP = "overlap"
+    FULL = "full"
 
 
 class MotionFormat(StrEnum):
@@ -240,22 +299,6 @@ class KinematicsBackendName(StrEnum):
 
     SIMPLE = "simple"
     MUJOCO = "mujoco"
-
-
-class ContactMode(StrEnum):
-    """How contact constraints are inferred or supplied.
-
-    Attributes:
-        DISABLED (str): Do not infer or apply contact constraints.
-        VELOCITY (str): Infer contact from foot velocity thresholds.
-        HEIGHT (str): Infer contact from height above support.
-        EXPLICIT_WINDOWS (str): Use user-supplied contact time windows.
-    """
-
-    DISABLED = "disabled"
-    VELOCITY = "velocity"
-    HEIGHT = "height"
-    EXPLICIT_WINDOWS = "explicit_windows"
 
 
 class ObjectQposMode(RetargetEnum):

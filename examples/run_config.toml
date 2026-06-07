@@ -1,42 +1,60 @@
 name = "configured_fixture"
 robot = "synthetic_humanoid"
-task_kind = "robot_only"
 output = "configured_fixture.npz"
-scale_to_robot = true
 
-[source]
+[observation]
 kind = "motion_file"
 path = "../tests/fixtures/minimal_motion.json"
 format = "minimal"
 
-[mesh]
+[recipe]
+kind = "role_mapping"
+task_kind = "robot_only"
+scale_to_robot = true
+
+[recipe.joint_roles]
+L_Hip = "left_hip"
+L_Knee = "left_knee"
+L_Toe = "left_ankle"
+R_Hip = "right_hip"
+R_Knee = "right_knee"
+R_Toe = "right_ankle"
+Spine = "torso"
+
+[recipe.link_roles]
+Pelvis = "pelvis"
+L_Toe = "left_foot"
+R_Toe = "right_foot"
+Spine = "torso"
+
+[recipe.mesh]
 topology = "delaunay"
 k_neighbors = 4
 
-[solver]
+[recipe.solver]
 backend = "auto"
 max_iterations = 8
 trust_radius = 0.2
 tolerance = 1e-6
 
-[scene]
+[recipe.scene]
 ground_size = 7
 ground_range = [-0.75, 0.75]
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "laplacian"
 weight = 10.0
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "smoothness"
 weight = 0.2
 
-[[constraints]]
+[[recipe.constraints]]
 kind = "joint_limits"
 
-[[constraints]]
+[[recipe.constraints]]
 kind = "trust_region"
 
-[[constraints]]
+[[recipe.constraints]]
 kind = "foot_sticking"
 tolerance = 0.001

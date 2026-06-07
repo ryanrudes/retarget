@@ -74,28 +74,31 @@ def test_cli_run_from_toml_config(tmp_path):
         """
 name = "configured"
 robot = "synthetic_humanoid"
-task_kind = "robot_only"
 output = "configured.npz"
-output_fps = 60.0
 
-[source]
+[observation]
 kind = "motion_file"
 path = "motion.json"
 format = "minimal"
 
-[mesh]
+[recipe]
+kind = "role_mapping"
+task_kind = "robot_only"
+output_fps = 60.0
+
+[recipe.mesh]
 topology = "k_nearest"
 k_neighbors = 2
 
-[solver]
+[recipe.solver]
 max_iterations = 4
 trust_radius = 0.2
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "laplacian"
 weight = 8.0
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "smoothness"
 weight = 0.1
 """.strip()
@@ -162,18 +165,21 @@ class CliZeroEnergy:
 name = "imported_objective"
 imports = ["custom_terms.py"]
 robot = "synthetic_humanoid"
-task_kind = "robot_only"
 output = "imported.npz"
 
-[source]
+[observation]
 kind = "motion_file"
 path = "motion.json"
 format = "minimal"
 
-[solver]
+[recipe]
+kind = "role_mapping"
+task_kind = "robot_only"
+
+[recipe.solver]
 max_iterations = 1
 
-[[objectives]]
+[[recipe.objectives]]
 kind = "cli_zero_energy"
 weight = 0.01
 """.strip()
@@ -198,15 +204,18 @@ def test_cli_run_reports_registry_preflight_errors_without_traceback(tmp_path):
         """
 name = "bad_extension_config"
 robot = "synthetic_humanoid"
-task_kind = "robot_only"
 output = "bad.npz"
 
-[source]
+[observation]
 kind = "motion_file"
 path = "motion.json"
 format = "minimal"
 
-[[objectives]]
+[recipe]
+kind = "role_mapping"
+task_kind = "robot_only"
+
+[[recipe.objectives]]
 kind = "missing_cli_objective"
 """.strip()
     )

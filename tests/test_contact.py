@@ -1,172 +1,108 @@
 import numpy as np
+import pytest
 
-from retarget.motion import (
-    ContactPlan,
-    ContactTrack,
-    MotionFormatSpec,
-    MotionSequence,
-    SupportPlane,
-    infer_contact_by_velocity,
+from retarget.capture import PointTrack, SampleTimeline
+from retarget.core.enums import ContactPatch, ContactState, ContactSubject
+from retarget.motion import SupportPlane
+from retarget.observation import SemanticContactSequence, SemanticContactTrack
+from retarget.observation.support import (
+    FootSupportClassificationConfig,
+    FootSupportStates,
+    classify_foot_support,
 )
 
 
-def test_infer_contact_by_velocity_marks_stationary_toe():
-    motion = MotionSequence(
-        name="contact",
-        joint_names=("Pelvis", "L_Toe", "R_Toe"),
-        joint_positions=np.asarray(
-            [
-                [[0.0, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]],
-                [[0.1, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.2, 0.0, 0.0]],
-                [[0.2, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.3, 0.0, 0.0]],
-            ],
-            dtype=np.float64,
-        ),
-        fps=30.0,
-    )
-    motion_format = MotionFormatSpec(
-        name="fixture",
-        joint_names=motion.joint_names,
-        root_joint="Pelvis",
-        contact_joints=("L_Toe", "R_Toe"),
-    )
-    contacts = infer_contact_by_velocity(motion, motion_format, velocity_threshold=0.05)
-    assert all(frame["L_Toe"] for frame in contacts)
-    assert not any(frame["R_Toe"] for frame in contacts)
+class Subject(ContactSubject):
+    LEFT = "left_foot"
+    RIGHT = "right_foot"
 
 
-def test_motion_format_accepts_no_contact_joints():
-    motion = MotionSequence.zeros("no_contact", ("root", "hand"), 2)
-    motion_format = MotionFormatSpec(name="no_contact", joint_names=motion.joint_names, root_joint="root")
-
-    contacts = infer_contact_by_velocity(motion, motion_format)
-
-    assert contacts == ({}, {})
+class State(ContactState):
+    AIR = "air"
+    GROUND = "ground"
+    OBJECT = "object"
 
 
-def test_infer_contact_supports_more_than_two_contact_joints():
-    motion = MotionSequence(
-        name="multi_contact",
-        joint_names=("root", "left_toe", "right_toe", "left_hand"),
-        joint_positions=np.asarray(
-            [
-                [[0.0, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [-0.3, 0.0, 1.0]],
-                [[0.1, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.2, 0.0, 0.0], [-0.3, 0.0, 1.0]],
-                [[0.2, 0.0, 1.0], [-0.1, 0.0, 0.0], [0.3, 0.0, 0.0], [-0.3, 0.0, 1.0]],
-            ],
-            dtype=np.float64,
-        ),
-        fps=30.0,
-    )
-    motion_format = MotionFormatSpec(
-        name="multi_contact",
-        joint_names=motion.joint_names,
-        root_joint="root",
-        contact_joints=("left_toe", "right_toe", "left_hand"),
-    )
-
-    contacts = infer_contact_by_velocity(motion, motion_format, velocity_threshold=0.05)
-
-    assert all(frame["left_toe"] for frame in contacts)
-    assert not any(frame["right_toe"] for frame in contacts)
-    assert all(frame["left_hand"] for frame in contacts)
+class Patch(ContactPatch):
+    LEFT_SOLE = "left_sole"
+    RIGHT_SOLE = "right_sole"
 
 
-def test_explicit_motion_contacts_override_velocity_inference():
-    motion = MotionSequence(
-        name="explicit_contact",
-        joint_names=("root", "left_toe", "right_toe"),
-        joint_positions=np.asarray(
-            [
-                [[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-                [[0.1, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-            ],
-            dtype=np.float64,
-        ),
-        fps=30.0,
-        contacts=(
-            {"left_toe": True, "right_toe": False, "ignored": True},
-            {"left_toe": False, "right_toe": True, "ignored": True},
-        ),
-    )
-    motion_format = MotionFormatSpec(
-        name="explicit_contact",
-        joint_names=motion.joint_names,
-        root_joint="root",
-        contact_joints=("left_toe", "right_toe"),
-    )
-
-    contacts = infer_contact_by_velocity(motion, motion_format, velocity_threshold=0.05)
-
-    assert contacts == (
-        {"left_toe": True, "right_toe": False},
-        {"left_toe": False, "right_toe": True},
-    )
-
-
-def test_motion_contacts_resample_with_nearest_neighbor_states():
-    motion = MotionSequence(
-        name="contact_resample",
-        joint_names=("root", "toe"),
-        joint_positions=np.asarray(
-            [
-                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-                [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-            ],
-            dtype=np.float64,
-        ),
-        fps=1.0,
-        contacts={"toe": [True, False]},
-    )
-
-    resampled = motion.resampled(2.0)
-
-    assert resampled.contacts == ({"toe": True}, {"toe": True}, {"toe": False})
-
-
-def test_contact_plan_validates_tracks_and_exposes_frame_view():
-    support = SupportPlane(normal=np.array([0.0, 0.0, 2.0]), origin=np.array([0.0, 0.0, 0.1]))
-    plan = ContactPlan(
+def test_semantic_contacts_are_target_independent_until_resolved():
+    timeline = SampleTimeline.uniform(3, 30.0, clock="observation")
+    sequence = SemanticContactSequence(
+        timeline=timeline,
         tracks=(
-            ContactTrack("left_foot", np.array([0, 1, 2]), link_names=("left_toe",), labels=("air", "ground", "board")),
-            ContactTrack("right_foot", np.array([1, 0, 0]), link_names=("right_toe",)),
+            SemanticContactTrack(
+                subject=Subject.LEFT,
+                patch=Patch.LEFT_SOLE,
+                states=(State.AIR, State.GROUND, State.OBJECT),
+                active_states=(State.GROUND, State.OBJECT),
+                support_states=(State.GROUND,),
+            ),
         ),
-        support=support,
-        provenance={"source": "test"},
+        support=SupportPlane(
+            normal=np.asarray([0.0, 0.0, 1.0]),
+            origin=np.asarray([0.0, 0.0, 0.1]),
+        ),
     )
 
-    frame = plan.frame(1)
+    assert not hasattr(sequence.tracks[0], "link_names")
+    plan = sequence.resolve({Subject.LEFT: ("left_toe",)})
 
-    assert plan.frame_count == 3
-    assert frame.active_link_names == ("left_toe",)
-    assert frame.support_link_names == ("left_toe",)
-    assert frame.support is support
-    assert frame.as_contact_dict() == {"left_foot": True, "right_foot": False}
+    assert plan.frame(0).active_link_names == ()
+    assert plan.frame(1).active_link_names == ("left_toe",)
+    assert plan.frame(1).support_link_names == ("left_toe",)
+    assert plan.frame(2).support_link_names == ()
 
 
-def test_contact_plan_resamples_and_scales_support_plane():
-    plan = ContactPlan(
-        tracks=(ContactTrack("toe", np.array([0, 1]), link_names=("left_toe",)),),
-        support=SupportPlane(normal=np.array([0.0, 0.0, 1.0]), origin=np.array([0.0, 0.0, 0.5])),
+def test_semantic_contact_resolution_requires_explicit_subject_mapping():
+    timeline = SampleTimeline.uniform(2, 30.0)
+    sequence = SemanticContactSequence(
+        timeline=timeline,
+        tracks=(
+            SemanticContactTrack(
+                subject=Subject.LEFT,
+                states=(State.AIR, State.GROUND),
+                active_states=(State.GROUND,),
+            ),
+        ),
     )
 
-    resampled = plan.resampled(1.0, 2.0)
-    scaled = resampled.scaled(2.0)
-
-    assert resampled.frame_count == 3
-    assert resampled.tracks[0].states.tolist() == [0, 0, 1]
-    assert np.allclose(scaled.support.origin, [0.0, 0.0, 1.0])
+    with pytest.raises(ValueError, match="left_foot"):
+        sequence.resolve({})
 
 
-def test_contact_plan_from_binary_contacts_maps_links():
-    plan = ContactPlan.from_binary_contacts(
-        ({"L_Foot": True, "R_Foot": False}, {"L_Foot": False, "R_Foot": True}),
-        link_mapping={"L_Foot": "left_toe", "R_Foot": ("right_toe",)},
-        support=SupportPlane(normal=np.array([0.0, 0.0, 1.0]), origin=np.zeros(3)),
-        provenance={"source": "legacy"},
+def test_foot_support_classifier_returns_typed_semantic_sequence():
+    timeline = SampleTimeline.uniform(4, 10.0, clock="observation")
+    board = np.asarray([[0.0, 0.0, 0.1]] * 4)
+    left = np.asarray([[0.0, 0.0, 0.11]] * 4)
+    right = np.asarray([[0.2, 0.0, 0.0]] * 4)
+
+    result = classify_foot_support(
+        timeline=timeline,
+        left_foot=PointTrack(role=Subject.LEFT, values=left),
+        right_foot=PointTrack(role=Subject.RIGHT, values=right),
+        observed_object=PointTrack(role=Subject.LEFT, values=board),
+        left_subject=Subject.LEFT,
+        right_subject=Subject.RIGHT,
+        left_patch=Patch.LEFT_SOLE,
+        right_patch=Patch.RIGHT_SOLE,
+        states=FootSupportStates(
+            air=State.AIR,
+            ground=State.GROUND,
+            observed_object=State.OBJECT,
+        ),
+        config=FootSupportClassificationConfig(
+            ground_height_percentile=0.0,
+            ground_clearance_m=0.03,
+            ground_speed_mps=0.05,
+            object_horizontal_distance_m=0.1,
+            object_height_min_m=0.0,
+            object_height_max_m=0.03,
+            object_relative_speed_mps=0.05,
+        ),
     )
 
-    assert tuple(track.subject for track in plan.tracks) == ("L_Foot", "R_Foot")
-    assert plan.tracks[0].link_names == ("left_toe",)
-    assert plan.frame(0).active_link_names == ("left_toe",)
-    assert plan.frame(1).active_link_names == ("right_toe",)
+    assert result.tracks[0].states == (State.OBJECT,) * 4
+    assert result.tracks[1].states == (State.GROUND,) * 4

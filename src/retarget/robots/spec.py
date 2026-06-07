@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from retarget.core.enums import HumanoidRobotRole, RobotRole
+
 
 class JointLimit(BaseModel):
     """Named joint position bounds.
@@ -75,14 +77,16 @@ class RobotSpec(BaseModel):
         contact_links (tuple[str, ...]): Links used for foot or support contact (default empty).
         nominal_tracking_joints (tuple[str, ...]): Joints tracked by nominal-pose objectives.
         joint_limits (dict[str, tuple[float, float]]): Per-joint ``(lower, upper)`` bounds.
-        default_joint_mapping (dict[str, str]): Source-joint to robot-joint name map.
-        default_link_mapping (dict[str, str]): Source-link to robot link/joint name map.
+        role_vocabulary (type[RobotRole]): Enum defining supported semantic roles.
+        joint_roles (dict[str, str]): Semantic robot-role to actuated-joint mapping.
+        link_roles (dict[str, str]): Semantic robot-role to link mapping.
+        link_groups (dict[str, tuple[str, ...]]): Semantic robot-role to link-group mapping.
         geometry_names (tuple[str, ...]): Collision/visual geometry names exposed by the robot model.
         mujoco_body_aliases (dict[str, str]): Robot link-name to MuJoCo body-name overrides.
         urdf_path (Path | None): Optional URDF used for visualization or kinematics.
         mujoco_xml_path (Path | None): Optional MuJoCo XML model path.
         qpos_layout (QposLayout): Layout of root, joints, and optional object pose in ``qpos``.
-        metadata (dict[str, Any]): Free-form robot metadata (asset hints, descriptions, etc.).
+        metadata (dict[str, Any]): Provenance-only robot tags and descriptions.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -95,8 +99,10 @@ class RobotSpec(BaseModel):
     contact_links: tuple[str, ...] = ()
     nominal_tracking_joints: tuple[str, ...] = ()
     joint_limits: dict[str, tuple[float, float]] = Field(default_factory=dict)
-    default_joint_mapping: dict[str, str] = Field(default_factory=dict)
-    default_link_mapping: dict[str, str] = Field(default_factory=dict)
+    role_vocabulary: type[RobotRole] = HumanoidRobotRole
+    joint_roles: dict[str, str] = Field(default_factory=dict)
+    link_roles: dict[str, str] = Field(default_factory=dict)
+    link_groups: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     geometry_names: tuple[str, ...] = ()
     mujoco_body_aliases: dict[str, str] = Field(default_factory=dict)
     urdf_path: Path | None = None
@@ -125,7 +131,7 @@ class RobotSpec(BaseModel):
             return (_name_value(value),)
         return tuple(_name_value(item) for item in value)
 
-    @field_validator("default_joint_mapping", "default_link_mapping", "mujoco_body_aliases", mode="before")
+    @field_validator("joint_roles", "link_roles", "mujoco_body_aliases", mode="before")
     @classmethod
     def _coerce_name_mapping(cls, value: Any) -> dict[str, str]:
         if value in (None, ""):
@@ -133,6 +139,15 @@ class RobotSpec(BaseModel):
         if not isinstance(value, dict):
             raise ValueError("name mappings must be dictionaries")
         return {_name_value(key): _name_value(item) for key, item in value.items()}
+
+    @field_validator("link_groups", mode="before")
+    @classmethod
+    def _coerce_link_groups(cls, value: Any) -> dict[str, tuple[str, ...]]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("link_groups must be a dictionary")
+        return {_name_value(key): tuple(_name_value(item) for item in items) for key, items in value.items()}
 
     @field_validator("joint_limits", mode="before")
     @classmethod
@@ -151,12 +166,29 @@ class RobotSpec(BaseModel):
     @field_validator("metadata")
     @classmethod
     def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
-        blocked = {"mujoco_body_names", "holosoma_robot_geom_names", "geometry_names"}
+        blocked = {
+            "contact_links",
+            "dof",
+            "geometry_names",
+            "height_m",
+            "holosoma_robot_geom_names",
+            "joint_limits",
+            "joint_names",
+            "joint_roles",
+            "link_groups",
+            "link_names",
+            "link_roles",
+            "mujoco_body_aliases",
+            "mujoco_body_names",
+            "mujoco_xml_path",
+            "nominal_tracking_joints",
+            "qpos_layout",
+            "role_vocabulary",
+            "urdf_path",
+        }
         present = sorted(blocked & set(value))
         if present:
-            raise ValueError(
-                "RobotSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present)
-            )
+            raise ValueError("RobotSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
         return dict(value)
 
     @model_validator(mode="after")
@@ -183,13 +215,26 @@ class RobotSpec(BaseModel):
         unknown_nominal = set(self.nominal_tracking_joints) - set(self.joint_names)
         if unknown_nominal:
             raise ValueError(f"nominal_tracking_joints reference unknown joints: {sorted(unknown_nominal)}")
-        unknown_mapping_targets = set(self.default_joint_mapping.values()) - set(self.joint_names)
+        if not issubclass(self.role_vocabulary, RobotRole):
+            raise TypeError("role_vocabulary must subclass RobotRole")
+        vocabulary_values = {role.value for role in self.role_vocabulary}
+        unknown_roles = (set(self.joint_roles) | set(self.link_roles) | set(self.link_groups)) - vocabulary_values
+        if unknown_roles:
+            raise ValueError(
+                f"semantic role bindings are not members of {self.role_vocabulary.__name__}: {sorted(unknown_roles)}"
+            )
+        unknown_mapping_targets = set(self.joint_roles.values()) - set(self.joint_names)
         if unknown_mapping_targets:
-            raise ValueError(f"default_joint_mapping targets unknown joints: {sorted(unknown_mapping_targets)}")
+            raise ValueError(f"joint_roles target unknown joints: {sorted(unknown_mapping_targets)}")
         valid_link_targets = set(self.link_names) | set(self.joint_names)
-        unknown_link_targets = set(self.default_link_mapping.values()) - valid_link_targets
+        unknown_link_targets = set(self.link_roles.values()) - valid_link_targets
         if unknown_link_targets:
-            raise ValueError(f"default_link_mapping targets unknown links: {sorted(unknown_link_targets)}")
+            raise ValueError(f"link_roles target unknown links: {sorted(unknown_link_targets)}")
+        unknown_group_targets = {
+            link for links in self.link_groups.values() for link in links if link not in valid_link_targets
+        }
+        if unknown_group_targets:
+            raise ValueError(f"link_groups target unknown links: {sorted(unknown_group_targets)}")
         unknown_aliases = set(self.mujoco_body_aliases) - valid_link_targets
         if unknown_aliases:
             raise ValueError(f"mujoco_body_aliases reference unknown links: {sorted(unknown_aliases)}")
@@ -202,6 +247,38 @@ class RobotSpec(BaseModel):
             return self.joint_names.index(name)
         except ValueError as exc:
             raise KeyError(f"Unknown robot joint {name!r} for {self.name!r}") from exc
+
+    def joint_for_role(self, role: Any) -> str:
+        """Resolve a semantic robot role to an actuated joint."""
+
+        if not isinstance(role, self.role_vocabulary):
+            raise TypeError(f"role must be a {self.role_vocabulary.__name__} member for robot {self.name!r}")
+        key = _name_value(role)
+        try:
+            return self.joint_roles[key]
+        except KeyError as exc:
+            raise KeyError(f"Robot {self.name!r} has no joint binding for role {key!r}") from exc
+
+    def link_for_role(self, role: Any) -> str:
+        """Resolve a semantic robot role to a link."""
+
+        if not isinstance(role, self.role_vocabulary):
+            raise TypeError(f"role must be a {self.role_vocabulary.__name__} member for robot {self.name!r}")
+        key = _name_value(role)
+        try:
+            return self.link_roles[key]
+        except KeyError as exc:
+            raise KeyError(f"Robot {self.name!r} has no link binding for role {key!r}") from exc
+
+    def links_for_role(self, role: Any) -> tuple[str, ...]:
+        """Resolve a semantic robot role to one or more links."""
+
+        if not isinstance(role, self.role_vocabulary):
+            raise TypeError(f"role must be a {self.role_vocabulary.__name__} member for robot {self.name!r}")
+        key = _name_value(role)
+        if key in self.link_groups:
+            return self.link_groups[key]
+        return (self.link_for_role(role),)
 
     def qpos_size(self, *, has_object: bool = False) -> int:
         """Return qpos size for this robot and object setting."""

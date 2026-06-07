@@ -1,52 +1,103 @@
 # Architecture
 
-The public API is organized around immutable inputs and typed outputs:
-
-- `RetargetingProblem` describes the robot, motion, scene, solver, objectives, constraints, and optional Rich progress reporting (`show_progress`).
-- `Retargeter` executes the run and returns `RetargetingResult`.
-- Registries hold motion formats, robots, objective terms, constraint terms, solvers, metrics, and visualizers.
-- Heavy backends such as MuJoCo, CVXPY, and Viser are optional and isolated behind protocols.
+The design separates facts observed in the world from choices made for a target
+robot.
 
 ```mermaid
 flowchart LR
-  motion[MotionSequence] --> problem[RetargetingProblem]
-  problem --> retargeter[Retargeter]
-  retargeter --> engine[InteractionMeshRetargetingEngine]
-  engine --> result[RetargetingResult]
-  result --> export[Export / visualization]
-  result --> eval_fn[evaluate]
-  eval_fn --> report[EvaluationReport]
+  native["VideoRecording / MocapRecording / HumanPoseRecording"]
+  observe["ObservationRecipe.observe()"]
+  scene["SceneObservation"]
+  adapt["RetargetingRecipe.build_problem()"]
+  problem["RetargetingProblem"]
+  run["Retargeter.run()"]
+  result["RetargetingResult"]
+
+  native --> observe --> scene --> adapt --> problem --> run --> result
+  robot["RobotSpec"] --> adapt
 ```
 
-Related references: [Interaction mesh](interaction-mesh.md), [Result schema](result-schema.md), [Registries](api/registries.md), [Ecosystem](ecosystem/index.md).
+`RetargetingExperiment` owns this orchestration. It accepts either an
+`ObservationRecipe` or an existing `SceneObservation`, so expensive capture
+processing can be inspected, checkpointed explicitly, and reused with several
+robots or adaptation recipes.
+
+## Native Recordings
+
+Each recording owns its native `SampleTimeline`, frame convention, enum
+vocabulary, validity masks, and provenance:
+
+- `VideoRecording`
+- `MocapRecording`
+- `HumanPoseRecording`
+- `PointTrack`, `PoseTrack`, `CategoricalTrack`, and their specialized track types
+
+Recordings do not pretend to share a clock. `ClockTransform` represents the
+estimated affine mapping between clocks. Point tracks interpolate linearly, pose
+tracks use SLERP, and categorical tracks use nearest-neighbor sampling.
+Registration failures raise `AlignmentError` carrying the rejected
+`AlignmentReport`; there is no zero-lag fallback.
+
+Fusion recipes declare `TimelineSelection` and `CropPolicy` directly.
+Skateboarding can retain the human-pose grid, retain the transformed mocap
+grid, or construct an explicit uniform grid. Selecting `UNIFORM` also requires
+`uniform_fps`; no global timing constant chooses this implicitly.
+
+## Scene Observation
+
+`SceneObservation` is the canonical target-independent output of capture
+processing. It has one timeline and world frame, actor motion, semantic
+landmarks, rigid bodies, observed objects, semantic contacts, support geometry,
+alignment reports, and provenance-only metadata.
+
+`SemanticContactSequence` names subjects, patches, and states. It does not name
+robot links. Link resolution happens only in the adaptation recipe.
+
+Checkpoints are explicit:
+
+```python
+observation.save_npz("observation.npz")
+restored = SceneObservation.load_npz("observation.npz")
+```
+
+No recipe writes a stage file or cache automatically.
+
+## Robot Adaptation
+
+Source vocabularies subclass `MotionJoint`, `MocapRigidBody`,
+`ObservationRole`, `ContactSubject`, `ContactState`, and `ContactPatch`.
+Robots declare a `RobotRole` vocabulary and bind those roles to concrete joints,
+links, and link groups through `RobotSpec`.
+
+Adaptation recipes map observation or motion enum members to robot-role enum
+members. They then create the robot-resolved `MotionSequence`, `ContactPlan`,
+`LinkTargetPlan`, scene, objective profile, and constraints. There are no
+side-name heuristics or default source-name mappings in the optimization core.
+Workflow-specific numeric behavior belongs in typed policy objects such as
+`HolosomaClimbObservationPolicy` and `HolosomaClimbOptimizationPolicy`, not in
+vocabulary or metadata dictionaries.
 
 ## Retargeting Core
 
-`Retargeter` prepares the problem (including optional `output_fps` resampling) and delegates frame optimization to `InteractionMeshRetargetingEngine`. When `RetargetingProblem.output_fps` is set, `Retargeter.run` calls `with_output_fps_applied()` so motion and dynamic object trajectories are resampled before optimization; the saved result frame count matches the requested rate. `engine.run` expects that prepared problem and does not resample again.
+`Retargeter` applies optional output-rate resampling and delegates to
+`InteractionMeshRetargetingEngine`. The engine builds the configured interaction
+mesh, queries the selected kinematics backend, and lowers typed objective and
+constraint configs into a local quadratic problem for each SQP iteration.
 
-The default engine is `InteractionMeshRetargetingEngine`. It uses the `RetargetingProblem.mesh` spec to configure `InteractionMeshBuilder`, defaulting to Delaunay topology with deterministic fallback. A custom engine-level builder can still override the problem spec for programmatic sweeps. The default solver mode is `auto`: it uses CVXPY/Clarabel when the optimize extra is installed and falls back to the deterministic NumPy/SciPy solver otherwise. For each frame it:
+Heavy integrations such as MuJoCo, CVXPY, Viser, Torch, SMPL-X, ROS bag readers,
+and GVHMR execution remain optional behind protocols or source implementations.
 
-1. Scales the input motion to the target robot when requested.
-2. Builds an interaction mesh from mapped human joints and object, terrain, or ground sample points.
-3. Computes source Laplacian coordinates in the task frame.
-4. Queries a kinematics backend for robot point positions and Jacobians.
-5. Runs an SQP inner loop: lowers registered objective and constraint terms into a local quadratic subproblem over the configured qpos variables, solves it (joint limits, trust region, foot sticking, explicit foot-lock windows, ground non-penetration, scene clearance, and backend self-collision when enabled), and repeats until the configured convergence mode is satisfied or the frame's iteration limit is reached.
-6. Advances to the next frame, warm-starting actuated joints from the previous solution.
+## Declarative Runs
 
-The fixture backend is deterministic and dependency-light so tests and examples run without robot assets. `MuJoCoKinematicsBackend` provides body positions, translational/rotational Jacobians, qpos/qvel conversion, position integration, joint range extraction, and geom-distance hooks behind the same protocol; stricter collision constraints and simulator-specific metrics can be layered behind that backend without changing the high-level problem/result schema.
+Run configs serialize constructor arguments for the same public hierarchy:
 
-### Contacts and Targets
+```toml
+[observation]
+kind = "motion_file"
 
-Structured runtime inputs live on the problem as `ContactPlan` and `LinkTargetPlan`. `foot_sticking`, `foot_lock`, and `non_penetration` consume the current `ContactFrame`; `link_tracking` consumes the current `TargetFrame`. Old `MotionSequence.contacts` dictionaries are treated as loader compatibility and converted into a `ContactPlan` at the CLI boundary when no explicit plan is supplied.
+[recipe]
+kind = "role_mapping"
+```
 
-## Command Line
-
-The CLI uses Typer for typed, workflow-oriented subcommands and Rich for readable tables, summaries, and diagnostics. Typer owns command parsing only; the commands immediately construct typed package objects such as `RetargetingProblem`, `RetargetingResult`, and `AssetStore`.
-
-Single-run CLI jobs can also be loaded from TOML, YAML, or JSON. Those files are deserialized into `RetargetingRunConfig`, resolved through registries, and then converted into the same `RetargetingProblem` used by the Python API.
-
-Batch CLI jobs use `BatchRunner`, `BatchJob`, and `BatchManifest` from `retarget.pipeline`. The runner owns resume behavior and process-pool execution while the CLI only builds jobs and prints a Rich summary.
-
-Core models and solvers avoid terminal concerns so they remain usable from notebooks, services, and other libraries.
-
-Evaluation (`retarget evaluate`, `evaluate_result`) loads a `RetargetingResult`, optionally aligns a `RetargetingProblem` to the result time grid, and returns an `EvaluationReport` with metric values—it is a separate post-run step, not part of `Retargeter.run`.
+`RetargetingRunConfig.build_experiment()` returns a `RetargetingExperiment`.
+The CLI does not have a separate preparation or synchronization workflow.

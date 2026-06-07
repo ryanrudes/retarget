@@ -2,6 +2,10 @@
 
 Extension points implemented by backends, terms, loaders, and exporters.
 
+::: retarget.capture.sources.ObservationSource
+
+::: retarget.capture.estimators.HumanPoseEstimator
+
 ::: retarget.core.protocols.KinematicsBackend
 
 ::: retarget.core.protocols.ObjectiveTerm

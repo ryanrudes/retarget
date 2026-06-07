@@ -1,35 +1,41 @@
 # Quickstart
 
-After this smoke test, read [Introduction](introduction.md) for a full research-style walkthrough (sensors → `MotionSequence` → scene → robot). For shorter hands-on lessons, see [Tutorials](tutorials/index.md).
-
 ```bash
 uv sync --extra dev
 uv run retarget doctor
-uv run retarget run --motion tests/fixtures/minimal_motion.json --format minimal --robot synthetic_humanoid --output result.npz
-uv run retarget evaluate --result result.npz
+uv run retarget run --config examples/basic/run_config.toml
+uv run retarget evaluate --result examples/basic/generated/basic_retarget.npz
 ```
 
-Motion inputs can be JSON, NPY, NPZ, or wide CSV files. CSV columns use the registered format's joint names with `_x`, `_y`, and `_z` suffixes.
+The config constructs a `MotionFileObservationRecipe`, a
+`RoleRetargetingRecipe`, and a `RetargetingExperiment`.
 
-For repeatable experiments, put the run in a TOML or YAML config:
+For native multimodal capture:
 
 ```bash
-uv run retarget run --config examples/run_config.toml   # writes examples/configured_fixture.npz
-uv run retarget evaluate --result examples/configured_fixture.npz --config examples/run_config.toml
+uv run python examples/skateboarding/run_retarget.py \
+  --demo pushoff5_twoshoes \
+  --max-frames 20 \
+  --download-assets
 ```
 
-For a full capture-to-robot path (Vicon, GVHMR, foot support, prepare, retarget), see [Research ecosystem](ecosystem/index.md) and `examples/skateboarding/`.
+That command loads native Vicon and GVHMR recordings directly, performs temporal
+and spatial registration in memory, derives semantic contacts, adapts them to
+the robot, and retargets. It does not consume or create a synchronized stage
+file.
 
-Verify local changes with the same gates used by CI:
+Raw video can be composed with any `HumanPoseEstimator` through
+`VideoPoseSource`; `GvhmrEstimator` is the optional concrete local-checkout
+backend.
+
+Verify changes with:
 
 ```bash
-git submodule update --init   # vendor motion_sync + contact_detection for API docs
-uv run ruff check src tests examples docs
-uv run mypy src
+uv run ruff check src tests examples scripts docs/hooks
+uv run mypy src/retarget
 uv run pytest
 uv run mkdocs build --strict
 ```
 
-Sibling-repo layout and optional editable installs: [Workspace setup](ecosystem/workspace-setup.md).
-
-Pytest runs a fixed set of dependency-free example scripts from a temporary working directory (`tests/test_examples.py`: `basic_robot_only.py`, `batch_and_evaluate.py`, `climbing_terrain.py`, `custom_motion_format.py`, `custom_objective.py`, `custom_robot.py`, `object_interaction.py`). Research scripts such as `examples/skateboarding/run_retarget.py` have help-message smoke tests and separate data/asset setup.
+Continue with [Introduction](introduction.md), [Capture system](ecosystem/index.md),
+and [Architecture](architecture.md).

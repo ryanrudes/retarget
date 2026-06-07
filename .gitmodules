@@ -1,6 +1,0 @@
-[submodule "vendor/motion_sync"]
-	path = vendor/motion_sync
-	url = https://github.com/ryanrudes/motion_sync.git
-[submodule "vendor/event_detection"]
-	path = vendor/event_detection
-	url = https://github.com/ryanrudes/contact_detection.git

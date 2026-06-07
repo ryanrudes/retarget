@@ -3,9 +3,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from retarget.core.enums import FrameConvention, QuaternionOrder
+from retarget.core.enums import FrameConvention, MotionJoint, QuaternionOrder
 from retarget.core.pose import PoseSequence
 from retarget.motion import MotionFormatSpec, MotionSequence, load_motion, motion_formats
+
+
+class UnitMotionJoint(MotionJoint):
+    ROOT = "root"
+    LEFT_TOE = "left_toe"
+    RIGHT_TOE = "right_toe"
 
 
 def test_json_motion_loader():
@@ -16,41 +22,13 @@ def test_json_motion_loader():
     assert "height_m" not in motion.metadata
 
 
-def test_json_motion_loader_reads_explicit_contacts(tmp_path):
-    path = tmp_path / "motion.json"
-    path.write_text(
-        """
-{
-  "name": "contacts",
-  "joint_names": ["Pelvis", "L_Toe", "R_Toe"],
-  "joint_positions": [
-    [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-    [[0.1, 0.0, 0.0], [0.0, 0.0, 0.0], [0.2, 0.0, 0.0]]
-  ],
-  "contacts": [
-    {"L_Toe": true, "R_Toe": false},
-    {"L_Toe": false, "R_Toe": true}
-  ]
-}
-""".strip()
-    )
-
-    motion = load_motion(path, "minimal")
-
-    assert motion.contacts == (
-        {"L_Toe": True, "R_Toe": False},
-        {"L_Toe": False, "R_Toe": True},
-    )
-
-
 def test_json_motion_loader_reads_root_poses_and_converts_frame(tmp_path):
     motion_formats.register(
         "unit_test_root_y_up",
         MotionFormatSpec(
             name="unit_test_root_y_up",
-            joint_names=("root", "left_toe", "right_toe"),
-            root_joint="root",
-            contact_joints=("left_toe", "right_toe"),
+            joint_vocabulary=UnitMotionJoint,
+            root_joint=UnitMotionJoint.ROOT,
             quaternion_order=QuaternionOrder.XYZW,
             frame_convention=FrameConvention.Y_UP_RIGHT_HANDED,
         ),
@@ -138,11 +116,7 @@ def test_csv_motion_loader_infers_fps_and_reorders_by_frame(tmp_path):
         row["height_m"] = "1.8"
         row["Pelvis_x"] = str(pelvis_x)
         rows.append(row)
-    path.write_text(
-        ",".join(columns)
-        + "\n"
-        + "\n".join(",".join(row[column] for column in columns) for row in rows)
-    )
+    path.write_text(",".join(columns) + "\n" + "\n".join(",".join(row[column] for column in columns) for row in rows))
 
     motion = load_motion(path, "minimal")
 
@@ -177,44 +151,13 @@ def test_csv_motion_loader_reads_root_pose_columns(tmp_path):
         row["root_position_x"] = root_x
         row["root_quaternion_w"] = "1.0"
         rows.append(row)
-    path.write_text(
-        ",".join(columns)
-        + "\n"
-        + "\n".join(",".join(row[column] for column in columns) for row in rows)
-    )
+    path.write_text(",".join(columns) + "\n" + "\n".join(",".join(row[column] for column in columns) for row in rows))
 
     motion = load_motion(path, "minimal")
 
     assert motion.root_poses is not None
     assert np.allclose(motion.root_poses.positions[:, 0], [1.0, 2.0])
     assert np.allclose(motion.root_poses.quaternions(), [[1.0, 0.0, 0.0, 0.0]] * 2)
-
-
-def test_csv_motion_loader_reads_contact_columns(tmp_path):
-    spec = motion_formats.get("minimal")
-    path = tmp_path / "motion.csv"
-    columns = ["frame", "L_Toe_contact", "contact_R_Toe"]
-    for joint in spec.joint_names:
-        columns.extend([f"{joint}_x", f"{joint}_y", f"{joint}_z"])
-    rows = []
-    for frame, left_contact, right_contact in ((0, "true", "0"), (1, "false", "1")):
-        row = {column: "0.0" for column in columns}
-        row["frame"] = str(frame)
-        row["L_Toe_contact"] = left_contact
-        row["contact_R_Toe"] = right_contact
-        rows.append(row)
-    path.write_text(
-        ",".join(columns)
-        + "\n"
-        + "\n".join(",".join(row[column] for column in columns) for row in rows)
-    )
-
-    motion = load_motion(path, "minimal")
-
-    assert motion.contacts == (
-        {"L_Toe": True, "R_Toe": False},
-        {"L_Toe": False, "R_Toe": True},
-    )
 
 
 def test_csv_motion_loader_reports_missing_coordinate(tmp_path):
@@ -230,9 +173,8 @@ def test_load_motion_converts_registered_format_frame_to_internal_z_up(tmp_path)
         "unit_test_y_up",
         MotionFormatSpec(
             name="unit_test_y_up",
-            joint_names=("root", "left_toe", "right_toe"),
-            root_joint="root",
-            contact_joints=("left_toe", "right_toe"),
+            joint_vocabulary=UnitMotionJoint,
+            root_joint=UnitMotionJoint.ROOT,
             frame_convention=FrameConvention.Y_UP_RIGHT_HANDED,
         ),
         replace=True,
@@ -282,6 +224,16 @@ def test_motion_sequence_resampled_interpolates_joint_positions():
     assert resampled.metadata["resampled_from_fps"] == 1.0
     assert np.allclose(resampled.joint("root")[:, 0], [0.0, 1.0, 2.0])
     assert np.allclose(resampled.joint("hand")[:, 1], [2.0, 3.0, 4.0])
+
+
+def test_motion_sequence_rejects_behavioral_metadata():
+    with pytest.raises(ValueError, match="provenance-only"):
+        MotionSequence(
+            name="bad_metadata",
+            joint_names=("root",),
+            joint_positions=np.zeros((1, 1, 3)),
+            metadata={"source_height_m": 1.8},
+        )
 
 
 def test_motion_sequence_duration_matches_endpoint_time_grid():

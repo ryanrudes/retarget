@@ -9,10 +9,10 @@ contact_links = ["left_foot"]
 hip = [-1.0, 1.0]
 knee = [-2.0, 0.0]
 
-[default_joint_mapping]
-root = "hip"
-left_toe = "knee"
+[joint_roles]
+pelvis = "hip"
+left_knee = "knee"
 
-[default_link_mapping]
-root = "pelvis"
-left_toe = "left_foot"
+[link_roles]
+pelvis = "pelvis"
+left_foot = "left_foot"

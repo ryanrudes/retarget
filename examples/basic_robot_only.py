@@ -1,34 +1,42 @@
-"""Basic robot-only retargeting with the typed Python API."""
+"""Basic robot-only retargeting through the experiment API."""
 
-from __future__ import annotations
+from pathlib import Path
 
-import numpy as np
-
-from retarget import MotionFormat, Retargeter, RetargetingProblem, Robot, SceneSpec, TaskKind
-from retarget.motion import MotionSequence, motion_formats
-from retarget.robots import robots
-
-joint_names = motion_formats.get(MotionFormat.MINIMAL).joint_names
-positions = np.zeros((20, len(joint_names), 3), dtype=float)
-positions[:, joint_names.index("Pelvis"), 0] = np.linspace(0.0, 0.2, 20)
-positions[:, joint_names.index("L_Toe"), 2] = -0.8
-positions[:, joint_names.index("R_Toe"), 2] = -0.8
-
-motion = MotionSequence(
-    name="basic",
-    joint_names=joint_names,
-    joint_positions=positions,
-    fps=30,
-    source_height_m=1.7,
+from retarget import (
+    HumanoidRobotRole,
+    MinimalMotionJoint,
+    MotionFileObservationRecipe,
+    MotionFormat,
+    RetargetingExperiment,
+    Robot,
+    RobotOnlySceneRecipe,
+    RoleRetargetingRecipe,
+    TaskKind,
+    motion_formats,
+    robots,
 )
-problem = RetargetingProblem(
+
+repo_root = Path(__file__).resolve().parents[1]
+motion_format = motion_formats.get(MotionFormat.MINIMAL)
+observation = MotionFileObservationRecipe(
+    path=repo_root / "tests" / "fixtures" / "minimal_motion.json",
+    motion_format=motion_format,
     name="basic",
+)
+recipe = RoleRetargetingRecipe(
     task_kind=TaskKind.ROBOT_ONLY,
-    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
-    motion=motion,
-    motion_format=motion_formats.get(MotionFormat.MINIMAL),
-    scene=SceneSpec.robot_only(),
+    motion_format=motion_format,
+    scene=RobotOnlySceneRecipe(),
+    link_roles={
+        MinimalMotionJoint.PELVIS: HumanoidRobotRole.PELVIS,
+        MinimalMotionJoint.LEFT_TOE: HumanoidRobotRole.LEFT_FOOT,
+        MinimalMotionJoint.RIGHT_TOE: HumanoidRobotRole.RIGHT_FOOT,
+    },
 )
-result = Retargeter().run(problem)
+result = RetargetingExperiment(
+    observation=observation,
+    recipe=recipe,
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
+).run()
 result.save_npz("basic_robot_only.npz")
 print(result.qpos.shape)

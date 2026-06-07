@@ -1,28 +1,69 @@
 # Coordinate Conventions
 
-Internal geometry uses explicit `Pose` and `PoseSequence` objects. Quaternions carry their storage order (`wxyz` or `xyzw`) and frame convention. Convert data at the boundary and keep internal code convention-aware.
+Every native recording owns its coordinate frame and timestamps. Capture sources
+must report those facts explicitly; they must not pre-align data or imply that
+two recordings share a clock.
 
-All retargeting positions are in **meters** in the internal **Z-up right-handed** frame after loaders or adapters run.
+`SceneObservation` is the canonical fusion boundary:
 
-Supported frame conventions:
+- all tracks use one `SampleTimeline`;
+- all geometry uses one `world_frame`;
+- positions are measured in meters;
+- rotations carry an explicit `QuaternionOrder`.
 
-- `z_up_right_handed`: internal default for all retargeting, metrics, visualization, and export code.
-- `y_up_right_handed`: common input convention for game and mocap assets.
+Observation recipes perform temporal and spatial registration before creating
+that object. Retargeting recipes can therefore consume an observation without
+knowing which sensors produced it.
 
-Use `convert_points_frame`, `Pose.to_frame`, or `PoseSequence.to_frame` when writing loaders or adapters. The built-in `load_motion` boundary converts any registered motion format into internal Z-up coordinates and records `frame_converted_from` / `frame_converted_to` metadata when a conversion occurs.
+## Frames
 
-The Y-up to Z-up conversion maps points as `(x, y, z) -> (x, -z, y)`, preserving right-handed orientation. Quaternion storage order conversion is independent from frame conversion: use `reorder_quaternion` for `wxyz`/`xyzw` storage changes and `Pose.to_frame` for coordinate-frame changes.
+The built-in conventions are:
 
-Motion root poses follow the same boundary rule as joint positions. Built-in loaders read optional root pose arrays, convert them into `PoseSequence`, and `load_motion` converts them to internal Z-up coordinates together with the joints. Retargeting initializes qpos root translation and quaternion from `MotionSequence.root_poses` when available.
+- `FrameConvention.Z_UP_RIGHT_HANDED`, the internal default;
+- `FrameConvention.Y_UP_RIGHT_HANDED`, common for video pose estimators.
 
-Timing is explicit too. Sequence timestamps start at zero, so `MotionSequence.duration_s` is the endpoint span `(frame_count - 1) / fps`. `PoseSequence.resampled()`, `MotionSequence.resampled()`, and `RetargetingResult.resampled()` interpolate onto a new FPS grid while preserving sequence endpoints. Pose rotations use spherical interpolation; joint positions, qpos arrays, costs, and point clouds use deterministic linear interpolation.
+The Y-up to Z-up point conversion is `(x, y, z) -> (x, -z, y)`. Use
+`convert_points_frame`, `Pose.to_frame`, or `PoseSequence.to_frame`; do not
+reproduce axis permutations inside a recipe.
 
-## Motion sync / synced clip
+Quaternion storage order and coordinate-frame conversion are independent:
 
-Upstream [motion_sync](https://github.com/ryanrudes/motion_sync) clips keep sensor-native frames until you export for retargeting:
+```python
+from retarget import QuaternionOrder, reorder_quaternions
 
-- **Vicon** rigid bodies and markers in a `synced.npz` clip are **Z-up** (meters).
-- **Video / SMPL-X** body joints on the same clip are typically **Y-up** (meters).
-- Integration sources (for example `retarget.integrations.motion_sync.skateboarding`) convert packed human motion to Z-up while building `PreparedRetargetingInputs`.
+wxyz = reorder_quaternions(
+    xyzw,
+    QuaternionOrder.XYZW,
+    QuaternionOrder.WXYZ,
+)
+```
 
-See [Custom schemas](ecosystem/custom-schemas.md) for body/marker naming and [Introduction — Step 3](introduction.md#step-3-time-align-and-build-motionsequence) for the full align → convert → pack workflow. Register or adapt a motion format so `load_motion` applies the same Z-up boundary as the rest of the library ([Add a motion format](adding-a-motion-format.md)).
+`reorder_quaternions` operates over the last axis by default and accepts a
+custom `axis` for other array layouts.
+
+## Timelines
+
+`SampleTimeline` accepts irregular timestamps. A `ClockTransform` maps one
+native clock into observation time with an affine transform:
+
+```python
+from retarget import ClockTransform
+
+camera_to_world = ClockTransform(scale=1.0002, offset_s=-0.14)
+```
+
+Track classes own resampling behavior:
+
+- `PointTrack`, `MarkerTrack`, and `JointTrack` use linear interpolation;
+- `PoseTrack` uses linear translation and quaternion SLERP;
+- `CategoricalTrack` uses nearest-neighbor sampling.
+
+Registration strategies return typed `AlignmentReport` objects. Failed quality
+gates raise `AlignmentError` carrying the report; zero lag is never assumed as
+a fallback.
+
+## Persistence
+
+`SceneObservation.save_npz()` and `SceneObservation.load_npz()` are explicit
+inspection checkpoints. Normal experiments remain in memory, and no capture,
+registration, or recipe stage writes a cache automatically.

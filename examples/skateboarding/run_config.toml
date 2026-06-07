@@ -1,55 +1,20 @@
-# Real skateboarding clip config:
-#   uv run python scripts/bootstrap_robot_assets.py g1 --store .retarget_assets
-#   uv run python examples/skateboarding/run_retarget.py --demo pushoff5_twoshoes --download-assets
-#
-# CLI run from the repository root:
-#   uv run retarget run --config examples/skateboarding/run_config.toml
-
 name = "pushoff5_twoshoes"
 robot = "g1"
 robot_provider = "asset_store"
-task_kind = "object_interaction"
 output = "generated/pushoff5_twoshoes/pushoff5_twoshoes_retarget.npz"
-scale_to_robot = false
-output_fps = 30
-
-[source]
-kind = "motion_sync_skateboarding"
-demo = "pushoff5_twoshoes"
-synced_root = "../../motion_sync_output/synced"
 
 [robot_options]
 store = "../../.retarget_assets"
 
-[solver]
-backend = "cvxpy_clarabel"
-max_iterations = 10
-trust_radius = 0.2
+[observation]
+kind = "skateboarding"
+vicon = "../../capture_data/vicon/pushoff5_twoshoes"
+gvhmr = "../../capture_data/gvhmr/pushoff5_twoshoes"
+video_fps = 59.942
+timeline_selection = "human_pose"
+crop_policy = "overlap"
 
-[[objectives]]
-kind = "link_tracking"
-weight = 1.0
-
-[[objectives]]
-kind = "smoothness"
-weight = 0.2
-
-[[objectives]]
-kind = "nominal_tracking"
-weight = 5.0
-
-[[constraints]]
-kind = "joint_limits"
-
-[[constraints]]
-kind = "trust_region"
-
-[[constraints]]
-kind = "foot_sticking"
-tolerance = 0.001
-
-[[constraints]]
-kind = "non_penetration"
-sources = ["scene_points"]
-scene_clearance = 0.015
-activation_distance = 0.05
+[recipe]
+kind = "skateboarding"
+scale_to_robot = false
+output_fps = 30

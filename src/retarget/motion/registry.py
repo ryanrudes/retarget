@@ -15,7 +15,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import cast
 
-from retarget.core.enums import MotionFormat
+from retarget.core.enums import MotionFormat, MotionJoint
 from retarget.core.protocols import MotionLoader
 from retarget.core.registry import Registry
 from retarget.motion.spec import MotionFormatSpec
@@ -52,120 +52,118 @@ motion_loaders: Registry[MotionLoader] = Registry(
 """Registry of file-suffix :class:`~retarget.core.protocols.MotionLoader` implementations."""
 
 
-MINIMAL_JOINTS = (
-    "Pelvis",
-    "L_Hip",
-    "L_Knee",
-    "L_Toe",
-    "R_Hip",
-    "R_Knee",
-    "R_Toe",
-    "Spine",
-    "Head",
-    "L_Wrist",
-    "R_Wrist",
-)
+class MinimalMotionJoint(MotionJoint):
+    PELVIS = "Pelvis"
+    LEFT_HIP = "L_Hip"
+    LEFT_KNEE = "L_Knee"
+    LEFT_TOE = "L_Toe"
+    RIGHT_HIP = "R_Hip"
+    RIGHT_KNEE = "R_Knee"
+    RIGHT_TOE = "R_Toe"
+    SPINE = "Spine"
+    HEAD = "Head"
+    LEFT_WRIST = "L_Wrist"
+    RIGHT_WRIST = "R_Wrist"
 
-SMPLH_CORE_JOINTS = (
-    "Pelvis",
-    "L_Hip",
-    "L_Knee",
-    "L_Ankle",
-    "L_Toe",
-    "R_Hip",
-    "R_Knee",
-    "R_Ankle",
-    "R_Toe",
-    "Torso",
-    "Spine",
-    "Chest",
-    "Neck",
-    "Head",
-    "L_Shoulder",
-    "L_Elbow",
-    "L_Wrist",
-    "R_Shoulder",
-    "R_Elbow",
-    "R_Wrist",
-)
 
-LAFAN_CORE_JOINTS = (
-    "Hips",
-    "RightUpLeg",
-    "RightLeg",
-    "RightFoot",
-    "RightToeBase",
-    "LeftUpLeg",
-    "LeftLeg",
-    "LeftFoot",
-    "LeftToeBase",
-    "Spine",
-    "Spine1",
-    "Spine2",
-    "Neck",
-    "Head",
-    "RightArm",
-    "RightForeArm",
-    "RightHand",
-    "LeftArm",
-    "LeftForeArm",
-    "LeftHand",
-)
+class SmplhMotionJoint(MotionJoint):
+    PELVIS = "Pelvis"
+    LEFT_HIP = "L_Hip"
+    LEFT_KNEE = "L_Knee"
+    LEFT_ANKLE = "L_Ankle"
+    LEFT_TOE = "L_Toe"
+    RIGHT_HIP = "R_Hip"
+    RIGHT_KNEE = "R_Knee"
+    RIGHT_ANKLE = "R_Ankle"
+    RIGHT_TOE = "R_Toe"
+    TORSO = "Torso"
+    SPINE = "Spine"
+    CHEST = "Chest"
+    NECK = "Neck"
+    HEAD = "Head"
+    LEFT_SHOULDER = "L_Shoulder"
+    LEFT_ELBOW = "L_Elbow"
+    LEFT_WRIST = "L_Wrist"
+    RIGHT_SHOULDER = "R_Shoulder"
+    RIGHT_ELBOW = "R_Elbow"
+    RIGHT_WRIST = "R_Wrist"
 
-MOCAP_CORE_JOINTS = (
-    "Hips",
-    "Spine",
-    "Spine1",
-    "Neck",
-    "Head",
-    "LeftArm",
-    "LeftForeArm",
-    "LeftHand",
-    "LeftHandMiddle3",
-    "RightArm",
-    "RightForeArm",
-    "RightHand",
-    "RightHandMiddle3",
-    "LeftUpLeg",
-    "LeftLeg",
-    "LeftFoot",
-    "LeftToeBase",
-    "RightUpLeg",
-    "RightLeg",
-    "RightFoot",
-    "RightToeBase",
-)
 
-SMPLX_CORE_JOINTS = (
-    "Pelvis",
-    "L_Hip",
-    "R_Hip",
-    "Spine1",
-    "L_Knee",
-    "R_Knee",
-    "Spine2",
-    "L_Ankle",
-    "R_Ankle",
-    "Spine3",
-    "L_Foot",
-    "R_Foot",
-    "Neck",
-    "Head",
-    "L_Shoulder",
-    "R_Shoulder",
-    "L_Elbow",
-    "R_Elbow",
-    "L_Wrist",
-    "R_Wrist",
-)
+class LafanMotionJoint(MotionJoint):
+    HIPS = "Hips"
+    RIGHT_UP_LEG = "RightUpLeg"
+    RIGHT_LEG = "RightLeg"
+    RIGHT_FOOT = "RightFoot"
+    RIGHT_TOE_BASE = "RightToeBase"
+    LEFT_UP_LEG = "LeftUpLeg"
+    LEFT_LEG = "LeftLeg"
+    LEFT_FOOT = "LeftFoot"
+    LEFT_TOE_BASE = "LeftToeBase"
+    SPINE = "Spine"
+    SPINE1 = "Spine1"
+    SPINE2 = "Spine2"
+    NECK = "Neck"
+    HEAD = "Head"
+    RIGHT_ARM = "RightArm"
+    RIGHT_FORE_ARM = "RightForeArm"
+    RIGHT_HAND = "RightHand"
+    LEFT_ARM = "LeftArm"
+    LEFT_FORE_ARM = "LeftForeArm"
+    LEFT_HAND = "LeftHand"
+
+
+class MocapMotionJoint(MotionJoint):
+    HIPS = "Hips"
+    SPINE = "Spine"
+    SPINE1 = "Spine1"
+    NECK = "Neck"
+    HEAD = "Head"
+    LEFT_ARM = "LeftArm"
+    LEFT_FORE_ARM = "LeftForeArm"
+    LEFT_HAND = "LeftHand"
+    LEFT_HAND_MIDDLE3 = "LeftHandMiddle3"
+    RIGHT_ARM = "RightArm"
+    RIGHT_FORE_ARM = "RightForeArm"
+    RIGHT_HAND = "RightHand"
+    RIGHT_HAND_MIDDLE3 = "RightHandMiddle3"
+    LEFT_UP_LEG = "LeftUpLeg"
+    LEFT_LEG = "LeftLeg"
+    LEFT_FOOT = "LeftFoot"
+    LEFT_TOE_BASE = "LeftToeBase"
+    RIGHT_UP_LEG = "RightUpLeg"
+    RIGHT_LEG = "RightLeg"
+    RIGHT_FOOT = "RightFoot"
+    RIGHT_TOE_BASE = "RightToeBase"
+
+
+class SmplxMotionJoint(MotionJoint):
+    PELVIS = "Pelvis"
+    LEFT_HIP = "L_Hip"
+    RIGHT_HIP = "R_Hip"
+    SPINE1 = "Spine1"
+    LEFT_KNEE = "L_Knee"
+    RIGHT_KNEE = "R_Knee"
+    SPINE2 = "Spine2"
+    LEFT_ANKLE = "L_Ankle"
+    RIGHT_ANKLE = "R_Ankle"
+    SPINE3 = "Spine3"
+    LEFT_FOOT = "L_Foot"
+    RIGHT_FOOT = "R_Foot"
+    NECK = "Neck"
+    HEAD = "Head"
+    LEFT_SHOULDER = "L_Shoulder"
+    RIGHT_SHOULDER = "R_Shoulder"
+    LEFT_ELBOW = "L_Elbow"
+    RIGHT_ELBOW = "R_Elbow"
+    LEFT_WRIST = "L_Wrist"
+    RIGHT_WRIST = "R_Wrist"
 
 motion_formats.register(
     MotionFormat.MINIMAL,
     MotionFormatSpec(
         name=MotionFormat.MINIMAL.value,
-        joint_names=MINIMAL_JOINTS,
-        root_joint="Pelvis",
-        contact_joints=("L_Toe", "R_Toe"),
+        joint_vocabulary=MinimalMotionJoint,
+        root_joint=MinimalMotionJoint.PELVIS,
         default_height_m=1.7,
         description="Tiny synthetic format used for tests and examples.",
     ),
@@ -174,9 +172,8 @@ motion_formats.register(
     MotionFormat.SMPLH,
     MotionFormatSpec(
         name=MotionFormat.SMPLH.value,
-        joint_names=SMPLH_CORE_JOINTS,
-        root_joint="Pelvis",
-        contact_joints=("L_Toe", "R_Toe"),
+        joint_vocabulary=SmplhMotionJoint,
+        root_joint=SmplhMotionJoint.PELVIS,
         description="Core SMPL-H joints used by common object-interaction datasets.",
     ),
 )
@@ -184,9 +181,8 @@ motion_formats.register(
     MotionFormat.LAFAN,
     MotionFormatSpec(
         name=MotionFormat.LAFAN.value,
-        joint_names=LAFAN_CORE_JOINTS,
-        root_joint="Hips",
-        contact_joints=("LeftToeBase", "RightToeBase"),
+        joint_vocabulary=LafanMotionJoint,
+        root_joint=LafanMotionJoint.HIPS,
         default_height_m=1.7,
         description="Core LAFAN-style joint positions.",
     ),
@@ -195,9 +191,8 @@ motion_formats.register(
     MotionFormat.MOCAP,
     MotionFormatSpec(
         name=MotionFormat.MOCAP.value,
-        joint_names=MOCAP_CORE_JOINTS,
-        root_joint="Hips",
-        contact_joints=("LeftToeBase", "RightToeBase"),
+        joint_vocabulary=MocapMotionJoint,
+        root_joint=MocapMotionJoint.HIPS,
         default_height_m=1.78,
         description="Core markerless mocap-style joint positions.",
     ),
@@ -206,9 +201,8 @@ motion_formats.register(
     MotionFormat.SMPLX,
     MotionFormatSpec(
         name=MotionFormat.SMPLX.value,
-        joint_names=SMPLX_CORE_JOINTS,
-        root_joint="Pelvis",
-        contact_joints=("L_Foot", "R_Foot"),
+        joint_vocabulary=SmplxMotionJoint,
+        root_joint=SmplxMotionJoint.PELVIS,
         description="Core SMPL-X global joint position format.",
     ),
 )

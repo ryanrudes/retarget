@@ -362,24 +362,9 @@ def _nominal_qpos_plan_for_problem(problem: RetargetingProblem) -> NominalQposPl
 
 def _contact_plan_for_problem(
     problem: RetargetingProblem,
-    motion: MotionSequence,
+    _motion: MotionSequence,
 ) -> ContactPlan | None:
-    if problem.contacts is not None:
-        return _scaled_contact_plan(problem)
-    if not motion.contacts:
-        return None
-    subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
-    link_mapping = {subject: _links_for_contact_subject(subject, problem.robot.contact_links) for subject in subjects}
-    support = motion.support
-    factor = _motion_scale_factor(problem)
-    if support is not None and factor is not None:
-        support = support.scaled(factor)
-    return ContactPlan.from_binary_contacts(
-        motion.contacts,
-        link_mapping=link_mapping,
-        support=support,
-        provenance={"source": "motion_sequence.contacts", "motion": motion.name},
-    )
+    return _scaled_contact_plan(problem)
 
 
 def _source_height_m(problem: RetargetingProblem) -> float | None:
@@ -575,7 +560,7 @@ def _motion_provenance(problem: RetargetingProblem) -> dict[str, Any]:
         "fps": problem.motion.fps,
         "frame": problem.motion.frame.value,
         "has_root_poses": problem.motion.root_poses is not None,
-        "has_legacy_contacts": bool(problem.motion.contacts),
+        "has_contacts": problem.contacts is not None,
         "has_typed_contacts": problem.contacts is not None,
         "source_height_m": problem.motion.source_height_m,
         "metadata": _jsonable(problem.motion.metadata),
@@ -648,7 +633,7 @@ def _scene_provenance(problem: RetargetingProblem) -> dict[str, Any]:
 def _contact_metadata(problem: RetargetingProblem) -> dict[str, Any]:
     if problem.contacts is None:
         return {
-            "source": "legacy_motion_contacts" if problem.motion.contacts else None,
+            "source": problem.contacts.provenance.get("source") if problem.contacts is not None else None,
             "track_count": 0,
             "subjects": [],
             "has_support": False,
@@ -820,23 +805,17 @@ def _human_points(motion: MotionSequence, human_names: tuple[str, ...], frame_id
     return np.asarray(motion.joint_positions[frame_idx, indices, :], dtype=np.float64)
 
 
-def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
-    lower = subject.lower()
-    if "left" in lower or lower.startswith(("l_", "l-")):
-        return tuple(link for link in contact_links if "left" in link.lower() or link.lower().startswith(("l_", "l-")))
-    if "right" in lower or lower.startswith(("r_", "r-")):
-        return tuple(
-            link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
-        )
-    return contact_links
-
-
 def _point_jacobians_for_variables(
     backend: KinematicsBackend,
     qpos: FloatArray,
     point_names: tuple[str, ...],
     variable_set: ResolvedQposVariables,
 ) -> tuple[FloatArray, FloatArray]:
+    if not point_names:
+        return (
+            np.zeros((0, 3), dtype=np.float64),
+            np.zeros((0, 3, variable_set.size), dtype=np.float64),
+        )
     method = getattr(backend, "point_jacobians_for_qpos_indices", None)
     if callable(method):
         result = method(qpos, point_names, variable_set.indices)

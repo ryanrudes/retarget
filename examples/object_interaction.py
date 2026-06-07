@@ -1,54 +1,61 @@
-"""Object-interaction example with an identity object trajectory."""
+"""Object interaction through the unified experiment API."""
 
-from __future__ import annotations
+from pathlib import Path
 
 import numpy as np
 
 from retarget import (
+    HumanoidRobotRole,
+    MinimalMotionJoint,
+    MotionFileObservationRecipe,
     MotionFormat,
     ObjectSpec,
     ObjectTrajectory,
     OptimizationProfile,
-    Retargeter,
-    RetargetingProblem,
+    RetargetingExperiment,
     Robot,
+    RoleRetargetingRecipe,
     SceneSpec,
+    StaticSceneRecipe,
     TaskKind,
+    motion_formats,
+    robots,
 )
-from retarget.motion import MotionSequence, motion_formats
-from retarget.robots import robots
 
-fmt = motion_formats.get(MotionFormat.MINIMAL)
-motion = MotionSequence(
+repo_root = Path(__file__).resolve().parents[1]
+motion_format = motion_formats.get(MotionFormat.MINIMAL)
+observation = MotionFileObservationRecipe(
+    path=repo_root / "tests" / "fixtures" / "minimal_motion.json",
+    motion_format=motion_format,
     name="object_interaction",
-    joint_names=fmt.joint_names,
-    joint_positions=np.zeros((12, len(fmt.joint_names), 3)),
-    source_height_m=1.7,
 )
 object_spec = ObjectSpec(
     name="box",
     sample_points=np.asarray(
-        [
-            [x, y, z]
-            for x in (-0.2, 0.2)
-            for y in (-0.2, 0.2)
-            for z in (-0.2, 0.2)
-        ],
+        [[x, y, z] for x in (-0.2, 0.2) for y in (-0.2, 0.2) for z in (-0.2, 0.2)],
         dtype=np.float64,
     ),
-    trajectory=ObjectTrajectory.identity(motion.frame_count, fps=motion.fps, name="box"),
+    trajectory=ObjectTrajectory.identity(3, fps=30.0, name="box"),
 )
-problem = RetargetingProblem(
-    name="object_interaction",
+recipe = RoleRetargetingRecipe(
     task_kind=TaskKind.OBJECT_INTERACTION,
-    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
-    motion=motion,
-    motion_format=fmt,
-    scene=SceneSpec.object_interaction(object_spec),
+    motion_format=motion_format,
+    scene=StaticSceneRecipe(SceneSpec.object_interaction(object_spec)),
+    link_roles={
+        MinimalMotionJoint.PELVIS: HumanoidRobotRole.PELVIS,
+        MinimalMotionJoint.LEFT_WRIST: HumanoidRobotRole.LEFT_HAND,
+        MinimalMotionJoint.RIGHT_WRIST: HumanoidRobotRole.RIGHT_HAND,
+        MinimalMotionJoint.LEFT_TOE: HumanoidRobotRole.LEFT_FOOT,
+        MinimalMotionJoint.RIGHT_TOE: HumanoidRobotRole.RIGHT_FOOT,
+    },
     constraints=OptimizationProfile.object_interaction(
         floor_z=-2.0,
         scene_clearance=0.03,
         links=("left_toe", "right_toe"),
     ).constraints,
 )
-Retargeter().run(problem).save_npz("object_interaction.npz")
+RetargetingExperiment(
+    observation=observation,
+    recipe=recipe,
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
+).run().save_npz("object_interaction.npz")

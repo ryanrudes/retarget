@@ -108,7 +108,7 @@ def test_retargeter_runs_minimal_fixture(tmp_path):
     assert result.metadata["motion_format"] == "minimal"
     assert result.metadata["resolved_solver"] in {"numpy_least_squares", "cvxpy_clarabel"}
     assert len(result.metadata["solver_statuses"]) == motion.frame_count
-    assert result.metadata["link_mapping"]["L_Toe"] == "left_toe"
+    assert result.metadata["link_mapping"] == {}
     out = result.save_npz(tmp_path / "result.npz")
     assert out.exists()
     loaded = RetargetingResult.load_npz(out)
@@ -508,6 +508,7 @@ def test_object_result_metadata_includes_visualizer_playback_object():
 def test_problem_registry_preflight_reports_missing_extension_references():
     motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
     robot = robots.get("synthetic_humanoid")
+
     class MissingObjectiveConfig(ObjectiveConfig):
         kind: Literal["missing_objective"] = "missing_objective"
 
@@ -551,9 +552,7 @@ def test_problem_can_apply_reusable_optimization_profile():
     )
     from retarget.optimization import SmoothnessObjectiveConfig
 
-    profile = OptimizationProfile.defaults(name="low_smoothness").with_objective(
-        SmoothnessObjectiveConfig(weight=0.01)
-    )
+    profile = OptimizationProfile.defaults(name="low_smoothness").with_objective(SmoothnessObjectiveConfig(weight=0.01))
 
     problem = base_problem.with_optimization_profile(profile)
 
@@ -561,6 +560,21 @@ def test_problem_can_apply_reusable_optimization_profile():
     assert [objective.kind for objective in problem.objectives] == ["laplacian", "smoothness"]
     assert problem.objectives[-1].weight == 0.01
     assert base_problem.objectives[-1].weight == 0.2
+
+
+def test_problem_rejects_behavioral_metadata():
+    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
+    robot = robots.get("synthetic_humanoid")
+
+    with pytest.raises(ValueError, match="provenance-only"):
+        RetargetingProblem(
+            name="bad_metadata",
+            task_kind=TaskKind.ROBOT_ONLY,
+            robot=robot,
+            motion=motion,
+            scene=SceneSpec.robot_only(),
+            metadata={"solver": "numpy_least_squares"},
+        )
 
 
 def test_registered_custom_objective_and_constraint_affect_retargeting():
@@ -760,9 +774,7 @@ def test_penetration_metric_includes_scene_clearance_violation():
         motion=motion,
         motion_format=motion_formats.get("minimal"),
         scene=SceneSpec.object_interaction(object_spec),
-        constraints=(
-            NonPenetrationConstraintConfig(floor_z=-2.0, scene_clearance=0.05),
-        ),
+        constraints=(NonPenetrationConstraintConfig(floor_z=-2.0, scene_clearance=0.05),),
     )
     qpos = np.zeros((1, robot.qpos_size()))
     qpos[:, 3] = 1.0

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from retarget.assets import AssetStore
-from retarget.core.enums import AssetKind, Robot, RobotProviderName
+from retarget.core.enums import AssetKind, HumanoidRobotRole, Robot, RobotProviderName
 from retarget.core.protocols import RobotProvider
 from retarget.core.registry import Registry
 from retarget.robots.spec import RobotSpec
@@ -139,6 +139,24 @@ class AssetStoreRobotProvider:
         return RobotSpec.load(spec_path)
 
 
+class HolosomaRobotProvider:
+    """Construct the typed G1 spherehand spec from a Holosoma checkout."""
+
+    def load(self, name: str, **kwargs: Any) -> RobotSpec:
+        """Load the Holosoma G1 robot without exposing adapter code."""
+
+        from retarget.recipes.holosoma import g1_spherehand_robot
+
+        holosoma_root = kwargs.pop("holosoma_root", None)
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs))
+            raise ValueError(
+                f"HolosomaRobotProvider does not accept options: {unknown}"
+            )
+        spec = g1_spherehand_robot(holosoma_root)
+        return spec if name == spec.name else spec.model_copy(update={"name": name})
+
+
 def _robot_spec_path(asset_path: Path, spec_filename: str = "") -> Path:
     if asset_path.is_file():
         return asset_path
@@ -237,26 +255,32 @@ HUMANOID_LINKS = (
     "right_hand",
 )
 
-HUMANOID_LINK_MAPPING = {
-    "Pelvis": "pelvis",
-    "Spine": "torso",
-    "Head": "head",
-    "L_Toe": "left_foot",
-    "R_Toe": "right_foot",
-    "L_Wrist": "left_hand",
-    "R_Wrist": "right_hand",
+HUMANOID_LINK_ROLES = {
+    HumanoidRobotRole.PELVIS: "pelvis",
+    HumanoidRobotRole.TORSO: "torso",
+    HumanoidRobotRole.HEAD: "head",
+    HumanoidRobotRole.LEFT_HIP: "left_hip_pitch",
+    HumanoidRobotRole.LEFT_KNEE: "left_knee",
+    HumanoidRobotRole.LEFT_ANKLE: "left_ankle_pitch",
+    HumanoidRobotRole.LEFT_FOOT: "left_foot",
+    HumanoidRobotRole.RIGHT_HIP: "right_hip_pitch",
+    HumanoidRobotRole.RIGHT_KNEE: "right_knee",
+    HumanoidRobotRole.RIGHT_ANKLE: "right_ankle_pitch",
+    HumanoidRobotRole.RIGHT_FOOT: "right_foot",
+    HumanoidRobotRole.LEFT_HAND: "left_hand",
+    HumanoidRobotRole.RIGHT_HAND: "right_hand",
 }
 
-HUMANOID_JOINT_MAPPING = {
-    "L_Hip": "left_hip_pitch",
-    "L_Knee": "left_knee",
-    "L_Toe": "left_ankle_pitch",
-    "R_Hip": "right_hip_pitch",
-    "R_Knee": "right_knee",
-    "R_Toe": "right_ankle_pitch",
-    "Spine": "waist_yaw",
-    "L_Wrist": "left_elbow",
-    "R_Wrist": "right_elbow",
+G1_JOINT_ROLES = {
+    HumanoidRobotRole.LEFT_HIP: "left_hip_pitch",
+    HumanoidRobotRole.LEFT_KNEE: "left_knee",
+    HumanoidRobotRole.LEFT_ANKLE: "left_ankle_pitch",
+    HumanoidRobotRole.RIGHT_HIP: "right_hip_pitch",
+    HumanoidRobotRole.RIGHT_KNEE: "right_knee",
+    HumanoidRobotRole.RIGHT_ANKLE: "right_ankle_pitch",
+    HumanoidRobotRole.TORSO: "waist_yaw",
+    HumanoidRobotRole.LEFT_HAND: "left_elbow",
+    HumanoidRobotRole.RIGHT_HAND: "right_elbow",
 }
 
 
@@ -294,23 +318,30 @@ robots.register(
         contact_links=("left_toe", "right_toe"),
         nominal_tracking_joints=SYNTHETIC_JOINTS[:7],
         joint_limits={name: (-2.0, 2.0) for name in SYNTHETIC_JOINTS},
-        default_joint_mapping={
-            "L_Hip": "left_hip_pitch",
-            "L_Knee": "left_knee",
-            "L_Toe": "left_ankle",
-            "R_Hip": "right_hip_pitch",
-            "R_Knee": "right_knee",
-            "R_Toe": "right_ankle",
-            "Spine": "spine_yaw",
-            "L_Wrist": "left_elbow",
-            "R_Wrist": "right_elbow",
+        joint_roles={
+            HumanoidRobotRole.LEFT_HIP: "left_hip_pitch",
+            HumanoidRobotRole.LEFT_KNEE: "left_knee",
+            HumanoidRobotRole.LEFT_ANKLE: "left_ankle",
+            HumanoidRobotRole.RIGHT_HIP: "right_hip_pitch",
+            HumanoidRobotRole.RIGHT_KNEE: "right_knee",
+            HumanoidRobotRole.RIGHT_ANKLE: "right_ankle",
+            HumanoidRobotRole.TORSO: "spine_yaw",
+            HumanoidRobotRole.LEFT_HAND: "left_elbow",
+            HumanoidRobotRole.RIGHT_HAND: "right_elbow",
         },
-        default_link_mapping={
-            "Pelvis": "pelvis",
-            "L_Toe": "left_toe",
-            "R_Toe": "right_toe",
-            "L_Wrist": "left_hand",
-            "R_Wrist": "right_hand",
+        link_roles={
+            HumanoidRobotRole.PELVIS: "pelvis",
+            HumanoidRobotRole.TORSO: "spine_yaw",
+            HumanoidRobotRole.LEFT_HIP: "left_hip_pitch",
+            HumanoidRobotRole.LEFT_KNEE: "left_knee",
+            HumanoidRobotRole.LEFT_ANKLE: "left_ankle",
+            HumanoidRobotRole.LEFT_FOOT: "left_toe",
+            HumanoidRobotRole.RIGHT_HIP: "right_hip_pitch",
+            HumanoidRobotRole.RIGHT_KNEE: "right_knee",
+            HumanoidRobotRole.RIGHT_ANKLE: "right_ankle",
+            HumanoidRobotRole.RIGHT_FOOT: "right_toe",
+            HumanoidRobotRole.LEFT_HAND: "left_hand",
+            HumanoidRobotRole.RIGHT_HAND: "right_hand",
         },
         metadata={"fixture": True},
     ),
@@ -327,8 +358,8 @@ robots.register(
         contact_links=("left_foot", "right_foot"),
         nominal_tracking_joints=G1_LIKE_JOINTS[:19],
         joint_limits=_humanoid_limits(G1_LIKE_JOINTS),
-        default_joint_mapping=HUMANOID_JOINT_MAPPING,
-        default_link_mapping=HUMANOID_LINK_MAPPING,
+        joint_roles=G1_JOINT_ROLES,
+        link_roles=HUMANOID_LINK_ROLES,
         metadata={
             "asset_required": True,
             "description": (
@@ -361,8 +392,8 @@ robots.register(
             "right_elbow",
         ),
         joint_limits=_humanoid_limits(T1_LIKE_JOINTS),
-        default_joint_mapping=HUMANOID_JOINT_MAPPING | {"Spine": "torso_yaw"},
-        default_link_mapping=HUMANOID_LINK_MAPPING,
+        joint_roles=G1_JOINT_ROLES | {HumanoidRobotRole.TORSO: "torso_yaw"},
+        link_roles=HUMANOID_LINK_ROLES,
         metadata={
             "asset_required": True,
             "description": (
@@ -375,3 +406,4 @@ robots.register(
 robot_providers.register(RobotProviderName.REGISTRY, RegistryRobotProvider())
 robot_providers.register(RobotProviderName.FILE, FileRobotProvider())
 robot_providers.register(RobotProviderName.ASSET_STORE, AssetStoreRobotProvider())
+robot_providers.register(RobotProviderName.HOLOSOMA, HolosomaRobotProvider())

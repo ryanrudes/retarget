@@ -14,7 +14,6 @@ from retarget.core.enums import FrameConvention, MotionLoaderSuffix, QuaternionO
 from retarget.core.pose import PoseSequence
 from retarget.motion.registry import motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
-from retarget.motion.support import SupportPlane
 
 
 class JsonMotionLoader:
@@ -50,7 +49,6 @@ class JsonMotionLoader:
             fps=fps,
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
-            contacts=_contacts_from_mapping(data),
             source_height_m=source_height_m,
             metadata=metadata,
         )
@@ -95,11 +93,11 @@ class NpzMotionLoader:
             name (str | None): Override sequence name; defaults to the file stem.
 
         Returns:
-            MotionSequence: Parsed motion with optional root poses, contacts, and height metadata.
+            MotionSequence: Parsed motion with optional root poses and height metadata.
 
         Raises:
             KeyError: If no recognized position array key is present.
-            ValueError: If arrays or contact matrices fail validation.
+            ValueError: If arrays fail validation.
         """
 
         data = np.load(path, allow_pickle=True)
@@ -113,8 +111,6 @@ class NpzMotionLoader:
         if "height_m" in data:
             source_height_m = float(np.asarray(data["height_m"]).reshape(()))
         _reject_legacy_link_targets(data)
-        support_plane = _support_plane_from_npz(data)
-        contact_provenance = _contact_provenance_from_npz(data)
         fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
@@ -124,9 +120,6 @@ class NpzMotionLoader:
             fps=fps,
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
-            contacts=_contacts_from_npz(data, spec),
-            support=support_plane,
-            contact_provenance=contact_provenance,
             source_height_m=source_height_m,
             metadata=metadata,
         )
@@ -149,8 +142,7 @@ class CsvMotionLoader:
         """Load a wide CSV motion table.
 
         Each row is one frame. Joint coordinates are read from ``{joint}_{axis}`` columns
-        (also ``.`` and ``:`` separators). Optional root-pose and contact columns are
-        detected when present.
+        (also ``.`` and ``:`` separators). Optional root-pose columns are detected.
 
         Args:
             path (Path): CSV file with a header row.
@@ -188,7 +180,6 @@ class CsvMotionLoader:
             fps=fps,
             frame=spec.frame_convention,
             root_poses=_csv_root_poses(normalized_rows, spec, fps=fps),
-            contacts=_csv_contacts(normalized_rows, spec.contact_joints),
             source_height_m=source_height_m,
             metadata=metadata,
         )
@@ -199,31 +190,6 @@ def _first_present(data: Any, *keys: str) -> np.ndarray:
         if key in data:
             return np.asarray(data[key], dtype=np.float64)
     raise KeyError(f"Expected one of {keys} in motion file")
-
-
-def _contacts_from_mapping(data: dict[str, Any]) -> Any:
-    return data.get("contacts", data.get("contact_states", ()))
-
-
-def _contacts_from_npz(data: Any, spec: MotionFormatSpec) -> Any:
-    key = next((candidate for candidate in ("contacts", "contact_states") if candidate in data), None)
-    if key is None:
-        return ()
-    raw = data[key]
-    values = np.asarray(raw)
-    if values.dtype == object:
-        return values.tolist()
-    if values.ndim == 1 and len(spec.contact_joints) == 1:
-        values = values.reshape((-1, 1))
-    if values.ndim != 2:
-        raise ValueError(f"{key} must have shape (frames, contacts)")
-    names = _string_tuple(data.get("contact_names", spec.contact_joints))
-    if len(names) != values.shape[1]:
-        raise ValueError("contact_names length must match contact matrix width")
-    return tuple(
-        {name: bool(values[frame_idx, contact_idx]) for contact_idx, name in enumerate(names)}
-        for frame_idx in range(values.shape[0])
-    )
 
 
 def _reject_legacy_link_targets(data: Any) -> None:
@@ -243,35 +209,9 @@ def _reject_legacy_link_targets(data: Any) -> None:
         )
 
 
-def _support_plane_from_npz(data: Any) -> SupportPlane | None:
-    if "support_plane_normal" not in data and "support_plane_origin" not in data:
-        return None
-    if "support_plane_normal" not in data or "support_plane_origin" not in data:
-        raise KeyError("support plane requires support_plane_normal and support_plane_origin")
-    normal = np.asarray(data["support_plane_normal"], dtype=np.float64).reshape(3)
-    origin = np.asarray(data["support_plane_origin"], dtype=np.float64).reshape(3)
-    up_axis = int(np.asarray(data["support_plane_up_axis"]).reshape(())) if "support_plane_up_axis" in data else 2
-    return SupportPlane(normal=normal, origin=origin, up_axis=up_axis)
-
-
 def _optional_height_from_mapping(data: dict[str, Any]) -> float | None:
     value = data.get("source_height_m", data.get("height_m", data.get("height")))
     return None if value is None else float(value)
-
-
-def _contact_provenance_from_npz(data: Any) -> dict[str, Any]:
-    provenance: dict[str, Any] = {}
-    for key in (
-        "contact_source",
-        "contact_model_fingerprint",
-        "contact_timeline_fingerprint",
-        "contact_detector_timeline_fingerprint",
-    ):
-        if key in data:
-            provenance[key] = _scalar_string(data[key])
-    if "contact_source_frame_count" in data:
-        provenance["source_frame_count"] = int(np.asarray(data["contact_source_frame_count"]).reshape(()))
-    return provenance
 
 
 def _root_poses_from_mapping(
@@ -372,21 +312,6 @@ def _quaternion_order_from_mapping(data: Any, default: QuaternionOrder) -> Quate
     return default
 
 
-def _string_tuple(values: Any) -> tuple[str, ...]:
-    array = np.asarray(values)
-    if array.shape == ():
-        scalar = array.reshape(()).item()
-        if isinstance(scalar, bytes):
-            scalar = scalar.decode()
-        return (str(scalar),)
-    out: list[str] = []
-    for value in array.tolist():
-        if isinstance(value, bytes):
-            value = value.decode()
-        out.append(str(value))
-    return tuple(out)
-
-
 def _frame_from_mapping(data: Any, default: FrameConvention) -> FrameConvention:
     for key in ("frame_convention", "frame"):
         if key not in data:
@@ -453,24 +378,6 @@ def _optional_csv_float(row: dict[str, str], keys: tuple[str, ...]) -> float | N
     return None
 
 
-def _csv_contacts(rows: list[dict[str, str]], contact_joints: tuple[str, ...]) -> tuple[dict[str, bool], ...]:
-    contact_keys = {
-        joint: _first_csv_key(rows[0], _contact_column_candidates(joint))
-        for joint in contact_joints
-    }
-    contact_keys = {joint: key for joint, key in contact_keys.items() if key is not None}
-    if not contact_keys:
-        return ()
-    return tuple(
-        {
-            joint: _csv_bool(row[key])
-            for joint, key in contact_keys.items()
-            if key in row and row[key] not in ("", None)
-        }
-        for row in rows
-    )
-
-
 def _csv_root_poses(rows: list[dict[str, str]], spec: MotionFormatSpec, *, fps: float) -> PoseSequence | None:
     position_keys = [
         _first_csv_key(rows[0], _root_position_column_candidates(axis))
@@ -520,24 +427,6 @@ def _root_quaternion_column_candidates(component: str) -> tuple[str, ...]:
         _normalize_column(f"root_q{component}"),
         _normalize_column(f"root_pose_quaternion_{component}"),
     )
-
-
-def _contact_column_candidates(joint_name: str) -> tuple[str, ...]:
-    return (
-        _normalize_column(f"{joint_name}_contact"),
-        _normalize_column(f"contact_{joint_name}"),
-        _normalize_column(f"{joint_name}_in_contact"),
-        _normalize_column(f"is_contact_{joint_name}"),
-    )
-
-
-def _csv_bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y", "contact", "contacting"}:
-        return True
-    if normalized in {"0", "false", "f", "no", "n", "none", "off", ""}:
-        return False
-    return bool(float(value))
 
 
 def _first_csv_key(row: dict[str, str], keys: tuple[str, ...]) -> str | None:

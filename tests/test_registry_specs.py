@@ -21,6 +21,7 @@ from retarget.core.enums import (
     RobotJoint,
     RobotLink,
     RobotProviderName,
+    RobotRole,
     RunStatus,
     VisualizerName,
 )
@@ -45,6 +46,7 @@ from retarget.optimization import (
 )
 from retarget.results import RetargetingResult
 from retarget.robots import RobotSpec, robot_providers, robots
+from retarget.scene import ObjectSpec, SceneSpec, TerrainSpec
 from retarget.visualization import visualizers
 
 
@@ -95,7 +97,7 @@ def test_builtin_specs_available():
     assert t1.dof == 23
     assert "left_ankle_pitch" in g1.joint_names
     assert "torso_yaw" in t1.joint_names
-    assert g1.default_link_mapping["L_Toe"] == "left_foot"
+    assert g1.link_roles["left_foot"] == "left_foot"
     assert "placeholder" not in g1.metadata["description"]
 
 
@@ -118,9 +120,9 @@ def test_user_vocab_enums_normalize_into_robot_specs():
     class UnitRobotLink(RobotLink):
         FOOT = "foot_link"
 
-    class UnitMotionJoint(MotionJoint):
-        HIP = "HumanHip"
-        FOOT = "HumanFoot"
+    class UnitRobotRole(RobotRole):
+        HIP = "hip"
+        FOOT = "foot"
 
     class UnitContactSubject(ContactSubject):
         LEFT_FOOT = "left_foot_subject"
@@ -143,16 +145,17 @@ def test_user_vocab_enums_normalize_into_robot_specs():
         contact_links=(UnitRobotLink.FOOT,),
         nominal_tracking_joints=(UnitRobotJoint.HIP,),
         joint_limits={UnitRobotJoint.HIP: (-1.0, 1.0)},
-        default_joint_mapping={UnitMotionJoint.HIP: UnitRobotJoint.HIP},
-        default_link_mapping={UnitMotionJoint.FOOT: UnitRobotLink.FOOT},
+        role_vocabulary=UnitRobotRole,
+        joint_roles={UnitRobotRole.HIP: UnitRobotJoint.HIP},
+        link_roles={UnitRobotRole.FOOT: UnitRobotLink.FOOT},
         geometry_names=(UnitGeometry.FOOT_COLLISION,),
         mujoco_body_aliases={UnitRobotLink.FOOT: "foot_body"},
     )
 
     assert spec.joint_names == ("hip_joint",)
     assert spec.contact_links == ("foot_link",)
-    assert spec.default_joint_mapping == {"HumanHip": "hip_joint"}
-    assert spec.default_link_mapping == {"HumanFoot": "foot_link"}
+    assert spec.joint_roles == {"hip": "hip_joint"}
+    assert spec.link_roles == {"foot": "foot_link"}
     assert spec.geometry_names == ("foot_collision",)
     assert spec.mujoco_body_aliases == {"foot_link": "foot_body"}
     assert UnitContactSubject.LEFT_FOOT.value == "left_foot_subject"
@@ -171,14 +174,35 @@ def test_robot_spec_rejects_behavioral_metadata_keys():
         )
 
 
+@pytest.mark.parametrize(
+    ("factory", "key"),
+    [
+        (lambda metadata: ObjectSpec(name="object", metadata=metadata), "mesh_path"),
+        (lambda metadata: TerrainSpec(metadata=metadata), "sample_points"),
+        (lambda metadata: SceneSpec.robot_only().model_copy(update={"metadata": metadata}), "ground_size"),
+    ],
+)
+def test_scene_specs_reject_behavioral_metadata(factory, key):
+    if key == "ground_size":
+        with pytest.raises(ValueError, match="provenance-only"):
+            SceneSpec(task_kind="robot_only", metadata={key: 12})
+        return
+    with pytest.raises(ValueError, match="provenance-only"):
+        factory({key: "wrong"})
+
+
 def test_spec_registries_accept_decorated_factories():
+    class UnitMotionJoint(MotionJoint):
+        ROOT = "root"
+        LEFT_TOE = "left_toe"
+        RIGHT_TOE = "right_toe"
+
     @motion_formats.register("unit_test_format", replace=True)
     def unit_test_format() -> MotionFormatSpec:
         return MotionFormatSpec(
             name="unit_test_format",
-            joint_names=("root", "left_toe", "right_toe"),
-            root_joint="root",
-            contact_joints=("left_toe", "right_toe"),
+            joint_vocabulary=UnitMotionJoint,
+            root_joint=UnitMotionJoint.ROOT,
         )
 
     @robots.register("unit_test_robot", replace=True)
@@ -305,10 +329,15 @@ def test_protocol_registries_accept_decorated_classes(tmp_path):
     assert motion_loaders.get(".unitloader").load(motion_path, format_spec).name == "motion"
     assert robot_providers.get("unit_test_provider").load("decorated_robot").name == "decorated_robot"
     assert metrics.get("unit_test_metric").evaluate(result) == 42.0
-    assert exporters.get("unit_test_exporter").export(
-        result,
-        ExportSpec(format_name="unit_test_exporter", output_path=tmp_path / "export.txt"),
-    ).path.read_text() == "decorated_result"
+    assert (
+        exporters.get("unit_test_exporter")
+        .export(
+            result,
+            ExportSpec(format_name="unit_test_exporter", output_path=tmp_path / "export.txt"),
+        )
+        .path.read_text()
+        == "decorated_result"
+    )
     visualizer = visualizers.get("unit_test_visualizer")
     visualizer.view(result)
     assert visualizer.names == ["decorated_result"]

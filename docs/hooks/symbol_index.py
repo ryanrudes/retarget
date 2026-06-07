@@ -97,7 +97,7 @@ FIELD_SHORT_BLOCKLIST = frozenset(
 )
 
 SECTION_SUFFIXES = ("-functions", "-attributes", "-classes")
-API_PACKAGE_PREFIXES = ("retarget.", "motion_sync.", "contact_detection.")
+API_PACKAGE_PREFIXES = ("retarget.",)
 ANCHOR_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "api-anchor-ids.json"
 
 

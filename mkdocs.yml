@@ -113,9 +113,8 @@ nav:
       - Troubleshooting: troubleshooting.md
   - API:
       - Overview: api/index.md
-      - motion_sync: api/motion-sync.md
-      - "motion_sync (full)": api/motion-sync-reference.md
-      - contact_detection: api/contact-detection.md
+      - Capture: api/capture.md
+      - Observation and recipes: api/recipes.md
       - Pipeline: api/pipeline.md
       - Data models: api/models.md
       - Protocols: api/protocols.md
@@ -137,8 +136,6 @@ plugins:
         python:
           paths:
             - src
-            - vendor/motion_sync
-            - vendor/event_detection/src
           options:
             docstring_style: google
             docstring_options:

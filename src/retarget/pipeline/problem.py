@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.enums import TaskKind
 from retarget.mesh import InteractionMeshSpec
@@ -24,15 +24,16 @@ class RetargetingProblem(BaseModel):
     Attributes:
         name (str): Human-readable run identifier.
         task_kind (TaskKind): High-level workflow (robot-only, object interaction, climbing).
-        robot (RobotSpec): Target robot model, limits, and default mappings.
+        robot (RobotSpec): Target robot model, limits, and semantic role bindings.
         motion (MotionSequence): Source human joint trajectory in world space.
         scene (SceneSpec): Ground, terrain, and optional manipulated object.
         contacts (ContactPlan | None): Optional typed contact states and support geometry.
         targets (LinkTargetPlan | None): Optional typed link-tracking targets.
         initial_qpos (InitialQposPlan | None): Optional full-qpos seeds for each frame.
         nominal_qpos (NominalQposPlan | None): Optional frame-aligned nominal robot qpos trajectory.
-        motion_format (MotionFormatSpec | None): Format metadata for contact inference and scaling.
-        joint_mapping (dict[str, str] | None): Motion-joint to robot-joint map; ``None`` uses robot defaults.
+        motion_format (MotionFormatSpec | None): Typed source representation and scaling defaults.
+        joint_mapping (dict[str, str]): Explicit motion-joint to robot-joint map.
+        link_mapping (dict[str, str]): Explicit motion-joint to robot-link map.
         mesh (InteractionMeshSpec): Interaction-mesh topology for Laplacian objectives.
         solver (SolverSpec): Backend selection and SQP subproblem solver options.
         objectives (tuple[ObjectiveConfig, ...]): Weighted least-squares terms applied each frame.
@@ -42,7 +43,7 @@ class RetargetingProblem(BaseModel):
         output_fps (float | None): Resample motion and scene to this rate before retargeting; ``None`` keeps motion fps.
         show_progress (bool): When ``True``, show a Rich progress bar during per-frame optimization.
         progress_description (str | None): Progress bar label; defaults to :attr:`name`.
-        metadata (dict[str, Any]): Opaque key-value tags stored on results and manifests.
+        metadata (dict[str, Any]): Provenance-only tags stored on results and manifests.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -57,7 +58,8 @@ class RetargetingProblem(BaseModel):
     initial_qpos: InitialQposPlan | None = None
     nominal_qpos: NominalQposPlan | None = None
     motion_format: MotionFormatSpec | None = None
-    joint_mapping: dict[str, str] | None = None
+    joint_mapping: dict[str, str] = Field(default_factory=dict)
+    link_mapping: dict[str, str] = Field(default_factory=dict)
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
     solver: SolverSpec = Field(default_factory=SolverSpec)
     variables: QposVariableSpec = Field(default_factory=QposVariableSpec.actuated)
@@ -68,6 +70,45 @@ class RetargetingProblem(BaseModel):
     show_progress: bool = False
     progress_description: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("joint_mapping", "link_mapping", mode="before")
+    @classmethod
+    def _normalize_mapping(cls, value: Any) -> dict[str, str]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("joint and link mappings must be dictionaries")
+        return {str(source): str(target) for source, target in value.items()}
+
+    @field_validator("metadata")
+    @classmethod
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {
+            "constraints",
+            "contacts",
+            "initial_qpos",
+            "joint_mapping",
+            "link_mapping",
+            "mesh",
+            "motion",
+            "motion_format",
+            "nominal_qpos",
+            "objectives",
+            "output_fps",
+            "robot",
+            "scale_to_robot",
+            "scene",
+            "solver",
+            "targets",
+            "task_kind",
+            "variables",
+        }
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError(
+                "RetargetingProblem metadata is provenance-only; use typed fields instead: " + ", ".join(present)
+            )
+        return dict(value)
 
     @model_validator(mode="after")
     def _validate_problem(self) -> RetargetingProblem:
@@ -104,16 +145,12 @@ class RetargetingProblem(BaseModel):
             if self.initial_qpos.frame_count != self.motion.frame_count:
                 raise ValueError("initial_qpos frame count must match motion")
             if self.initial_qpos.qpos_size != expected_qpos_size:
-                raise ValueError(
-                    f"initial_qpos qpos_size must be {expected_qpos_size} for robot {self.robot.name!r}"
-                )
+                raise ValueError(f"initial_qpos qpos_size must be {expected_qpos_size} for robot {self.robot.name!r}")
         if self.nominal_qpos is not None:
             if self.nominal_qpos.frame_count != self.motion.frame_count:
                 raise ValueError("nominal_qpos frame count must match motion")
             if self.nominal_qpos.qpos_size != expected_qpos_size:
-                raise ValueError(
-                    f"nominal_qpos qpos_size must be {expected_qpos_size} for robot {self.robot.name!r}"
-                )
+                raise ValueError(f"nominal_qpos qpos_size must be {expected_qpos_size} for robot {self.robot.name!r}")
         self.variables.resolve(
             self.robot,
             qpos_size=self.robot.qpos_size(has_object=self.scene.has_dynamic_object()),
@@ -127,31 +164,14 @@ class RetargetingProblem(BaseModel):
         return self
 
     def resolved_joint_mapping(self) -> dict[str, str]:
-        """Return explicit mapping or robot defaults filtered to available motion joints."""
+        """Return the explicit motion-joint to robot-joint mapping."""
 
-        if self.joint_mapping is not None:
-            return dict(self.joint_mapping)
-        return {
-            human: robot_joint
-            for human, robot_joint in self.robot.default_joint_mapping.items()
-            if human in self.motion.joint_names and robot_joint in self.robot.joint_names
-        }
+        return dict(self.joint_mapping)
 
     def resolved_link_mapping(self) -> dict[str, str]:
         """Return motion-joint to robot-link mapping for interaction-mesh matching."""
 
-        if self.robot.default_link_mapping:
-            valid_link_targets = (
-                set(self.robot.link_names)
-                | set(self.robot.joint_names)
-                | set(self.robot.contact_links)
-            )
-            return {
-                human: link_name
-                for human, link_name in self.robot.default_link_mapping.items()
-                if human in self.motion.joint_names and link_name in valid_link_targets
-            }
-        return self.resolved_joint_mapping()
+        return dict(self.link_mapping)
 
     def validate_registry_references(self) -> None:
         """Validate registered optimization references used by this problem."""
@@ -179,6 +199,7 @@ class RetargetingProblem(BaseModel):
             nominal_qpos=self.nominal_qpos,
             motion_format=self.motion_format,
             joint_mapping=self.joint_mapping,
+            link_mapping=self.link_mapping,
             mesh=self.mesh,
             solver=self.solver,
             variables=self.variables,
@@ -214,18 +235,11 @@ class RetargetingProblem(BaseModel):
             scene=self.scene.resampled(fps),
             contacts=self.contacts.resampled(self.motion.fps, fps) if self.contacts is not None else None,
             targets=self.targets.resampled(self.motion.fps, fps) if self.targets is not None else None,
-            initial_qpos=(
-                self.initial_qpos.resampled(self.motion.fps, fps)
-                if self.initial_qpos is not None
-                else None
-            ),
-            nominal_qpos=(
-                self.nominal_qpos.resampled(self.motion.fps, fps)
-                if self.nominal_qpos is not None
-                else None
-            ),
+            initial_qpos=(self.initial_qpos.resampled(self.motion.fps, fps) if self.initial_qpos is not None else None),
+            nominal_qpos=(self.nominal_qpos.resampled(self.motion.fps, fps) if self.nominal_qpos is not None else None),
             motion_format=self.motion_format,
             joint_mapping=self.joint_mapping,
+            link_mapping=self.link_mapping,
             mesh=self.mesh,
             solver=self.solver,
             variables=self.variables,

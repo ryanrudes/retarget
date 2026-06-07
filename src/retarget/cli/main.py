@@ -11,7 +11,11 @@ from rich.console import Console
 from rich.table import Table
 
 from retarget.assets import AssetInstallManifest, AssetStore
-from retarget.cli.config import MotionFileSourceConfig, RetargetingRunConfig
+from retarget.cli.config import (
+    MotionFileObservationConfig,
+    RetargetingRunConfig,
+    RoleMappingRecipeConfig,
+)
 from retarget.core.enums import AssetKind, KinematicsBackendName, RunStatus, TaskKind
 from retarget.core.protocols import KinematicsBackend
 from retarget.export import ExportSpec, export_tracking, exporters
@@ -322,8 +326,7 @@ def export(
         ),
     )
     console.print(
-        f"Exported {exported.frame_count} frames at {exported.fps:g} fps "
-        f"to {exported.path} ({exported.format_name})"
+        f"Exported {exported.frame_count} frames at {exported.fps:g} fps to {exported.path} ({exported.format_name})"
     )
 
 
@@ -439,9 +442,14 @@ def _run_one(
     return _run_from_config(
         RetargetingRunConfig(
             name=name,
-            source=MotionFileSourceConfig(path=motion_path, format_name=format_name),
+            observation=MotionFileObservationConfig(
+                path=motion_path,
+                format_name=format_name,
+            ),
+            recipe=_default_role_recipe(format_name),
             output=output,
             robot=robot_name,
+        ).with_overrides(
             task_kind=task_kind,
         )
     )
@@ -474,25 +482,68 @@ def _run_config_from_inputs(
         raise typer.BadParameter("--output is required when --config is not provided")
     return RetargetingRunConfig(
         name=name,
-        source=MotionFileSourceConfig(path=motion, format_name=format_name or "minimal"),
+        observation=MotionFileObservationConfig(
+            path=motion,
+            format_name=format_name or "minimal",
+        ),
+        recipe=_default_role_recipe(format_name or "minimal").model_copy(
+            update={
+                "task_kind": task_kind or TaskKind.ROBOT_ONLY,
+                "show_progress": (show_progress if show_progress is not None else False),
+            }
+        ),
         output=output,
         robot=robot_name or "synthetic_humanoid",
-        task_kind=task_kind or TaskKind.ROBOT_ONLY,
-        show_progress=show_progress if show_progress is not None else False,
+    )
+
+
+def _default_role_recipe(format_name: str) -> RoleMappingRecipeConfig:
+    if format_name != "minimal":
+        raise typer.BadParameter(
+            "direct --motion runs only define the minimal role recipe; use --config for other typed motion vocabularies"
+        )
+    return RoleMappingRecipeConfig(
+        joint_roles={
+            "L_Hip": "left_hip",
+            "L_Knee": "left_knee",
+            "L_Toe": "left_ankle",
+            "R_Hip": "right_hip",
+            "R_Knee": "right_knee",
+            "R_Toe": "right_ankle",
+            "Spine": "torso",
+            "L_Wrist": "left_hand",
+            "R_Wrist": "right_hand",
+        },
+        link_roles={
+            "Pelvis": "pelvis",
+            "L_Hip": "left_hip",
+            "L_Knee": "left_knee",
+            "L_Toe": "left_foot",
+            "R_Hip": "right_hip",
+            "R_Knee": "right_knee",
+            "R_Toe": "right_foot",
+            "Spine": "torso",
+            "L_Wrist": "left_hand",
+            "R_Wrist": "right_hand",
+        },
     )
 
 
 def _run_from_config(config: RetargetingRunConfig) -> RetargetingResult:
-    problem = _problem_from_config(config)
-    backend = _preferred_config_kinematics(problem)
-    retargeter = (
-        Retargeter(engine=InteractionMeshRetargetingEngine(kinematics=backend))
-        if backend is not None
-        else Retargeter()
-    )
-    result = retargeter.run(problem)
+    try:
+        experiment = config.build_experiment(retargeter_factory=_retargeter_for_problem)
+        result = experiment.run()
+    except (ImportError, KeyError, ValueError, FileNotFoundError) as exc:
+        raise typer.BadParameter(_exception_message(exc)) from exc
     result.save_npz(config.output)
     return result
+
+
+def _retargeter_for_problem(problem: RetargetingProblem) -> Retargeter:
+    backend = _preferred_config_kinematics(problem)
+    return (
+        Retargeter(engine=InteractionMeshRetargetingEngine(kinematics=backend)) if backend is not None else Retargeter()
+    )
 
 
 def _preferred_config_kinematics(problem: RetargetingProblem) -> KinematicsBackend | None:
@@ -604,13 +655,10 @@ def _evaluate_batch_record(
 def _batch_record_problem(config_path: Path | None, record: BatchRunRecord) -> RetargetingProblem | None:
     if config_path is None:
         return None
-    config = (
-        RetargetingRunConfig.load(config_path)
-        .with_overrides(
-            motion=record.motion,
-            output=record.output,
-            name=Path(record.job_id).with_suffix("").as_posix(),
-        )
+    config = RetargetingRunConfig.load(config_path).with_overrides(
+        motion=record.motion,
+        output=record.output,
+        name=Path(record.job_id).with_suffix("").as_posix(),
     )
     return _problem_from_config(config)
 

@@ -114,7 +114,7 @@ class ObjectSpec(BaseModel):
         sample_space (ObjectSampleSpace): Coordinate space for ``sample_points``.
         trajectory (ObjectTrajectory | None): Time-varying object pose track.
         qpos_mode (ObjectQposMode): Whether the trajectory is appended to qpos or treated as an external scene pose.
-        metadata (dict[str, Any]): Opaque sidecar fields (mass, scale, asset ids, …).
+        metadata (dict[str, Any]): Provenance-only object tags.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -151,8 +151,7 @@ class ObjectSpec(BaseModel):
         if not isinstance(value, list | tuple):
             raise ValueError("visual_parts must be a list or tuple")
         return tuple(
-            item if isinstance(item, ObjectVisualPart) else ObjectVisualPart.model_validate(item)
-            for item in value
+            item if isinstance(item, ObjectVisualPart) else ObjectVisualPart.model_validate(item) for item in value
         )
 
     @field_validator("sample_points", mode="before")
@@ -164,6 +163,24 @@ class ObjectSpec(BaseModel):
         if arr.ndim != 2:
             raise ValueError("sample_points must have shape (N, 3)")
         return arr
+
+    @field_validator("metadata")
+    @classmethod
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {
+            "asset_scale",
+            "mesh_path",
+            "qpos_mode",
+            "sample_points",
+            "sample_space",
+            "trajectory",
+            "urdf_path",
+            "visual_parts",
+        }
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError("ObjectSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+        return dict(value)
 
     def scaled_sample_points(self, default: FloatArray | None = None) -> FloatArray | None:
         """Return object sample points in the active object-local geometry frame."""
@@ -186,7 +203,7 @@ class TerrainSpec(BaseModel):
         name (str): Terrain label used in scene exports and logs.
         mesh_path (Path | None): Optional terrain mesh file.
         sample_points (FloatArray | None): Precomputed terrain surface points with shape ``(N, 3)``.
-        metadata (dict[str, Any]): Opaque sidecar fields (friction, resolution, …).
+        metadata (dict[str, Any]): Provenance-only terrain tags.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -201,6 +218,15 @@ class TerrainSpec(BaseModel):
     def _path_or_none(cls, value: Any) -> Path | None:
         return None if value in (None, "") else Path(value)
 
+    @field_validator("metadata")
+    @classmethod
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {"mesh_path", "sample_points"}
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError("TerrainSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+        return dict(value)
+
 
 class SceneSpec(BaseModel):
     """Scene configuration for a retargeting run.
@@ -211,7 +237,7 @@ class SceneSpec(BaseModel):
         terrain (TerrainSpec | None): Static ground or climbable terrain definition.
         ground_range (tuple[float, float]): XY extent of the procedural ground grid (meters).
         ground_size (int): Number of samples per axis for :meth:`ground_points`.
-        metadata (dict[str, Any]): Opaque sidecar fields passed through to the solver.
+        metadata (dict[str, Any]): Provenance-only scene tags.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -222,6 +248,23 @@ class SceneSpec(BaseModel):
     ground_range: tuple[float, float] = (-1.0, 1.0)
     ground_size: int = 15
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        blocked = {
+            "ground_range",
+            "ground_size",
+            "object",
+            "support",
+            "support_plane",
+            "task_kind",
+            "terrain",
+        }
+        present = sorted(blocked & set(value))
+        if present:
+            raise ValueError("SceneSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+        return dict(value)
 
     @model_validator(mode="after")
     def _validate_scene(self) -> SceneSpec:

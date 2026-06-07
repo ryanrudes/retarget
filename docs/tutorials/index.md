@@ -2,16 +2,16 @@
 
 These guides walk through retarget end to end: install, run, inspect results, tune configs, and scale up to batch jobs. They assume you have cloned the repository and can run commands from the repo root.
 
-If you only need a one-liner to verify the install, start with [Quickstart](../quickstart.md). If you are planning a project with heterogeneous sensors (mocap, video body, contacts, props), read [Introduction](../introduction.md) first—it walks through a complete research use case. Use the pages below for shorter, focused lessons on each subsystem. After your first CLI run, continue with [Python API](python-api.md) for the same flow in code plus registries, config load, and export.
+If you only need a one-liner to verify the install, start with [Quickstart](../quickstart.md). For heterogeneous sensors, read [Introduction](../introduction.md) first. It walks through the complete native-recording to observation to adaptation flow.
 
 ## Suggested order
 
 | Step | Tutorial | You will |
 |------|----------|----------|
 | 1 | [Your first retarget](your-first-retarget.md) | Run the CLI, inspect a `.npz` result, evaluate quality |
-| 2 | [Python API](python-api.md) | Build `RetargetingProblem` objects, load configs, export from code |
+| 2 | [Python API](python-api.md) | Compose and inspect `RetargetingExperiment` stages |
 | 3 | [Run configs](run-configs.md) | Drive repeatable experiments from TOML/YAML/JSON |
-| 4 | [Motion input](motion-input.md) | Load JSON, NPZ, NPY, and CSV; match joint names to a format |
+| 4 | [Motion input](motion-input.md) | Load native capture or coherent motion files |
 | 5 | [Scenes and task kinds](scene-tasks.md) | Robot-only, object interaction, and climbing workflows |
 | 6 | [Batch and metrics](batch-and-metrics.md) | Process many motions and summarize evaluation reports |
 | 7 | [Export and view](export-and-view.md) | Ship tracking NPZ files and preview results |

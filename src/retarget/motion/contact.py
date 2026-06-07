@@ -1,14 +1,12 @@
-"""Contact-state inference helpers."""
+"""Robot-resolved runtime contact plans."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
 import numpy as np
 
-from retarget.motion.spec import MotionFormatSpec, MotionSequence
 from retarget.motion.support import SupportPlane
 
 
@@ -22,7 +20,7 @@ class ContactTrack:
     active_states: tuple[int, ...] = (1, 2)
     support_states: tuple[int, ...] = (1,)
     labels: tuple[str, ...] = ()
-    metadata: dict[str, object] = field(default_factory=dict)
+    provenance: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         states = np.asarray(self.states)
@@ -35,7 +33,7 @@ class ContactTrack:
         object.__setattr__(self, "active_states", tuple(int(state) for state in self.active_states))
         object.__setattr__(self, "support_states", tuple(int(state) for state in self.support_states))
         object.__setattr__(self, "labels", tuple(str(label) for label in self.labels))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "provenance", dict(self.provenance))
 
     @property
     def frame_count(self) -> int:
@@ -75,7 +73,7 @@ class ContactTrack:
             active_states=self.active_states,
             support_states=self.support_states,
             labels=self.labels,
-            metadata=dict(self.metadata),
+            provenance=dict(self.provenance),
         )
 
 
@@ -110,11 +108,6 @@ class ContactFrame:
         """Robot links mapped to tracks touching the support plane."""
 
         return tuple(dict.fromkeys(link for track in self.support_tracks for link in track.link_names))
-
-    def as_contact_dict(self) -> dict[str, bool]:
-        """Return compatibility contact booleans keyed by subject."""
-
-        return {track.subject: track.active_at(self.frame_idx) for track in self.tracks}
 
 
 @dataclass(frozen=True)
@@ -161,9 +154,7 @@ class ContactPlan:
         indices = np.searchsorted(source_times, target_times, side="left")
         indices = np.clip(indices, 0, len(source_times) - 1)
         previous = np.maximum(indices - 1, 0)
-        choose_previous = np.abs(target_times - source_times[previous]) <= np.abs(
-            source_times[indices] - target_times
-        )
+        choose_previous = np.abs(target_times - source_times[previous]) <= np.abs(source_times[indices] - target_times)
         indices[choose_previous] = previous[choose_previous]
         return ContactPlan(
             tracks=tuple(track.resampled_indices(indices) for track in self.tracks),
@@ -181,111 +172,3 @@ class ContactPlan:
             support=self.support.scaled(factor) if self.support is not None else None,
             provenance={**self.provenance, "scale_factor": float(factor)},
         )
-
-    @classmethod
-    def from_binary_contacts(
-        cls,
-        contacts: Sequence[Mapping[str, bool]],
-        *,
-        link_mapping: Mapping[str, Sequence[str] | str] | None = None,
-        support: SupportPlane | None = None,
-        provenance: Mapping[str, object] | None = None,
-    ) -> ContactPlan:
-        """Build from the legacy per-frame contact dict representation."""
-
-        if not contacts:
-            raise ValueError("contacts must not be empty")
-        subjects = tuple(dict.fromkeys(name for frame in contacts for name in frame))
-        link_mapping = dict(link_mapping or {})
-        tracks: list[ContactTrack] = []
-        for subject in subjects:
-            link_names = _link_names_for_subject(subject, link_mapping.get(subject, ()))
-            states = np.asarray([1 if frame.get(subject, False) else 0 for frame in contacts], dtype=np.int16)
-            tracks.append(
-                ContactTrack(
-                    subject=subject,
-                    states=states,
-                    link_names=link_names,
-                    active_states=(1,),
-                    support_states=(1,),
-                    labels=("air", "contact"),
-                )
-            )
-        return cls(
-            tracks=tuple(tracks),
-            frame_count=len(contacts),
-            support=support,
-            provenance=dict(provenance or {}),
-        )
-
-
-def infer_contact_by_velocity(
-    motion: MotionSequence,
-    motion_format: MotionFormatSpec | None,
-    *,
-    velocity_threshold: float = 0.01,
-) -> tuple[dict[str, bool], ...]:
-    """Return per-frame binary contact states.
-
-    Explicit contacts stored on the motion sequence take precedence. Otherwise
-    contact states are inferred from contact-joint speed; the first and last
-    frames reuse their nearest available finite-difference velocity.
-
-    Args:
-        motion (MotionSequence): Input motion with optional explicit contacts.
-        motion_format (MotionFormatSpec | None): Format spec supplying ``contact_joints``; may be ``None``.
-        velocity_threshold (float): Speed below which a contact joint is treated as in contact (m/s).
-
-    Returns:
-        tuple[dict[str, bool], ...]: One mapping per frame from contact-joint name to active flag.
-
-    Raises:
-        ValueError: If ``velocity_threshold`` is not positive.
-    """
-
-    if motion.contacts:
-        return _explicit_contacts(motion, motion_format)
-    if motion_format is None or not motion_format.contact_joints:
-        return tuple({} for _ in range(motion.frame_count))
-    if velocity_threshold <= 0:
-        raise ValueError("velocity_threshold must be positive")
-
-    contact_names = tuple(name for name in motion_format.contact_joints if name in motion.joint_names)
-    if not contact_names:
-        return tuple({} for _ in range(motion.frame_count))
-
-    positions = np.stack([motion.joint(name) for name in contact_names], axis=1)
-    if motion.frame_count == 1:
-        speeds = np.zeros((1, len(contact_names)), dtype=np.float64)
-    else:
-        velocities = np.gradient(positions, 1.0 / motion.fps, axis=0)
-        speeds = np.linalg.norm(velocities, axis=2)
-    return tuple(
-        {
-            name: bool(speeds[frame_idx, contact_idx] <= velocity_threshold)
-            for contact_idx, name in enumerate(contact_names)
-        }
-        for frame_idx in range(motion.frame_count)
-    )
-
-
-def _explicit_contacts(
-    motion: MotionSequence,
-    motion_format: MotionFormatSpec | None,
-) -> tuple[dict[str, bool], ...]:
-    if motion_format is None or not motion_format.contact_joints:
-        return tuple(dict(frame) for frame in motion.contacts)
-    allowed = set(motion_format.contact_joints)
-    return tuple(
-        {name: bool(active) for name, active in frame.items() if name in allowed}
-        for frame in motion.contacts
-    )
-
-
-def _link_names_for_subject(
-    subject: str,
-    value: Sequence[str] | str,
-) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return (value,)
-    return tuple(str(name) for name in value)

@@ -1,83 +1,87 @@
 # retarget
 
-`retarget` is a standalone, typed research toolkit for motion retargeting. It is built as a `uv` project with a composable Python API, an interaction-mesh SQP retargeting core, small fixtures, CLI workflows, and extension points for robots, motion formats, solvers, metrics, exporters, and visualizers.
+`retarget` is a typed research toolkit for capture processing and robot motion
+retargeting. Native sensor streams keep independent clocks and vocabularies until
+an `ObservationRecipe` fuses them into a target-independent `SceneObservation`.
+A `RetargetingRecipe` then resolves semantic roles through a `RobotSpec` and builds
+the optimization problem.
 
-The implementation is intentionally independent of the `holosoma` reference implementation. The package does not import or vendor it.
+```text
+native recordings
+-> ObservationRecipe
+-> SceneObservation
+-> RetargetingRecipe + RobotSpec
+-> RetargetingProblem
+-> RetargetingResult
+```
 
 ## Quickstart
 
 ```bash
 uv sync --extra dev
 uv run retarget doctor
+uv run retarget run --config examples/basic/run_config.toml
 uv run pytest
+uv run mypy src/retarget
 uv run mkdocs build --strict
 ```
 
-Python API:
+Python experiments use the same path as run configs:
 
 ```python
-import numpy as np
-
-from retarget import MotionFormat, Retargeter, RetargetingProblem, Robot, SceneSpec, TaskKind
-from retarget.motion import MotionSequence, motion_formats
+from retarget import HumanoidRobotRole, RetargetingExperiment, TaskKind
+from retarget.motion import motion_formats
+from retarget.motion.registry import MinimalMotionJoint
+from retarget.recipes import (
+    MotionFileObservationRecipe,
+    RobotOnlySceneRecipe,
+    RoleRetargetingRecipe,
+)
 from retarget.robots import robots
 
-joint_names = ("Pelvis", "L_Toe", "R_Toe", "L_Wrist", "R_Wrist")
-motion = MotionSequence(
-    name="tiny",
-    joint_names=joint_names,
-    joint_positions=np.zeros((8, len(joint_names), 3)),
-    fps=30,
+observation = MotionFileObservationRecipe.registered(
+    "tests/fixtures/minimal_motion.json",
+    "minimal",
 )
-
-problem = RetargetingProblem(
-    name="tiny",
+recipe = RoleRetargetingRecipe(
     task_kind=TaskKind.ROBOT_ONLY,
-    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
-    motion=motion,
-    motion_format=motion_formats.get(MotionFormat.MINIMAL),
-    scene=SceneSpec.robot_only(),
+    motion_format=motion_formats.get("minimal"),
+    scene=RobotOnlySceneRecipe(),
+    link_roles={
+        MinimalMotionJoint.PELVIS: HumanoidRobotRole.PELVIS,
+        MinimalMotionJoint.LEFT_TOE: HumanoidRobotRole.LEFT_FOOT,
+        MinimalMotionJoint.RIGHT_TOE: HumanoidRobotRole.RIGHT_FOOT,
+    },
 )
-result = Retargeter().run(problem)
-result.save_npz("tiny_result.npz")
+result = RetargetingExperiment(
+    observation=observation,
+    recipe=recipe,
+    robot=robots.get("synthetic_humanoid"),
+).run()
 ```
 
-Set `RetargetingProblem.output_fps` or call `result.resampled(fps)` when experiments need a common time grid.
+Skateboarding composes native Vicon and GVHMR sources directly; Holosoma climbing
+uses the same experiment hierarchy as a one-source subset. See `examples/skateboarding/`
+and `examples/holosoma/`.
 
-CLI:
+## Optional Dependencies
+
+Core capture models and retargeting remain lightweight. Install only the backends
+needed by an experiment:
 
 ```bash
-uv run retarget run \
-  --motion tests/fixtures/minimal_motion.json \
-  --format minimal \
-  --robot synthetic_humanoid \
-  --output tiny_result.npz
-uv run retarget export --result tiny_result.npz --output tracking.npz --format mujoco_npz
+uv sync --extra optimize
+uv sync --extra mujoco
+uv sync --extra viz
+uv sync --extra torch --extra smpl
 ```
-
-Config-file CLI:
-
-```bash
-uv run retarget run --config examples/run_config.toml
-```
-
-Asset manifest workflow:
-
-```bash
-uv run retarget assets validate examples/assets_manifest.toml
-uv run retarget assets install examples/assets_manifest.toml --store .retarget_assets
-```
-
-Robot specs can be loaded from Python registries or external TOML/YAML/JSON files, for example `examples/custom_robot.toml`.
 
 ## Documentation
 
-**https://ryanrudes.github.io/retarget/** — built from `docs/` with MkDocs Material (GitHub Pages on `master`).
-
-Local preview (includes live-code Jupyter; not on the hosted site). Initialize submodules first so vendor API pages (`motion_sync`, `contact_detection`) resolve for `mkdocs build` / `mkdocs serve`:
+The documentation is published at
+<https://ryanrudes.github.io/retarget/>. Preview locally with:
 
 ```bash
-git submodule update --init
 uv sync --extra dev
 uv run mkdocs serve
 ```

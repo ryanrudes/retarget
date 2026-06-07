@@ -73,46 +73,32 @@ G1_NOMINAL_TRACKING_JOINTS = (
     "right_wrist_yaw_joint",
 )
 
-G1_DEFAULT_JOINT_MAPPING = {
-    "L_Hip": "left_hip_pitch_joint",
-    "R_Hip": "right_hip_pitch_joint",
-    "L_Knee": "left_knee_joint",
-    "R_Knee": "right_knee_joint",
-    "L_Ankle": "left_ankle_pitch_joint",
-    "R_Ankle": "right_ankle_pitch_joint",
-    "L_Foot": "left_ankle_pitch_joint",
-    "R_Foot": "right_ankle_pitch_joint",
-    "Spine1": "waist_yaw_joint",
-    "Spine2": "waist_pitch_joint",
-    "Spine3": "waist_pitch_joint",
-    "L_Shoulder": "left_shoulder_roll_joint",
-    "R_Shoulder": "right_shoulder_roll_joint",
-    "L_Elbow": "left_elbow_joint",
-    "R_Elbow": "right_elbow_joint",
-    "L_Wrist": "left_wrist_roll_joint",
-    "R_Wrist": "right_wrist_roll_joint",
+G1_JOINT_ROLES = {
+    "left_hip": "left_hip_pitch_joint",
+    "left_knee": "left_knee_joint",
+    "left_ankle": "left_ankle_pitch_joint",
+    "right_hip": "right_hip_pitch_joint",
+    "right_knee": "right_knee_joint",
+    "right_ankle": "right_ankle_pitch_joint",
+    "torso": "waist_yaw_joint",
+    "left_hand": "left_wrist_roll_joint",
+    "right_hand": "right_wrist_roll_joint",
 }
 
-G1_DEFAULT_LINK_MAPPING = {
-    "Pelvis": "pelvis",
-    "L_Hip": "left_hip_pitch_link",
-    "R_Hip": "right_hip_pitch_link",
-    "L_Knee": "left_knee_link",
-    "R_Knee": "right_knee_link",
-    "L_Ankle": "left_ankle_pitch_link",
-    "R_Ankle": "right_ankle_pitch_link",
-    "L_Foot": "left_ankle_roll_link",
-    "R_Foot": "right_ankle_roll_link",
-    "Spine1": "torso_link",
-    "Spine2": "torso_link",
-    "Spine3": "torso_link",
-    "Head": "torso_link",
-    "L_Shoulder": "left_shoulder_roll_link",
-    "R_Shoulder": "right_shoulder_roll_link",
-    "L_Elbow": "left_elbow_link",
-    "R_Elbow": "right_elbow_link",
-    "L_Wrist": "left_wrist_roll_link",
-    "R_Wrist": "right_wrist_roll_link",
+G1_LINK_ROLES = {
+    "pelvis": "pelvis",
+    "torso": "torso_link",
+    "head": "torso_link",
+    "left_hip": "left_hip_pitch_link",
+    "left_knee": "left_knee_link",
+    "left_ankle": "left_ankle_pitch_link",
+    "left_foot": "left_ankle_roll_link",
+    "right_hip": "right_hip_pitch_link",
+    "right_knee": "right_knee_link",
+    "right_ankle": "right_ankle_pitch_link",
+    "right_foot": "right_ankle_roll_link",
+    "left_hand": "left_wrist_roll_link",
+    "right_hand": "right_wrist_roll_link",
 }
 
 
@@ -296,10 +282,16 @@ def _g1_toml(
     for name in joint_names:
         lower, upper = joint_limits[name]
         lines.append(f"{name} = [{lower:.12g}, {upper:.12g}]")
-    lines.extend(["", "[default_joint_mapping]"])
-    lines.extend(f"{human} = {json.dumps(robot)}" for human, robot in G1_DEFAULT_JOINT_MAPPING.items())
-    lines.extend(["", "[default_link_mapping]"])
-    lines.extend(f"{human} = {json.dumps(robot)}" for human, robot in G1_DEFAULT_LINK_MAPPING.items())
+    lines.extend(["", "[joint_roles]"])
+    lines.extend(
+        f"{role} = {json.dumps(joint)}"
+        for role, joint in G1_JOINT_ROLES.items()
+    )
+    lines.extend(["", "[link_roles]"])
+    lines.extend(
+        f"{role} = {json.dumps(link)}"
+        for role, link in G1_LINK_ROLES.items()
+    )
     lines.extend(
         [
             "",

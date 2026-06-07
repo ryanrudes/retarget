@@ -14,6 +14,12 @@ Typed specs and results passed through the pipeline.
 
 ## Scene & motion
 
+::: retarget.observation.spec.SceneObservation
+
+::: retarget.observation.spec.ObservedObject
+
+::: retarget.observation.contact.SemanticContactSequence
+
 ::: retarget.scene.spec.SceneSpec
 
 ::: retarget.scene.spec.ObjectSpec
@@ -31,16 +37,10 @@ Typed specs and results passed through the pipeline.
         - fps
         - root_poses
         - metadata
-        - contacts
 
 ::: retarget.motion.spec.MotionFormatSpec
-    options:
-      members:
-        - joint_names
 
 ::: retarget.motion.loaders.load_motion
-
-::: retarget.motion.contact.infer_contact_by_velocity
 
 ## Robots
 

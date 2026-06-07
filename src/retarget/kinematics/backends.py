@@ -310,7 +310,7 @@ class MuJoCoKinematicsBackend:
         self.model: Any = _load_mujoco_model(mujoco, path)
         self.data: Any = mujoco.MjData(self.model)
         link_names = set(self.robot.link_names) | set(self.robot.contact_links)
-        link_names.update(self.robot.default_link_mapping.values())
+        link_names.update(self.robot.link_roles.values())
         self._mujoco_body_names = build_mujoco_body_name_map(
             mujoco,
             self.model,

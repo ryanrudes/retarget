@@ -1,0 +1,17 @@
+name = "holosoma_mocap_climb_seq_0"
+robot = "holosoma_g1_29dof_spherehand"
+robot_provider = "holosoma"
+output = "../holosoma_climb_120.npz"
+
+[robot_options]
+holosoma_root = "../../../holosoma"
+
+[observation]
+kind = "holosoma_climb"
+holosoma_root = "../../../holosoma"
+frame_count = 120
+
+[recipe]
+kind = "holosoma_climb"
+holosoma_root = "../../../holosoma"
+include_object_collision = true

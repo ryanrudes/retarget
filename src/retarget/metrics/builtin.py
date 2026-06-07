@@ -61,7 +61,7 @@ class OptimizationCostMetric:
 
 
 class FootSlidingMetric:
-    """Mean stance-foot xy speed during inferred contact."""
+    """Mean stance-foot xy speed during explicitly planned contact."""
 
     name = MetricName.FOOT_SLIDING.value
 
@@ -70,8 +70,8 @@ class FootSlidingMetric:
 
         Args:
             result: Retargeted trajectory to score.
-            problem: When provided with ``contact_links``, uses link positions and
-                inferred contacts; otherwise falls back to root ``qpos`` xy velocity.
+            problem: When provided with a ``ContactPlan``, uses its robot-resolved
+                contact links; otherwise falls back to root ``qpos`` xy velocity.
 
         Returns:
             Mean sliding speed in m/s.
@@ -79,7 +79,7 @@ class FootSlidingMetric:
 
         if result.frame_count < 2:
             return 0.0
-        if problem is not None and problem.robot.contact_links:
+        if problem is not None and problem.contacts is not None and problem.robot.contact_links:
             positions = _contact_link_positions(result, problem)
             contacts = _human_contact_mask(problem)
             sliding: list[float] = []
@@ -104,7 +104,8 @@ class ContactPreservationMetric:
 
         Args:
             result: Retargeted trajectory to score.
-            problem: When provided, compares human motion contacts to robot link contacts.
+            problem: When provided with a ``ContactPlan``, compares its contact
+                labels to robot link contacts.
 
         Returns:
             Fraction in ``[0, 1]``; ``1.0`` when human joints are unavailable.
@@ -112,7 +113,7 @@ class ContactPreservationMetric:
 
         if result.human_joints is None:
             return 1.0
-        if problem is not None and problem.robot.contact_links:
+        if problem is not None and problem.contacts is not None and problem.robot.contact_links:
             human_contacts = _human_contact_mask(problem)
             robot_contacts = _robot_contact_mask(problem, result=result)
             if human_contacts.shape == robot_contacts.shape and human_contacts.size:
@@ -305,12 +306,7 @@ def _scene_points(problem: RetargetingProblem) -> np.ndarray | None:
         if problem.scene.object.sample_points is not None:
             return np.asarray(problem.scene.object.sample_points, dtype=np.float64)
         return np.asarray(
-            [
-                [x, y, z]
-                for x in (-0.2, 0.2)
-                for y in (-0.2, 0.2)
-                for z in (-0.2, 0.2)
-            ],
+            [[x, y, z] for x in (-0.2, 0.2) for y in (-0.2, 0.2) for z in (-0.2, 0.2)],
             dtype=np.float64,
         )
     if problem.scene.terrain is not None and problem.scene.terrain.sample_points is not None:
@@ -319,16 +315,12 @@ def _scene_points(problem: RetargetingProblem) -> np.ndarray | None:
 
 
 def _human_contact_mask(problem: RetargetingProblem) -> np.ndarray:
-    if problem.contacts is not None:
-        return _contact_plan_to_mask(problem)
-    if not problem.motion.contacts:
-        return np.zeros((problem.motion.frame_count, len(problem.robot.contact_links)), dtype=bool)
-    return _contact_dicts_to_mask(problem.motion.contacts, problem)
+    if problem.contacts is None:
+        raise ValueError("contact-aware metrics require an explicit ContactPlan")
+    return _contact_plan_to_mask(problem)
 
 
-def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult | None = None) -> np.ndarray:
-    if result is None:
-        return _human_contact_mask(problem)
+def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult) -> np.ndarray:
     positions = _contact_link_positions(result, problem)
     if len(positions) == 1:
         speeds = np.zeros((1, len(problem.robot.contact_links)), dtype=np.float64)
@@ -338,35 +330,14 @@ def _robot_contact_mask(problem: RetargetingProblem, result: RetargetingResult |
     return speeds <= threshold
 
 
-def _contact_dicts_to_mask(contact_dicts: tuple[dict[str, bool], ...], problem: RetargetingProblem) -> np.ndarray:
-    mask = np.zeros((len(contact_dicts), len(problem.robot.contact_links)), dtype=bool)
-    for frame_idx, contact_state in enumerate(contact_dicts):
-        for motion_joint, active in contact_state.items():
-            if not active:
-                continue
-            for link_idx, link_name in enumerate(problem.robot.contact_links):
-                if _same_side(motion_joint, link_name):
-                    mask[frame_idx, link_idx] = True
-    return mask
-
-
 def _contact_plan_to_mask(problem: RetargetingProblem) -> np.ndarray:
     assert problem.contacts is not None
     frame_count = cast(int, problem.contacts.frame_count)
     mask = np.zeros((frame_count, len(problem.robot.contact_links)), dtype=np.bool_)
     link_index = {name: idx for idx, name in enumerate(problem.robot.contact_links)}
     for track in problem.contacts.tracks:
-        mapped_indices = tuple(
-            link_index[link_name]
-            for link_name in track.link_names
-            if link_name in link_index
-        )
-        if mapped_indices:
-            indices = mapped_indices
-        else:
-            indices = tuple(
-                idx for idx, link_name in enumerate(problem.robot.contact_links) if _same_side(track.subject, link_name)
-            )
+        mapped_indices = tuple(link_index[link_name] for link_name in track.link_names if link_name in link_index)
+        indices = mapped_indices
         if not indices:
             continue
         columns = list(indices)
@@ -384,16 +355,6 @@ def _contact_plan_details(problem: RetargetingProblem) -> dict[str, object] | No
         "track_count": len(problem.contacts.tracks),
         "has_support": problem.contacts.support is not None,
     }
-
-
-def _same_side(motion_joint: str, link_name: str) -> bool:
-    motion_lower = motion_joint.lower()
-    link_lower = link_name.lower()
-    if "left" in motion_lower or motion_lower.startswith("l_"):
-        return "left" in link_lower or link_lower.startswith("l_")
-    if "right" in motion_lower or motion_lower.startswith("r_"):
-        return "right" in link_lower or link_lower.startswith("r_")
-    return True
 
 
 def _non_penetration_config(problem: RetargetingProblem) -> NonPenetrationConstraintConfig | None:

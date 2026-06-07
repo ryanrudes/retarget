@@ -1,4 +1,4 @@
-"""Typed CLI run-spec loading."""
+"""Declarative frontends for the public experiment recipe hierarchy."""
 
 from __future__ import annotations
 
@@ -9,19 +9,34 @@ import importlib.util
 import json
 import sys
 import tomllib
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, Self, TypeAlias, cast
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from retarget.core.enums import FrameConvention, QuaternionOrder, RunSourceKind, TaskKind
+from retarget.capture import GvhmrOutputSource, ViconRecordingSource
+from retarget.core.enums import (
+    CropPolicy,
+    FrameConvention,
+    ObservationRecipeKind,
+    QuaternionOrder,
+    RetargetingRecipeKind,
+    SolverBackend,
+    TaskKind,
+    TimelineSelection,
+)
 from retarget.core.pose import PoseSequence, convert_points_frame
 from retarget.core.registry import Registry
 from retarget.mesh import InteractionMeshSpec, sample_mesh_points
-from retarget.motion import load_motion, motion_formats
-from retarget.motion.contact import ContactPlan
-from retarget.optimization import constraint_terms, objective_terms, validate_optimization_references
+from retarget.motion import motion_formats
+from retarget.optimization import (
+    constraint_terms,
+    objective_terms,
+    validate_optimization_references,
+)
 from retarget.optimization.spec import (
     ConstraintConfig,
     ConstraintConfigUnion,
@@ -31,117 +46,209 @@ from retarget.optimization.spec import (
     SolverSpec,
 )
 from retarget.optimization.variables import QposVariableSpec
-from retarget.pipeline import PreparedRetargetingInputs, RetargetingProblem
+from retarget.pipeline import (
+    ObservationRecipe,
+    Retargeter,
+    RetargetingExperiment,
+    RetargetingProblem,
+    RetargetingRecipe,
+)
+from retarget.recipes import MotionFileObservationRecipe, RoleRetargetingRecipe
+from retarget.recipes.holosoma import (
+    HolosomaClimbObservationPolicy,
+    HolosomaClimbObservationRecipe,
+    HolosomaClimbOptimizationPolicy,
+    HolosomaClimbRetargetingRecipe,
+)
+from retarget.recipes.skateboarding import (
+    GVHMR_SCHEMA,
+    VICON_SCHEMA,
+    SkateboardingObservationRecipe,
+    SkateboardingRetargetingRecipe,
+)
 from retarget.robots import robot_providers, robots
 from retarget.robots.spec import RobotSpec
-from retarget.scene import ObjectSpec, ObjectTrajectory, ObjectVisualPart, SceneSpec, TerrainSpec
+from retarget.scene import (
+    ObjectSpec,
+    ObjectTrajectory,
+    ObjectVisualPart,
+    SceneSpec,
+    TerrainSpec,
+)
 
 
-class BaseRunSourceConfig(BaseModel):
-    """Base class for typed run-source config blocks."""
+class BaseObservationConfig(BaseModel):
+    """Serializable configuration for one observation recipe."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: RunSourceKind
+    kind: ObservationRecipeKind
 
-    def resolve_paths(self, base_dir: Path) -> BaseRunSourceConfig:
+    def resolve_paths(self, base_dir: Path) -> BaseObservationConfig:
         """Return a copy with relative paths resolved."""
 
         return self
 
 
-class RunSourceBuilder(Protocol):
-    """Build prepared retarget inputs from one run-source config type."""
+class BaseAdaptationConfig(BaseModel):
+    """Serializable configuration for one robot-adaptation recipe."""
 
-    config_type: type[BaseRunSourceConfig]
+    model_config = ConfigDict(extra="forbid")
 
-    def validate_registry_references(self, config: BaseRunSourceConfig, messages: list[str]) -> None:
-        """Append missing registry-reference messages for this source."""
+    kind: RetargetingRecipeKind
 
-    def prepare(
+    def resolve_paths(self, base_dir: Path) -> BaseAdaptationConfig:
+        """Return a copy with relative paths resolved."""
+
+        return self
+
+
+class ObservationConfigBuilder(Protocol):
+    """Deserialize one observation config into a public recipe."""
+
+    config_type: type[BaseObservationConfig]
+
+    def build(
         self,
-        config: BaseRunSourceConfig,
-        robot: RobotSpec,
+        config: BaseObservationConfig,
         *,
         run_name: str | None,
-        run_config: Any,
-    ) -> PreparedRetargetingInputs:
-        """Load and adapt source data for a run."""
+    ) -> ObservationRecipe:
+        """Build the observation recipe."""
+
+    def validate_registry_references(
+        self,
+        config: BaseObservationConfig,
+        messages: list[str],
+    ) -> None:
+        """Append invalid registry references."""
 
 
-run_sources: Registry[RunSourceBuilder] = Registry("run source")
+class AdaptationConfigBuilder(Protocol):
+    """Deserialize one adaptation config into a public recipe."""
+
+    config_type: type[BaseAdaptationConfig]
+
+    def build(
+        self,
+        config: BaseAdaptationConfig,
+        *,
+        observation: BaseObservationConfig,
+        robot: RobotSpec,
+        run_name: str | None,
+    ) -> RetargetingRecipe:
+        """Build the robot-adaptation recipe."""
+
+    def validate_registry_references(
+        self,
+        config: BaseAdaptationConfig,
+        messages: list[str],
+    ) -> None:
+        """Append invalid registry references."""
 
 
-class MotionFileSourceConfig(BaseRunSourceConfig):
-    """Load a motion file through a registered motion format."""
+observation_config_builders: Registry[ObservationConfigBuilder] = Registry("observation recipe config")
+adaptation_config_builders: Registry[AdaptationConfigBuilder] = Registry("retargeting recipe config")
+
+
+class MotionFileObservationConfig(BaseObservationConfig):
+    """Load one file through a registered typed motion format."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: RunSourceKind = RunSourceKind.MOTION_FILE
+    kind: ObservationRecipeKind = ObservationRecipeKind.MOTION_FILE
     path: Path
     format_name: str = Field(default="minimal", alias="format")
 
     @field_validator("path", mode="before")
     @classmethod
-    def _coerce_path(cls, value: Any) -> Path:
+    def _path(cls, value: Any) -> Path:
         return Path(value)
 
-    def resolve_paths(self, base_dir: Path) -> MotionFileSourceConfig:
-        """Return a copy with relative paths resolved."""
-
+    def resolve_paths(self, base_dir: Path) -> MotionFileObservationConfig:
         return self.model_copy(update={"path": _resolve_relative(self.path, base_dir)})
 
 
-class MotionSyncSkateboardingSourceConfig(BaseRunSourceConfig):
-    """Prepare a skateboarding ``motion_sync`` clip directly."""
+class SkateboardingObservationConfig(BaseObservationConfig):
+    """Fuse native Vicon and GVHMR recordings in memory."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    kind: RunSourceKind = RunSourceKind.MOTION_SYNC_SKATEBOARDING
-    demo: str = "pushoff5_twoshoes"
-    synced: Path | None = None
-    synced_root: Path = Path("motion_sync_output/synced")
+    kind: ObservationRecipeKind = ObservationRecipeKind.SKATEBOARDING
+    vicon: Path
+    gvhmr: Path
+    video_fps: float
+    source_height_m: float | None = None
     max_frames: int | None = None
-    height_m: float | None = None
-    force_contacts: bool = False
-    save_contact_layer: bool = False
+    timeline_selection: TimelineSelection = TimelineSelection.HUMAN_POSE
+    crop_policy: CropPolicy = CropPolicy.OVERLAP
+    uniform_fps: float | None = None
 
-    @field_validator("synced", "synced_root", mode="before")
+    @field_validator("vicon", "gvhmr", mode="before")
     @classmethod
-    def _coerce_optional_path(cls, value: Any) -> Path | None:
-        return None if value in (None, "") else Path(value)
+    def _path(cls, value: Any) -> Path:
+        return Path(value)
+
+    @field_validator("video_fps", "source_height_m", "uniform_fps")
+    @classmethod
+    def _positive_float(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0.0:
+            raise ValueError("sampling rates and heights must be positive")
+        return value
 
     @field_validator("max_frames")
     @classmethod
-    def _positive_max_frames(cls, value: int | None) -> int | None:
+    def _positive_frames(cls, value: int | None) -> int | None:
         if value is not None and value <= 0:
             raise ValueError("max_frames must be positive")
         return value
 
-    @field_validator("height_m")
-    @classmethod
-    def _positive_height(cls, value: float | None) -> float | None:
-        if value is not None and value <= 0:
-            raise ValueError("height_m must be positive")
-        return None if value is None else float(value)
-
-    def resolve_paths(self, base_dir: Path) -> MotionSyncSkateboardingSourceConfig:
-        """Return a copy with relative paths resolved."""
-
+    def resolve_paths(self, base_dir: Path) -> SkateboardingObservationConfig:
         return self.model_copy(
             update={
-                "synced": _resolve_relative(self.synced, base_dir),
-                "synced_root": _resolve_relative(self.synced_root, base_dir),
+                "vicon": _resolve_relative(self.vicon, base_dir),
+                "gvhmr": _resolve_relative(self.gvhmr, base_dir),
             }
         )
 
-    @property
-    def synced_path(self) -> Path:
-        """Resolved synced clip path."""
 
-        if self.synced is not None:
-            return self.synced
-        return self.synced_root / self.demo
+class HolosomaClimbObservationPolicyConfig(BaseModel):
+    """Serializable Holosoma capture-processing policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_height_m: float = Field(default=1.78, gt=0.0)
+    mat_height_m: float = Field(default=0.1, ge=0.0)
+    contact_velocity_threshold: float = Field(default=0.01, ge=0.0)
+    object_sample_count: int = Field(default=100, gt=0)
+    object_sample_seed: int = 42
+
+    def build(self) -> HolosomaClimbObservationPolicy:
+        return HolosomaClimbObservationPolicy(**self.model_dump())
+
+
+class HolosomaClimbObservationConfig(BaseObservationConfig):
+    """Load the public Holosoma climbing fixture as a native observation."""
+
+    kind: ObservationRecipeKind = ObservationRecipeKind.HOLOSOMA_CLIMB
+    holosoma_root: Path
+    frame_count: int | None = None
+    source_fps: float = Field(default=30.0, gt=0.0)
+    downsample: int = Field(default=4, gt=0)
+    policy: HolosomaClimbObservationPolicyConfig = Field(default_factory=HolosomaClimbObservationPolicyConfig)
+
+    @field_validator("holosoma_root", mode="before")
+    @classmethod
+    def _path(cls, value: Any) -> Path:
+        return Path(value)
+
+    @field_validator("frame_count")
+    @classmethod
+    def _positive_frames(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("frame_count must be positive")
+        return value
+
+    def resolve_paths(self, base_dir: Path) -> HolosomaClimbObservationConfig:
+        return self.model_copy(update={"holosoma_root": _resolve_relative(self.holosoma_root, base_dir)})
 
 
 ObjectiveConfigInput: TypeAlias = ObjectiveConfigUnion | dict[str, Any]
@@ -149,7 +256,7 @@ ConstraintConfigInput: TypeAlias = ConstraintConfigUnion | dict[str, Any]
 
 
 class ObjectVisualPartConfig(BaseModel):
-    """Serializable visual mesh part for object playback."""
+    """Serializable visual mesh part."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -160,17 +267,15 @@ class ObjectVisualPartConfig(BaseModel):
 
     @field_validator("mesh_path", mode="before")
     @classmethod
-    def _coerce_mesh_path(cls, value: Any) -> Path:
+    def _path(cls, value: Any) -> Path:
         return Path(value)
 
     def resolve_paths(self, base_dir: Path) -> ObjectVisualPartConfig:
-        """Return a copy with relative asset paths resolved against `base_dir`."""
-
         return self.model_copy(update={"mesh_path": _resolve_relative(self.mesh_path, base_dir)})
 
 
 class ObjectConfig(BaseModel):
-    """Serializable object-scene options for CLI run specs."""
+    """Serializable object scene specification."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -193,14 +298,12 @@ class ObjectConfig(BaseModel):
 
     @field_validator("mesh_sample_count")
     @classmethod
-    def _non_negative_mesh_sample_count(cls, value: int) -> int:
+    def _sample_count(cls, value: int) -> int:
         if value < 0:
             raise ValueError("mesh_sample_count must be non-negative")
         return value
 
     def resolve_paths(self, base_dir: Path) -> ObjectConfig:
-        """Return a copy with relative asset paths resolved against `base_dir`."""
-
         return self.model_copy(
             update={
                 "mesh_path": _resolve_relative(self.mesh_path, base_dir),
@@ -213,7 +316,7 @@ class ObjectConfig(BaseModel):
 
 
 class TerrainConfig(BaseModel):
-    """Serializable terrain-scene options for CLI run specs."""
+    """Serializable terrain scene specification."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -227,14 +330,12 @@ class TerrainConfig(BaseModel):
 
     @field_validator("mesh_sample_count")
     @classmethod
-    def _non_negative_mesh_sample_count(cls, value: int) -> int:
+    def _sample_count(cls, value: int) -> int:
         if value < 0:
             raise ValueError("mesh_sample_count must be non-negative")
         return value
 
     def resolve_paths(self, base_dir: Path) -> TerrainConfig:
-        """Return a copy with relative asset paths resolved against `base_dir`."""
-
         return self.model_copy(
             update={
                 "mesh_path": _resolve_relative(self.mesh_path, base_dir),
@@ -244,7 +345,7 @@ class TerrainConfig(BaseModel):
 
 
 class SceneConfig(BaseModel):
-    """Serializable scene options for CLI run specs."""
+    """Serializable scene recipe fields."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -255,33 +356,24 @@ class SceneConfig(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def resolve_paths(self, base_dir: Path) -> SceneConfig:
-        """Return a copy with relative file paths resolved against `base_dir`."""
-
         return self.model_copy(
             update={
-                "object": self.object.resolve_paths(base_dir) if self.object is not None else None,
-                "terrain": self.terrain.resolve_paths(base_dir) if self.terrain is not None else None,
+                "object": (self.object.resolve_paths(base_dir) if self.object is not None else None),
+                "terrain": (self.terrain.resolve_paths(base_dir) if self.terrain is not None else None),
             }
         )
 
 
-class RetargetingRunConfig(BaseModel):
-    """Human-editable run spec used by the CLI."""
+class RoleMappingRecipeConfig(BaseAdaptationConfig):
+    """Adapt typed motion joints through semantic robot roles."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    name: str | None = None
-    source: BaseRunSourceConfig
-    robot: str = "synthetic_humanoid"
-    robot_provider: str = "registry"
-    robot_options: dict[str, Any] = Field(default_factory=dict)
+    kind: RetargetingRecipeKind = RetargetingRecipeKind.ROLE_MAPPING
     task_kind: TaskKind = TaskKind.ROBOT_ONLY
-    output: Path
-    imports: tuple[str, ...] = ()
+    joint_roles: dict[str, str] = Field(default_factory=dict)
+    link_roles: dict[str, str] = Field(default_factory=dict)
     scale_to_robot: bool = True
     output_fps: float | None = None
     show_progress: bool = False
-    joint_mapping: dict[str, str] | None = None
     mesh: InteractionMeshSpec = Field(default_factory=InteractionMeshSpec)
     solver: SolverSpec = Field(default_factory=SolverSpec)
     variables: QposVariableSpec = Field(default_factory=QposVariableSpec.actuated)
@@ -290,28 +382,152 @@ class RetargetingRunConfig(BaseModel):
     scene: SceneConfig = Field(default_factory=SceneConfig)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("output", mode="before")
+    def resolve_paths(self, base_dir: Path) -> RoleMappingRecipeConfig:
+        return self.model_copy(update={"scene": self.scene.resolve_paths(base_dir)})
+
+    def resolved_objectives(self) -> tuple[ObjectiveConfig, ...]:
+        return _resolve_objective_configs(
+            self.objectives if self.objectives is not None else OptimizationProfile.defaults().objectives
+        )
+
+    def resolved_constraints(self) -> tuple[ConstraintConfig, ...]:
+        return _resolve_constraint_configs(
+            self.constraints if self.constraints is not None else OptimizationProfile.defaults().constraints
+        )
+
+
+class SkateboardingAdaptationConfig(BaseAdaptationConfig):
+    """Configure the public skateboarding adaptation recipe."""
+
+    kind: RetargetingRecipeKind = RetargetingRecipeKind.SKATEBOARDING
+    scale_to_robot: bool = False
+    output_fps: float | None = None
+    show_progress: bool = False
+    solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL
+
+
+class HolosomaClimbOptimizationPolicyConfig(BaseModel):
+    """Serializable Holosoma optimization policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    collision_activation_distance: float = Field(default=0.1, gt=0.0)
+    qpos_regularization: tuple[tuple[int, float], ...] = ((19, 0.2), (20, 0.2))
+    nominal_qpos_indices: tuple[int, ...] = tuple(range(19))
+
+    def build(self) -> HolosomaClimbOptimizationPolicy:
+        return HolosomaClimbOptimizationPolicy(
+            collision_activation_distance=self.collision_activation_distance,
+            qpos_regularization=self.qpos_regularization,
+            nominal_qpos_indices=self.nominal_qpos_indices,
+        )
+
+
+class HolosomaClimbAdaptationConfig(BaseAdaptationConfig):
+    """Configure the public Holosoma climbing adaptation recipe."""
+
+    kind: RetargetingRecipeKind = RetargetingRecipeKind.HOLOSOMA_CLIMB
+    holosoma_root: Path
+    include_object_collision: bool = True
+    show_progress: bool = False
+    solver_backend: SolverBackend = SolverBackend.CVXPY_CLARABEL
+    policy: HolosomaClimbOptimizationPolicyConfig = Field(default_factory=HolosomaClimbOptimizationPolicyConfig)
+
+    @field_validator("holosoma_root", mode="before")
     @classmethod
-    def _coerce_path(cls, value: Any) -> Path:
+    def _path(cls, value: Any) -> Path:
         return Path(value)
 
-    @field_validator("source", mode="before")
+    def resolve_paths(self, base_dir: Path) -> HolosomaClimbAdaptationConfig:
+        return self.model_copy(update={"holosoma_root": _resolve_relative(self.holosoma_root, base_dir)})
+
+
+@dataclass(frozen=True)
+class ConfiguredSceneRecipe:
+    """Build a frame-aligned scene from serialized scene fields."""
+
+    task_kind: TaskKind
+    config: SceneConfig
+
+    def build_scene(self, observation: Any) -> SceneSpec:
+        fps = observation.timeline.nominal_fps
+        if fps is None:
+            raise ValueError("configured scenes require at least two observation samples")
+        object_spec = _object_spec(
+            self.config.object,
+            frame_count=observation.timeline.sample_count,
+            fps=fps,
+        )
+        terrain_spec = _terrain_spec(self.config.terrain)
+        if self.task_kind == TaskKind.ROBOT_ONLY:
+            return SceneSpec(
+                task_kind=self.task_kind,
+                terrain=terrain_spec or TerrainSpec(),
+                ground_range=self.config.ground_range,
+                ground_size=self.config.ground_size,
+                metadata=self.config.metadata,
+            )
+        if self.task_kind == TaskKind.OBJECT_INTERACTION:
+            return SceneSpec(
+                task_kind=self.task_kind,
+                object=object_spec or ObjectSpec(name="object"),
+                terrain=terrain_spec,
+                ground_range=self.config.ground_range,
+                ground_size=self.config.ground_size,
+                metadata=self.config.metadata,
+            )
+        return SceneSpec(
+            task_kind=self.task_kind,
+            object=object_spec,
+            terrain=terrain_spec or TerrainSpec(name="terrain"),
+            ground_range=self.config.ground_range,
+            ground_size=self.config.ground_size,
+            metadata=self.config.metadata,
+        )
+
+
+class RetargetingRunConfig(BaseModel):
+    """Serialized constructor arguments for a `RetargetingExperiment`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    observation: BaseObservationConfig
+    recipe: BaseAdaptationConfig
+    robot: str = "synthetic_humanoid"
+    robot_provider: str = "registry"
+    robot_options: dict[str, Any] = Field(default_factory=dict)
+    output: Path
+    imports: tuple[str, ...] = ()
+
+    @field_validator("output", mode="before")
     @classmethod
-    def _coerce_source(cls, value: Any) -> BaseRunSourceConfig:
-        if isinstance(value, BaseRunSourceConfig):
+    def _output_path(cls, value: Any) -> Path:
+        return Path(value)
+
+    @field_validator("observation", mode="before")
+    @classmethod
+    def _observation(cls, value: Any) -> BaseObservationConfig:
+        if isinstance(value, BaseObservationConfig):
             return value
         if not isinstance(value, dict):
-            raise ValueError("source must be a typed source mapping")
-        raw_kind = value.get("kind")
-        if raw_kind is None:
-            raise ValueError("source.kind is required")
-        kind = RunSourceKind(str(raw_kind))
-        builder = run_sources.get(kind)
-        return builder.config_type.model_validate(value)
+            raise ValueError("observation must be a typed mapping")
+        kind = ObservationRecipeKind(str(value.get("kind", "")))
+        return observation_config_builders.get(kind).config_type.model_validate(value)
+
+    @field_validator("recipe", mode="before")
+    @classmethod
+    def _recipe(cls, value: Any) -> BaseAdaptationConfig:
+        if isinstance(value, BaseAdaptationConfig):
+            return value
+        if not isinstance(value, dict):
+            raise ValueError("recipe must be a typed mapping")
+        kind = RetargetingRecipeKind(str(value.get("kind", "")))
+        return adaptation_config_builders.get(kind).config_type.model_validate(value)
 
     @field_validator("imports", mode="before")
     @classmethod
-    def _coerce_imports(cls, value: Any) -> tuple[str, ...]:
+    def _imports(cls, value: Any) -> tuple[str, ...]:
         if value in (None, ""):
             return ()
         if isinstance(value, str):
@@ -320,23 +536,24 @@ class RetargetingRunConfig(BaseModel):
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
-        """Load a `.toml`, `.yaml`, `.yml`, or `.json` run spec."""
+        """Load and resolve one TOML, YAML, or JSON experiment config."""
 
         config_path = Path(path)
         data = _load_mapping(config_path)
-        config = cls.model_validate(data)
-        return config.resolve_paths(config_path.parent)
+        raw_imports = data.get("imports", ())
+        references = (str(raw_imports),) if isinstance(raw_imports, str) else tuple(str(value) for value in raw_imports)
+        for reference in _resolve_import_refs(references, config_path.parent):
+            _import_extension(reference)
+        return cls.model_validate(data).resolve_paths(config_path.parent)
 
     def resolve_paths(self, base_dir: Path) -> Self:
-        """Return a copy with relative file paths resolved against `base_dir`."""
-
         return self.model_copy(
             update={
-                "source": self.source.resolve_paths(base_dir),
+                "observation": self.observation.resolve_paths(base_dir),
+                "recipe": self.recipe.resolve_paths(base_dir),
                 "output": _resolve_relative(self.output, base_dir),
                 "imports": _resolve_import_refs(self.imports, base_dir),
                 "robot_options": _resolve_robot_options(self.robot_options, base_dir),
-                "scene": self.scene.resolve_paths(base_dir),
             }
         )
 
@@ -351,16 +568,19 @@ class RetargetingRunConfig(BaseModel):
         name: str | None = None,
         show_progress: bool | None = None,
     ) -> Self:
-        """Return a copy with explicit CLI overrides applied."""
-
         updates: dict[str, Any] = {}
         if motion is not None:
-            current_format = self.source.format_name if isinstance(self.source, MotionFileSourceConfig) else "minimal"
-            updates["source"] = MotionFileSourceConfig(path=motion, format_name=format_name or current_format)
+            current_format = (
+                self.observation.format_name if isinstance(self.observation, MotionFileObservationConfig) else "minimal"
+            )
+            updates["observation"] = MotionFileObservationConfig(
+                path=motion,
+                format_name=format_name or current_format,
+            )
         elif format_name is not None:
-            if not isinstance(self.source, MotionFileSourceConfig):
-                raise ValueError("--format can only override motion_file sources")
-            updates["source"] = self.source.model_copy(update={"format_name": format_name})
+            if not isinstance(self.observation, MotionFileObservationConfig):
+                raise ValueError("--format can only override motion-file observations")
+            updates["observation"] = self.observation.model_copy(update={"format_name": format_name})
         if output is not None:
             updates["output"] = output
         if robot is not None:
@@ -368,185 +588,294 @@ class RetargetingRunConfig(BaseModel):
             updates["robot_provider"] = "registry"
             updates["robot_options"] = {}
         if task_kind is not None:
-            updates["task_kind"] = task_kind
+            if not isinstance(self.recipe, RoleMappingRecipeConfig):
+                raise ValueError("--task-kind can only override role-mapping recipes")
+            updates["recipe"] = self.recipe.model_copy(update={"task_kind": task_kind})
         if name is not None:
             updates["name"] = name
         if show_progress is not None:
-            updates["show_progress"] = show_progress
+            updates["recipe"] = self.recipe.model_copy(update={"show_progress": show_progress})
         return self.model_copy(update=updates)
 
-    def build_problem(self) -> RetargetingProblem:
-        """Resolve registries and build a `RetargetingProblem`."""
-
-        self.validate_registry_references()
-        robot_spec = robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
-        prepared = self._build_inputs(robot_spec)
-        return RetargetingProblem(
-            name=self.name or prepared.motion.name,
-            task_kind=self.task_kind,
-            robot=robot_spec,
-            motion=prepared.motion,
-            scene=prepared.scene,
-            contacts=prepared.contacts,
-            targets=prepared.targets,
-            nominal_qpos=prepared.nominal_qpos,
-            motion_format=prepared.motion_format,
-            joint_mapping=self.joint_mapping,
-            mesh=self.mesh,
-            solver=self.solver,
-            variables=self.variables,
-            objectives=self.resolved_objectives(),
-            constraints=self.resolved_constraints(),
-            scale_to_robot=self.scale_to_robot,
-            output_fps=self.output_fps,
-            show_progress=self.show_progress,
-            metadata={**self.metadata, **prepared.metadata},
-        )
-
     def import_extensions(self) -> None:
-        """Import explicitly configured extension modules."""
-
         for reference in self.imports:
             _import_extension(reference)
 
-    def resolved_objectives(self) -> tuple[ObjectiveConfig, ...]:
-        """Return config entries validated through registered objective terms."""
+    def load_robot(self) -> RobotSpec:
+        """Resolve the configured target robot."""
 
-        return _resolve_objective_configs(self.objectives if self.objectives is not None else _default_objectives())
+        return robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
 
-    def resolved_constraints(self) -> tuple[ConstraintConfig, ...]:
-        """Return config entries validated through registered constraint terms."""
+    def build_experiment(
+        self,
+        *,
+        retargeter: Retargeter | None = None,
+        retargeter_factory: Callable[[RetargetingProblem], Retargeter] | None = None,
+    ) -> RetargetingExperiment:
+        """Build the same public experiment object used by Python workflows."""
 
-        return _resolve_constraint_configs(self.constraints if self.constraints is not None else _default_constraints())
+        self.validate_registry_references()
+        robot = self.load_robot()
+        observation = observation_config_builders.get(self.observation.kind).build(self.observation, run_name=self.name)
+        recipe = adaptation_config_builders.get(self.recipe.kind).build(
+            self.recipe,
+            observation=self.observation,
+            robot=robot,
+            run_name=self.name,
+        )
+        return RetargetingExperiment(
+            observation=observation,
+            recipe=recipe,
+            robot=robot,
+            retargeter=retargeter,
+            retargeter_factory=retargeter_factory,
+        )
+
+    def build_problem(self) -> RetargetingProblem:
+        """Observe and adapt through `RetargetingExperiment`."""
+
+        return self.build_experiment().build_problem()
 
     def validate_registry_references(self) -> None:
-        """Validate named extension references before loading files or assets."""
-
         self.import_extensions()
         messages: list[str] = []
-        run_sources.get(self.source.kind).validate_registry_references(self.source, messages)
+        observation_config_builders.get(self.observation.kind).validate_registry_references(self.observation, messages)
+        adaptation_config_builders.get(self.recipe.kind).validate_registry_references(self.recipe, messages)
         _append_missing_registry_messages(messages, robot_providers, (self.robot_provider,))
         if self.robot_provider == "registry":
             _append_missing_registry_messages(messages, robots, (self.robot,))
-        objective_inputs = self.objectives if self.objectives is not None else _default_objectives()
-        constraint_inputs = self.constraints if self.constraints is not None else _default_constraints()
-        _append_missing_registry_messages(messages, objective_terms, _config_kinds(objective_inputs, label="objective"))
+        if messages:
+            raise KeyError("Unknown experiment-config registry references: " + "; ".join(messages))
+
+
+class MotionFileObservationBuilder:
+    config_type: type[BaseObservationConfig] = MotionFileObservationConfig
+
+    def build(
+        self,
+        config: BaseObservationConfig,
+        *,
+        run_name: str | None,
+    ) -> ObservationRecipe:
+        source = cast(MotionFileObservationConfig, config)
+        return MotionFileObservationRecipe.registered(
+            source.path,
+            source.format_name,
+            name=run_name,
+        )
+
+    def validate_registry_references(
+        self,
+        config: BaseObservationConfig,
+        messages: list[str],
+    ) -> None:
+        source = cast(MotionFileObservationConfig, config)
+        _append_missing_registry_messages(messages, motion_formats, (source.format_name,))
+
+
+class SkateboardingObservationBuilder:
+    config_type: type[BaseObservationConfig] = SkateboardingObservationConfig
+
+    def build(
+        self,
+        config: BaseObservationConfig,
+        *,
+        run_name: str | None,
+    ) -> ObservationRecipe:
+        source = cast(SkateboardingObservationConfig, config)
+        name = run_name or source.gvhmr.name
+        return SkateboardingObservationRecipe(
+            mocap=ViconRecordingSource(
+                source.vicon,
+                VICON_SCHEMA,
+                name=name,
+            ),
+            human_pose=GvhmrOutputSource(
+                source.gvhmr,
+                GVHMR_SCHEMA,
+                fps=source.video_fps,
+                name=name,
+                source_height_m=source.source_height_m,
+            ),
+            timeline_selection=source.timeline_selection,
+            crop_policy=source.crop_policy,
+            uniform_fps=source.uniform_fps,
+            max_frames=source.max_frames,
+        )
+
+    def validate_registry_references(
+        self,
+        config: BaseObservationConfig,
+        messages: list[str],
+    ) -> None:
+        del config, messages
+
+
+class HolosomaObservationBuilder:
+    config_type: type[BaseObservationConfig] = HolosomaClimbObservationConfig
+
+    def build(
+        self,
+        config: BaseObservationConfig,
+        *,
+        run_name: str | None,
+    ) -> ObservationRecipe:
+        del run_name
+        source = cast(HolosomaClimbObservationConfig, config)
+        return HolosomaClimbObservationRecipe.from_fixture(
+            source.holosoma_root,
+            frame_count=source.frame_count,
+            source_fps=source.source_fps,
+            downsample=source.downsample,
+            policy=source.policy.build(),
+        )
+
+    def validate_registry_references(
+        self,
+        config: BaseObservationConfig,
+        messages: list[str],
+    ) -> None:
+        del config, messages
+
+
+class RoleMappingAdaptationBuilder:
+    config_type: type[BaseAdaptationConfig] = RoleMappingRecipeConfig
+
+    def build(
+        self,
+        config: BaseAdaptationConfig,
+        *,
+        observation: BaseObservationConfig,
+        robot: RobotSpec,
+        run_name: str | None,
+    ) -> RetargetingRecipe:
+        recipe_config = cast(RoleMappingRecipeConfig, config)
+        if not isinstance(observation, MotionFileObservationConfig):
+            raise TypeError("role_mapping recipes currently require a motion_file observation")
+        motion_format = motion_formats.get(observation.format_name)
+        return RoleRetargetingRecipe(
+            task_kind=recipe_config.task_kind,
+            motion_format=motion_format,
+            scene=ConfiguredSceneRecipe(
+                task_kind=recipe_config.task_kind,
+                config=recipe_config.scene,
+            ),
+            joint_roles={
+                motion_format.joint_vocabulary(source): robot.role_vocabulary(target)
+                for source, target in recipe_config.joint_roles.items()
+            },
+            link_roles={
+                motion_format.joint_vocabulary(source): robot.role_vocabulary(target)
+                for source, target in recipe_config.link_roles.items()
+            },
+            mesh=recipe_config.mesh,
+            solver=recipe_config.solver,
+            variables=recipe_config.variables,
+            objectives=recipe_config.resolved_objectives(),
+            constraints=recipe_config.resolved_constraints(),
+            scale_to_robot=recipe_config.scale_to_robot,
+            output_fps=recipe_config.output_fps,
+            show_progress=recipe_config.show_progress,
+            name=run_name,
+            metadata=recipe_config.metadata,
+        )
+
+    def validate_registry_references(
+        self,
+        config: BaseAdaptationConfig,
+        messages: list[str],
+    ) -> None:
+        recipe = cast(RoleMappingRecipeConfig, config)
+        objective_inputs = (
+            recipe.objectives if recipe.objectives is not None else OptimizationProfile.defaults().objectives
+        )
+        constraint_inputs = (
+            recipe.constraints if recipe.constraints is not None else OptimizationProfile.defaults().constraints
+        )
+        _append_missing_registry_messages(
+            messages,
+            objective_terms,
+            _config_kinds(objective_inputs, label="objective"),
+        )
         _append_missing_registry_messages(
             messages,
             constraint_terms,
             _config_kinds(constraint_inputs, label="constraint"),
         )
-        if messages:
-            raise KeyError("Unknown run-config registry references: " + "; ".join(messages))
         validate_optimization_references(
-            solver=self.solver,
-            objectives=self.resolved_objectives(),
-            constraints=self.resolved_constraints(),
-        )
-
-    def _build_inputs(self, robot: RobotSpec) -> PreparedRetargetingInputs:
-        return run_sources.get(self.source.kind).prepare(self.source, robot, run_name=self.name, run_config=self)
-
-    def _build_scene(self, *, frame_count: int, fps: float) -> SceneSpec:
-        object_spec = _object_spec(self.scene.object, frame_count=frame_count, fps=fps)
-        terrain_spec = _terrain_spec(self.scene.terrain)
-        if self.task_kind == TaskKind.ROBOT_ONLY:
-            return SceneSpec(
-                task_kind=self.task_kind,
-                terrain=terrain_spec or TerrainSpec(),
-                ground_range=self.scene.ground_range,
-                ground_size=self.scene.ground_size,
-                metadata=self.scene.metadata,
-            )
-        if self.task_kind == TaskKind.OBJECT_INTERACTION:
-            return SceneSpec(
-                task_kind=self.task_kind,
-                object=object_spec or ObjectSpec(name="object"),
-                terrain=terrain_spec,
-                ground_range=self.scene.ground_range,
-                ground_size=self.scene.ground_size,
-                metadata=self.scene.metadata,
-            )
-        return SceneSpec(
-            task_kind=self.task_kind,
-            object=object_spec,
-            terrain=terrain_spec or TerrainSpec(name="terrain"),
-            ground_range=self.scene.ground_range,
-            ground_size=self.scene.ground_size,
-            metadata=self.scene.metadata,
+            solver=recipe.solver,
+            objectives=recipe.resolved_objectives(),
+            constraints=recipe.resolved_constraints(),
         )
 
 
-class MotionFileSourceBuilder:
-    """Build retarget inputs from a registered motion file loader."""
+class SkateboardingAdaptationBuilder:
+    config_type: type[BaseAdaptationConfig] = SkateboardingAdaptationConfig
 
-    config_type: type[BaseRunSourceConfig] = MotionFileSourceConfig
-
-    def validate_registry_references(self, config: BaseRunSourceConfig, messages: list[str]) -> None:
-        source = cast(MotionFileSourceConfig, config)
-        _append_missing_registry_messages(messages, motion_formats, (source.format_name,))
-
-    def prepare(
+    def build(
         self,
-        config: BaseRunSourceConfig,
-        robot: RobotSpec,
+        config: BaseAdaptationConfig,
         *,
+        observation: BaseObservationConfig,
+        robot: RobotSpec,
         run_name: str | None,
-        run_config: Any,
-    ) -> PreparedRetargetingInputs:
-        source = cast(MotionFileSourceConfig, config)
-        motion_format = motion_formats.get(source.format_name)
-        motion = load_motion(source.path, source.format_name, name=run_name)
-        return PreparedRetargetingInputs(
-            motion=motion,
-            scene=run_config._build_scene(frame_count=motion.frame_count, fps=motion.fps),
-            contacts=_contact_plan_from_motion(motion, robot.contact_links),
-            motion_format=motion_format,
+    ) -> RetargetingRecipe:
+        del robot, run_name
+        if not isinstance(observation, SkateboardingObservationConfig):
+            raise TypeError("skateboarding adaptation requires a skateboarding observation")
+        recipe = cast(SkateboardingAdaptationConfig, config)
+        return SkateboardingRetargetingRecipe(
+            scale_to_robot=recipe.scale_to_robot,
+            output_fps=recipe.output_fps,
+            show_progress=recipe.show_progress,
+            solver_backend=recipe.solver_backend,
         )
 
-
-class MotionSyncSkateboardingSourceBuilder:
-    """Build retarget inputs from the bundled skateboarding motion_sync recipe."""
-
-    config_type: type[BaseRunSourceConfig] = MotionSyncSkateboardingSourceConfig
-
-    def validate_registry_references(self, _config: BaseRunSourceConfig, _messages: list[str]) -> None:
-        return
-
-    def prepare(
+    def validate_registry_references(
         self,
-        config: BaseRunSourceConfig,
-        robot: RobotSpec,
+        config: BaseAdaptationConfig,
+        messages: list[str],
+    ) -> None:
+        del config, messages
+
+
+class HolosomaAdaptationBuilder:
+    config_type: type[BaseAdaptationConfig] = HolosomaClimbAdaptationConfig
+
+    def build(
+        self,
+        config: BaseAdaptationConfig,
         *,
+        observation: BaseObservationConfig,
+        robot: RobotSpec,
         run_name: str | None,
-        run_config: Any,
-    ) -> PreparedRetargetingInputs:
-        del run_config
-        source = cast(MotionSyncSkateboardingSourceConfig, config)
-        from retarget.integrations.motion_sync.skateboarding import from_skateboarding_clip
-
-        prepared = from_skateboarding_clip(
-            source.synced_path,
-            name=run_name or source.demo,
-            max_frames=source.max_frames,
-            height_m=source.height_m,
-            force_contacts=source.force_contacts,
-            save_contact_layer=source.save_contact_layer,
-            contact_links=robot.contact_links,
-        )
-        return PreparedRetargetingInputs(
-            motion=prepared.motion,
-            scene=prepared.scene,
-            contacts=prepared.contacts,
-            targets=prepared.targets,
-            nominal_qpos=prepared.nominal_qpos,
-            motion_format=prepared.motion_format,
-            metadata=dict(prepared.metadata),
+    ) -> RetargetingRecipe:
+        del robot, run_name
+        if not isinstance(observation, HolosomaClimbObservationConfig):
+            raise TypeError("holosoma_climb adaptation requires a Holosoma observation")
+        recipe = cast(HolosomaClimbAdaptationConfig, config)
+        return HolosomaClimbRetargetingRecipe(
+            holosoma_root=recipe.holosoma_root,
+            include_object_collision=recipe.include_object_collision,
+            solver_backend=recipe.solver_backend,
+            show_progress=recipe.show_progress,
+            optimization_policy=recipe.policy.build(),
         )
 
+    def validate_registry_references(
+        self,
+        config: BaseAdaptationConfig,
+        messages: list[str],
+    ) -> None:
+        del config, messages
 
-run_sources.register(RunSourceKind.MOTION_FILE, MotionFileSourceBuilder())
-run_sources.register(RunSourceKind.MOTION_SYNC_SKATEBOARDING, MotionSyncSkateboardingSourceBuilder())
+
+observation_config_builders.register(ObservationRecipeKind.MOTION_FILE, MotionFileObservationBuilder())
+observation_config_builders.register(ObservationRecipeKind.SKATEBOARDING, SkateboardingObservationBuilder())
+observation_config_builders.register(ObservationRecipeKind.HOLOSOMA_CLIMB, HolosomaObservationBuilder())
+adaptation_config_builders.register(RetargetingRecipeKind.ROLE_MAPPING, RoleMappingAdaptationBuilder())
+adaptation_config_builders.register(RetargetingRecipeKind.SKATEBOARDING, SkateboardingAdaptationBuilder())
+adaptation_config_builders.register(RetargetingRecipeKind.HOLOSOMA_CLIMB, HolosomaAdaptationBuilder())
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:
@@ -574,15 +903,16 @@ def _resolve_relative(path: Path | None, base_dir: Path) -> Path | None:
     return (base_dir / path).resolve()
 
 
-def _resolve_import_refs(references: tuple[str, ...], base_dir: Path) -> tuple[str, ...]:
-    resolved: list[str] = []
-    for reference in references:
-        if _is_path_like_import(reference):
-            path = Path(reference)
-            resolved.append(str(path if path.is_absolute() else (base_dir / path).resolve()))
-        else:
-            resolved.append(reference)
-    return tuple(resolved)
+def _resolve_import_refs(
+    references: tuple[str, ...],
+    base_dir: Path,
+) -> tuple[str, ...]:
+    return tuple(
+        str(Path(reference) if Path(reference).is_absolute() else (base_dir / reference).resolve())
+        if _is_path_like_import(reference)
+        else reference
+        for reference in references
+    )
 
 
 def _is_path_like_import(reference: str) -> bool:
@@ -593,14 +923,12 @@ def _import_extension(reference: str) -> None:
     if not _is_path_like_import(reference):
         importlib.import_module(reference)
         return
-
     path = Path(reference)
     if path.suffix != ".py":
         raise ValueError(f"Extension import path {reference!r} must point to a .py file")
     if not path.exists():
         raise FileNotFoundError(path)
-
-    module_name = _module_name_for_path(path)
+    module_name = "_retarget_plugin_" + hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
     if module_name in sys.modules:
         return
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -615,17 +943,15 @@ def _import_extension(reference: str) -> None:
         raise
 
 
-def _module_name_for_path(path: Path) -> str:
-    digest = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
-    return f"_retarget_plugin_{digest}"
-
-
-def _append_missing_registry_messages(messages: list[str], registry: Registry[Any], keys: tuple[str, ...]) -> None:
+def _append_missing_registry_messages(
+    messages: list[str],
+    registry: Registry[Any],
+    keys: tuple[str, ...],
+) -> None:
     missing = registry.missing(keys)
-    if not missing:
-        return
-    available = ", ".join(registry.names()) or "<none>"
-    messages.append(f"{registry.name}: {', '.join(missing)} (available: {available})")
+    if missing:
+        available = ", ".join(registry.names()) or "<none>"
+        messages.append(f"{registry.name}: {', '.join(missing)} (available: {available})")
 
 
 def _config_kinds(items: tuple[Any, ...], *, label: str) -> tuple[str, ...]:
@@ -633,99 +959,55 @@ def _config_kinds(items: tuple[Any, ...], *, label: str) -> tuple[str, ...]:
     for item in items:
         if isinstance(item, (ObjectiveConfig, ConstraintConfig)):
             kinds.append(item.kind)
-            continue
-        if not isinstance(item, dict):
-            raise TypeError(f"{label} config entries must be typed configs or mappings")
-        kind = item.get("kind")
-        if not isinstance(kind, str) or not kind:
+        elif isinstance(item, dict) and isinstance(item.get("kind"), str):
+            kinds.append(item["kind"])
+        else:
             raise ValueError(f"{label} config entries must include a non-empty kind")
-        kinds.append(kind)
     return tuple(kinds)
 
 
-def _resolve_objective_configs(items: tuple[Any, ...]) -> tuple[ObjectiveConfig, ...]:
-    configs: list[ObjectiveConfig] = []
-    for item in items:
-        if isinstance(item, ObjectiveConfig):
-            configs.append(item)
-            continue
-        if not isinstance(item, dict):
-            raise TypeError("objective config entries must be typed configs or mappings")
-        kind = item.get("kind")
-        if not isinstance(kind, str) or not kind:
-            raise ValueError("objective config entries must include a non-empty kind")
-        term = objective_terms.get(kind)
-        configs.append(term.config_type.model_validate(item))
-    return tuple(configs)
-
-
-def _resolve_constraint_configs(items: tuple[Any, ...]) -> tuple[ConstraintConfig, ...]:
-    configs: list[ConstraintConfig] = []
-    for item in items:
-        if isinstance(item, ConstraintConfig):
-            configs.append(item)
-            continue
-        if not isinstance(item, dict):
-            raise TypeError("constraint config entries must be typed configs or mappings")
-        kind = item.get("kind")
-        if not isinstance(kind, str) or not kind:
-            raise ValueError("constraint config entries must include a non-empty kind")
-        term = constraint_terms.get(kind)
-        configs.append(term.config_type.model_validate(item))
-    return tuple(configs)
-
-
-def _resolve_robot_options(options: dict[str, Any], base_dir: Path) -> dict[str, Any]:
-    resolved = dict(options)
-    for key in ("path", "store"):
-        value = resolved.get(key)
-        if value is None or value == "":
-            continue
-        resolved[key] = _resolve_relative(Path(str(value)), base_dir)
-    return resolved
-
-
-def _contact_plan_from_motion(motion: Any, contact_links: tuple[str, ...]) -> ContactPlan | None:
-    if not motion.contacts:
-        return None
-    subjects = tuple(dict.fromkeys(name for frame in motion.contacts for name in frame))
-    link_mapping = {subject: _links_for_contact_subject(subject, contact_links) for subject in subjects}
-    contact_provenance = motion.contact_provenance
-    return ContactPlan.from_binary_contacts(
-        motion.contacts,
-        link_mapping=link_mapping,
-        support=motion.support,
-        provenance={
-            "source": "motion_sequence.contacts",
-            "motion": motion.name,
-            **dict(contact_provenance),
-        },
+def _resolve_objective_configs(
+    items: tuple[Any, ...],
+) -> tuple[ObjectiveConfig, ...]:
+    return tuple(
+        item
+        if isinstance(item, ObjectiveConfig)
+        else objective_terms.get(str(item["kind"])).config_type.model_validate(item)
+        for item in items
     )
 
 
-def _links_for_contact_subject(subject: str, contact_links: tuple[str, ...]) -> tuple[str, ...]:
-    lower = subject.lower()
-    if "left" in lower or lower.startswith(("l_", "l-")):
-        return tuple(link for link in contact_links if "left" in link.lower() or link.lower().startswith(("l_", "l-")))
-    if "right" in lower or lower.startswith(("r_", "r-")):
-        return tuple(
-            link for link in contact_links if "right" in link.lower() or link.lower().startswith(("r_", "r-"))
-        )
-    return contact_links
+def _resolve_constraint_configs(
+    items: tuple[Any, ...],
+) -> tuple[ConstraintConfig, ...]:
+    return tuple(
+        item
+        if isinstance(item, ConstraintConfig)
+        else constraint_terms.get(str(item["kind"])).config_type.model_validate(item)
+        for item in items
+    )
 
 
-def _default_objectives() -> tuple[ObjectiveConfig, ...]:
-    return OptimizationProfile.defaults().objectives
+def _resolve_robot_options(
+    options: dict[str, Any],
+    base_dir: Path,
+) -> dict[str, Any]:
+    resolved = dict(options)
+    for key in ("path", "store", "holosoma_root"):
+        value = resolved.get(key)
+        if value not in (None, ""):
+            resolved[key] = _resolve_relative(Path(str(value)), base_dir)
+    return resolved
 
 
-def _default_constraints() -> tuple[ConstraintConfig, ...]:
-    return OptimizationProfile.defaults().constraints
-
-
-def _object_spec(config: ObjectConfig | None, *, frame_count: int, fps: float) -> ObjectSpec | None:
+def _object_spec(
+    config: ObjectConfig | None,
+    *,
+    frame_count: int,
+    fps: float,
+) -> ObjectSpec | None:
     if config is None:
         return None
-    trajectory = _object_trajectory(config, frame_count=frame_count, fps=fps)
     return ObjectSpec(
         name=config.name,
         mesh_path=config.mesh_path,
@@ -747,7 +1029,11 @@ def _object_spec(config: ObjectConfig | None, *, frame_count: int, fps: float) -
             mesh_path=config.mesh_path,
             mesh_sample_count=config.mesh_sample_count,
         ),
-        trajectory=trajectory,
+        trajectory=_object_trajectory(
+            config,
+            frame_count=frame_count,
+            fps=fps,
+        ),
         metadata=config.metadata,
     )
 
@@ -769,7 +1055,12 @@ def _terrain_spec(config: TerrainConfig | None) -> TerrainSpec | None:
     )
 
 
-def _object_trajectory(config: ObjectConfig, *, frame_count: int, fps: float) -> ObjectTrajectory | None:
+def _object_trajectory(
+    config: ObjectConfig,
+    *,
+    frame_count: int,
+    fps: float,
+) -> ObjectTrajectory | None:
     if config.trajectory_path is not None:
         poses = _load_pose_sequence(config.trajectory_path, fps=fps).to_frame(FrameConvention.Z_UP_RIGHT_HANDED)
         return ObjectTrajectory(name=config.name, poses=poses)
@@ -777,7 +1068,10 @@ def _object_trajectory(config: ObjectConfig, *, frame_count: int, fps: float) ->
         positions = (
             np.asarray(config.trajectory_positions, dtype=np.float64)
             if config.trajectory_positions is not None
-            else np.zeros((len(config.trajectory_quaternions or ()), 3), dtype=np.float64)
+            else np.zeros(
+                (len(config.trajectory_quaternions or ()), 3),
+                dtype=np.float64,
+            )
         )
         quaternions = (
             np.asarray(config.trajectory_quaternions, dtype=np.float64)
@@ -813,7 +1107,10 @@ def _scene_points(
         points = sample_mesh_points(mesh_path, count=mesh_sample_count)
     else:
         return None
-    return np.asarray(convert_points_frame(points, frame, FrameConvention.Z_UP_RIGHT_HANDED), dtype=np.float64)
+    return np.asarray(
+        convert_points_frame(points, frame, FrameConvention.Z_UP_RIGHT_HANDED),
+        dtype=np.float64,
+    )
 
 
 def _load_points(path: Path) -> np.ndarray:
@@ -821,8 +1118,8 @@ def _load_points(path: Path) -> np.ndarray:
     if suffix == ".npy":
         return _validate_points(np.load(path))
     if suffix == ".npz":
-        data = np.load(path, allow_pickle=True)
-        return _validate_points(_first_present_array(data, "sample_points", "points", "vertices"))
+        with np.load(path, allow_pickle=False) as data:
+            return _validate_points(_first_present_array(data, "sample_points", "points", "vertices"))
     if suffix == ".json":
         data = json.loads(path.read_text())
         values = data.get("sample_points", data.get("points", data)) if isinstance(data, dict) else data
@@ -836,16 +1133,25 @@ def _load_points(path: Path) -> np.ndarray:
 def _load_pose_sequence(path: Path, *, fps: float) -> PoseSequence:
     suffix = path.suffix.lower()
     if suffix == ".npy":
-        positions = np.asarray(np.load(path), dtype=np.float64)
-        return _pose_sequence_from_arrays(positions, None, fps=fps)
+        return _pose_sequence_from_arrays(np.load(path), None, fps=fps)
     if suffix == ".npz":
-        data = np.load(path, allow_pickle=True)
-        positions = _first_present_array(data, "positions", "translations", "object_positions")
-        quaternions = _maybe_present_array(data, "quaternions", "rotations", "object_quaternions")
-        file_fps = _scalar_float(data, "fps", fps)
-        frame = _enum_value(data, "frame_convention", FrameConvention.Z_UP_RIGHT_HANDED)
-        order = _enum_value(data, "quaternion_order", QuaternionOrder.WXYZ)
-        return _pose_sequence_from_arrays(positions, quaternions, fps=file_fps, frame=frame, order=order)
+        with np.load(path, allow_pickle=False) as data:
+            positions = _first_present_array(data, "positions", "translations", "object_positions")
+            quaternions = _maybe_present_array(data, "quaternions", "rotations", "object_quaternions")
+            file_fps = _scalar_float(data, "fps", fps)
+            frame = _enum_value(
+                data,
+                "frame_convention",
+                FrameConvention.Z_UP_RIGHT_HANDED,
+            )
+            order = _enum_value(data, "quaternion_order", QuaternionOrder.WXYZ)
+        return _pose_sequence_from_arrays(
+            positions,
+            quaternions,
+            fps=file_fps,
+            frame=frame,
+            order=order,
+        )
     if suffix == ".json":
         data = json.loads(path.read_text())
         if not isinstance(data, dict):
@@ -853,35 +1159,53 @@ def _load_pose_sequence(path: Path, *, fps: float) -> PoseSequence:
         json_positions: Any = data.get("positions", data.get("translations", data.get("object_positions")))
         if json_positions is None:
             raise KeyError(f"{path} must contain positions, translations, or object_positions")
-        json_quaternions: Any | None = data.get("quaternions", data.get("rotations", data.get("object_quaternions")))
-        frame = FrameConvention(str(data.get("frame_convention", data.get("frame", FrameConvention.Z_UP_RIGHT_HANDED))))
+        quaternions = data.get(
+            "quaternions",
+            data.get("rotations", data.get("object_quaternions")),
+        )
+        frame = FrameConvention(
+            str(
+                data.get(
+                    "frame_convention",
+                    data.get("frame", FrameConvention.Z_UP_RIGHT_HANDED),
+                )
+            )
+        )
         order = QuaternionOrder(str(data.get("quaternion_order", QuaternionOrder.WXYZ)))
         return _pose_sequence_from_arrays(
             json_positions,
-            json_quaternions,
+            quaternions,
             fps=float(data.get("fps", fps)),
             frame=frame,
             order=order,
         )
     if suffix == ".csv":
         rows = list(csv.DictReader(path.read_text().splitlines()))
-        positions = np.asarray([[float(row["x"]), float(row["y"]), float(row["z"])] for row in rows], dtype=np.float64)
+        positions = np.asarray(
+            [[float(row["x"]), float(row["y"]), float(row["z"])] for row in rows],
+            dtype=np.float64,
+        )
+        quaternions = None
+        order = QuaternionOrder.WXYZ
         if rows and all(key in rows[0] for key in ("qw", "qx", "qy", "qz")):
             quaternions = np.asarray(
-                [[float(row["qw"]), float(row["qx"]), float(row["qy"]), float(row["qz"])] for row in rows],
+                [
+                    [
+                        float(row["qw"]),
+                        float(row["qx"]),
+                        float(row["qy"]),
+                        float(row["qz"]),
+                    ]
+                    for row in rows
+                ],
                 dtype=np.float64,
             )
-            order = QuaternionOrder.WXYZ
-        elif rows and all(key in rows[0] for key in ("qx", "qy", "qz", "qw")):
-            quaternions = np.asarray(
-                [[float(row["qx"]), float(row["qy"]), float(row["qz"]), float(row["qw"])] for row in rows],
-                dtype=np.float64,
-            )
-            order = QuaternionOrder.XYZW
-        else:
-            quaternions = None
-            order = QuaternionOrder.WXYZ
-        return _pose_sequence_from_arrays(positions, quaternions, fps=fps, order=order)
+        return _pose_sequence_from_arrays(
+            positions,
+            quaternions,
+            fps=fps,
+            order=order,
+        )
     raise ValueError(f"Unsupported trajectory file suffix {suffix!r}; expected .npy, .npz, .json, or .csv")
 
 
@@ -897,7 +1221,13 @@ def _pose_sequence_from_arrays(
     if pos.ndim != 2 or pos.shape[1] != 3:
         raise ValueError("object trajectory positions must have shape (frames, 3)")
     quat = _identity_quaternions(len(pos)) if quaternions is None else np.asarray(quaternions, dtype=np.float64)
-    return PoseSequence.from_arrays(pos, quat, fps=fps, quaternion_order=order, frame=frame)
+    return PoseSequence.from_arrays(
+        pos,
+        quat,
+        fps=fps,
+        quaternion_order=order,
+        frame=frame,
+    )
 
 
 def _identity_quaternions(frame_count: int) -> np.ndarray:
@@ -928,9 +1258,7 @@ def _maybe_present_array(data: Any, *keys: str) -> np.ndarray | None:
 
 
 def _scalar_float(data: Any, key: str, default: float) -> float:
-    if key not in data:
-        return default
-    return float(np.asarray(data[key]).reshape(()))
+    return default if key not in data else float(np.asarray(data[key]).reshape(()))
 
 
 def _enum_value(data: Any, key: str, default: Any) -> Any:

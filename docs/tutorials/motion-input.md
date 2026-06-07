@@ -1,111 +1,88 @@
-# Motion input
+# Motion And Capture Input
 
-!!! info "Prerequisites"
-    Familiarity with [Your first retarget](your-first-retarget.md) helps—you have already loaded a fixture motion and run the CLI.
+There are two input levels:
 
-Retargeting starts from a **`MotionSequence`**: named joints, positions shaped `(frames, joints, 3)`, frame rate, optional root poses, and typed source fields such as `source_height_m`. This tutorial covers how files become that sequence and how to stay aligned with a **motion format** definition.
+- native recordings preserve independent clocks and frames;
+- `SceneObservation` provides one target-independent timeline and world frame.
 
-## Motion formats are contracts
+`MotionSequence` is created during robot adaptation. It is not the container for
+heterogeneous capture or semantic contacts.
 
-A motion format declares:
+## Native Recordings
 
-- Which joint names appear in files
-- How to parse JSON, NPZ, NPY, or CSV into arrays
-- Typed source fields such as `source_height_m` for scale-to-robot workflows
-
-List registered formats:
-
-```bash
-uv run retarget doctor
-```
-
-The `minimal` format matches the tutorial fixture and the synthetic humanoid mapping. Research formats (for example SMPL-X) register separately and may need optional dependencies.
-
-## Load a fixture file
-
-=== "CLI"
-
-    ```bash
-    uv run retarget run \
-      --motion tests/fixtures/minimal_motion.json \
-      --format minimal \
-      --robot synthetic_humanoid \
-      --output from_json.npz
-    ```
-
-=== "Python"
-
-    ```python
-    from retarget.motion import load_motion
-
-    motion = load_motion("tests/fixtures/minimal_motion.json", "minimal")
-    print(motion.joint_names)
-    print(motion.joint_positions.shape)  # (frames, joints, 3)
-    ```
-
-The JSON layout stores `joint_names`, `joint_positions` as nested lists, and `fps`. Optional `height_m` or `source_height_m` fields are loaded into `MotionSequence.source_height_m`, which drives `scale_to_robot` policies in run configs.
-
-## Supported file types
-
-| Extension | Notes |
-|-----------|--------|
-| `.json` | Human-readable; good for fixtures and small clips |
-| `.npz` / `.npy` | Compact; arrays must match the format’s expected keys |
-| `.csv` | Wide format: columns `{JointName}_x`, `{JointName}_y`, `{JointName}_z` |
-
-Loaders convert external frame conventions to internal **Z-up right-handed** coordinates and record conversions in motion metadata. If your mocap is Y-up, read [Coordinate conventions](../coordinate-conventions.md) before writing a custom loader.
-
-## Build motion in code
-
-When prototyping, construct arrays directly (see `examples/basic_robot_only.py`):
+Use typed sources for capture:
 
 ```python
-import numpy as np
-from retarget.motion import MotionSequence, motion_formats
+from retarget import (
+    GvhmrOutputSource,
+    HumanPoseSourceSchema,
+    ViconBagSource,
+    ViconSourceSchema,
+)
 
-fmt = motion_formats.get("minimal")
-names = fmt.joint_names
-positions = np.zeros((30, len(names), 3))
-positions[:, names.index("Pelvis"), 0] = np.linspace(0.0, 0.5, 30)
-
-motion = MotionSequence(
-    name="synthetic_walk",
-    joint_names=names,
-    joint_positions=positions,
-    fps=30,
-    source_height_m=1.7,
+vicon = ViconBagSource(
+    path="/data/trial",
+    schema=ViconSourceSchema(
+        rigid_bodies={"Left_Shoe": Body.LEFT_SHOE},
+        markers={},
+    ),
+)
+pose = GvhmrOutputSource(
+    path="/data/gvhmr/trial",
+    schema=HumanPoseSourceSchema(joint_indices=joint_indices),
+    fps=59.94,
 )
 ```
 
-Pass this `motion` object to `RetargetingProblem` instead of loading from disk.
+Each recording owns timestamps, frame, enum vocabulary, validity, and
+provenance. An observation recipe aligns and resamples the sources.
 
-## Resampling frame rate
+## Registered Motion Files
 
-Three related knobs:
+For an already coherent joint trajectory, use
+`MotionFileObservationRecipe`:
 
-1. **`MotionSequence.resampled(fps)`** — resample source joints (and root poses) before optimization.
-2. **`RetargetingProblem.output_fps`** — engine resamples motion (and object trajectories) before solving; saved results use that rate.
-3. **`RetargetingResult.resampled(fps)`** — resample `qpos` after the fact for export or comparison.
+```python
+from retarget import MotionFileObservationRecipe, MotionFormat, motion_formats
 
-Use `output_fps` in run configs when every experiment in a study should share a time grid.
+observation_recipe = MotionFileObservationRecipe(
+    path="tests/fixtures/minimal_motion.json",
+    motion_format=motion_formats.get(MotionFormat.MINIMAL),
+)
+observation = observation_recipe.observe()
+```
 
-## Custom formats
+Built-in loaders support `.json`, `.npz`, `.npy`, and `.csv`. Formats declare a
+`MotionJoint` enum, root joint, coordinate convention, quaternion order, and
+default sampling facts.
 
-To support a new skeleton naming scheme or file layout:
+## In-Memory Recordings
 
-1. Implement a format class and register it on `motion_formats`.
-2. Optionally add a `motion_loaders` entry for discovery by extension.
+Construct `HumanPoseRecording`, `MocapRecording`, or `VideoRecording` directly
+for generated data and tests. Wrap them in `InMemorySource` when a recipe
+expects an `ObservationSource[T]`.
 
-Walk through `examples/custom_motion_format.py` and [Add a motion format](../adding-a-motion-format.md). Keep joint names stable—objectives and foot constraints refer to mapped link names on the robot, not raw mocap labels.
+Track resampling is type-specific. See
+[Coordinate conventions](../coordinate-conventions.md) for clock transforms,
+SLERP, and frame conversion.
 
-## Checklist before retargeting
+## Explicit Checkpoints
 
-- [ ] Every joint name in the file exists in the chosen format.
-- [ ] Positions are in meters (or consistently scaled) and roughly match the target robot’s size metadata.
-- [ ] `fps` matches the capture rate or your intended playback rate.
-- [ ] Root pose arrays, if present, use the quaternion order declared in the format or loader.
+```python
+observation.save_npz("trial_observation.npz")
+restored = SceneObservation.load_npz("trial_observation.npz")
+```
 
-## Next steps
+Checkpointing is optional. Sources and recipes never write an intermediate
+artifact automatically.
 
-- [Scenes and task kinds](scene-tasks.md) — when the motion interacts with objects or terrain
-- [Run configs](run-configs.md) — version motion paths and format names in TOML
+## Custom Input
+
+- subclass `MotionJoint`, `MocapRigidBody`, `MocapMarker`, or
+  `ObservationRole` for the source vocabulary;
+- implement `ObservationSource[T]` for a new storage boundary;
+- implement `HumanPoseEstimator` for a replaceable video estimator;
+- implement `ObservationRecipe` for domain-specific fusion.
+
+See [Add a motion format](../adding-a-motion-format.md) for coherent motion
+files and [Custom schemas](../ecosystem/custom-schemas.md) for native capture.

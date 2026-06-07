@@ -30,7 +30,7 @@ class AssetRecord(BaseModel):
         license (str | None): SPDX identifier or short license note.
         notice (str | None): Attribution or NOTICE text.
         installed_at (datetime | None): UTC timestamp when the asset was registered or installed.
-        metadata (dict[str, Any]): Free-form manifest metadata.
+        provenance (dict[str, Any]): Origin and processing history for the asset.
     """
 
     name: str
@@ -41,7 +41,7 @@ class AssetRecord(BaseModel):
     license: str | None = None
     notice: str | None = None
     installed_at: datetime | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("path", mode="before")
     @classmethod
@@ -62,7 +62,7 @@ class AssetRequirement(BaseModel):
         sha256 (str | None): Expected SHA-256 hex digest for file assets.
         license (str | None): SPDX identifier or short license note.
         notice (str | None): Attribution or NOTICE text.
-        metadata (dict[str, Any]): Free-form requirement metadata.
+        provenance (dict[str, Any]): Origin and processing history supplied by the manifest.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -75,7 +75,7 @@ class AssetRequirement(BaseModel):
     sha256: str | None = None
     license: str | None = None
     notice: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("destination", mode="before")
     @classmethod
@@ -106,12 +106,12 @@ class AssetInstallManifest(BaseModel):
     Attributes:
         schema_version (int): Manifest format version (default ``1``).
         assets (tuple[AssetRequirement, ...]): Assets to install or reference.
-        metadata (dict[str, Any]): Free-form manifest metadata.
+        provenance (dict[str, Any]): Origin and processing history for the manifest.
     """
 
     schema_version: int = 1
     assets: tuple[AssetRequirement, ...] = ()
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path) -> AssetInstallManifest:
@@ -180,7 +180,7 @@ class AssetStore:
         sha256: str | None = None,
         license: str | None = None,
         notice: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> AssetRecord:
         """Track or copy an asset path into the store."""
 
@@ -209,7 +209,7 @@ class AssetStore:
             license=license,
             notice=notice,
             installed_at=_utc_now(),
-            metadata=metadata or {},
+            provenance=provenance or {},
         )
         manifest.records = [existing for existing in manifest.records if existing.name != name]
         manifest.records.append(record)
@@ -237,7 +237,7 @@ class AssetStore:
             sha256=requirement.sha256,
             license=requirement.license,
             notice=requirement.notice,
-            metadata=requirement.metadata,
+            provenance=requirement.provenance,
         )
 
     def install_manifest(

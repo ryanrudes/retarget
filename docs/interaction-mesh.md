@@ -38,7 +38,9 @@ problem = problem.model_copy(
 )
 ```
 
-Result metadata records the actual topology and whether it came from the problem spec or a custom engine override. To share one mesh policy across many programmatic runs, pass a custom engine:
+The structured mesh run report records the actual topology and whether it came
+from the problem spec or a custom engine override. To share one mesh policy
+across many programmatic runs, pass a custom engine:
 
 ```python
 from retarget.mesh import InteractionMeshBuilder, MeshTopology

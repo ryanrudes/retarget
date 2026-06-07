@@ -15,14 +15,14 @@ from .vocabulary import (
     HolosomaMocapJoint,
 )
 
-_MOCAP_JOINT_NAMES = tuple(joint.value for joint in HolosomaMocapJoint)
+_MOCAP_JOINTS = tuple(HolosomaMocapJoint)
 
 
 def foot_sticking_contacts(
     timeline: SampleTimeline,
     human_joints: np.ndarray,
     *,
-    demo_joints: tuple[str, ...] = _MOCAP_JOINT_NAMES,
+    demo_joints: tuple[HolosomaMocapJoint, ...] = _MOCAP_JOINTS,
     velocity_threshold: float = 0.01,
 ) -> SemanticContactSequence:
     """Extract target-independent toe sticking states."""
@@ -67,14 +67,14 @@ def foot_sticking_contacts(
 def foot_sticking_states(
     human_joints: np.ndarray,
     *,
-    demo_joints: tuple[str, ...],
+    demo_joints: tuple[HolosomaMocapJoint, ...],
     velocity_threshold: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return binary foot-sticking states from toe XY displacement."""
 
     joints = np.asarray(human_joints, dtype=np.float64)
-    left_idx = demo_joints.index(HolosomaMocapJoint.LEFT_TOE_BASE.value)
-    right_idx = demo_joints.index(HolosomaMocapJoint.RIGHT_TOE_BASE.value)
+    left_idx = demo_joints.index(HolosomaMocapJoint.LEFT_TOE_BASE)
+    right_idx = demo_joints.index(HolosomaMocapJoint.RIGHT_TOE_BASE)
     left_velocity = np.linalg.norm(np.diff(joints[:, left_idx, :2], axis=0), axis=1)
     right_velocity = np.linalg.norm(np.diff(joints[:, right_idx, :2], axis=0), axis=1)
     left_velocity = np.concatenate([[velocity_threshold + 1.0], left_velocity])

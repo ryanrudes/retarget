@@ -12,6 +12,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import cast
 
+from retarget.core.enums import VisualizerKind
 from retarget.core.protocols import Visualizer
 from retarget.core.registry import Registry
 
@@ -27,6 +28,10 @@ def _visualizer_from_decorator(value: object) -> Visualizer:
     return candidate
 
 
-visualizers: Registry[Visualizer] = Registry("visualizer", decorator_transform=_visualizer_from_decorator)
+visualizers: Registry[VisualizerKind, Visualizer] = Registry(
+    "visualizer",
+    VisualizerKind,
+    decorator_transform=_visualizer_from_decorator,
+)
 
 __all__ = ["visualizers"]

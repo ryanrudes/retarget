@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from retarget.capture.timeline import SampleTimeline
-from retarget.core.enums import ContactPatch, ContactState, ContactSubject
+from retarget.core.enums import ContactPatch, ContactState, ContactSubject, RobotLink
 from retarget.motion.contact import ContactPlan, ContactTrack
 from retarget.motion.support import SupportPlane
 
@@ -90,7 +90,7 @@ class SemanticContactSequence:
 
     def resolve(
         self,
-        link_mapping: Mapping[ContactSubject, Sequence[str]],
+        link_mapping: Mapping[ContactSubject, Sequence[RobotLink]],
     ) -> ContactPlan:
         """Resolve semantic subjects to concrete robot links."""
 
@@ -100,23 +100,16 @@ class SemanticContactSequence:
             raise ValueError(f"contact role mapping is missing subjects: {values}")
         resolved: list[ContactTrack] = []
         for track in self.tracks:
-            vocabulary = tuple(dict.fromkeys((*track.states, *track.active_states, *track.support_states)))
-            state_indices = {state: index for index, state in enumerate(vocabulary)}
-            states = np.asarray([state_indices[state] for state in track.states], dtype=np.int16)
-            validity = np.asarray(track.validity, dtype=bool)
-            states[~validity] = -1
             resolved.append(
                 ContactTrack(
-                    subject=track.subject.value,
-                    states=states,
-                    link_names=tuple(link_mapping[track.subject]),
-                    active_states=tuple(state_indices[state] for state in track.active_states),
-                    support_states=tuple(state_indices[state] for state in track.support_states),
-                    labels=tuple(state.value for state in vocabulary),
-                    provenance={
-                        **track.provenance,
-                        "patch": track.patch.value if track.patch is not None else None,
-                    },
+                    subject=track.subject,
+                    states=track.states,
+                    links=tuple(link_mapping[track.subject]),
+                    patch=track.patch,
+                    active_states=track.active_states,
+                    support_states=track.support_states,
+                    validity=np.asarray(track.validity, dtype=bool),
+                    provenance=dict(track.provenance),
                 )
             )
         return ContactPlan(

@@ -1,14 +1,14 @@
 # Add A Motion Format
 
-A motion format describes one ordered joint vocabulary and its representation.
-Contact semantics do not belong in a motion format; observation recipes produce
-`SemanticContactSequence` separately.
-
-Define the vocabulary by subclassing `MotionJoint`:
+A motion format owns one ordered `MotionJoint` vocabulary.
 
 ```python
-from retarget import FrameConvention, MotionJoint
+from retarget import FrameConvention, MotionFormatKind, MotionJoint
 from retarget.motion import MotionFormatSpec, motion_formats
+
+
+class LabFormat(MotionFormatKind):
+    CAPTURE = "lab_capture"
 
 
 class LabJoint(MotionJoint):
@@ -17,32 +17,38 @@ class LabJoint(MotionJoint):
     RIGHT_TOE = "right_toe"
 
 
-@motion_formats.register("lab")
-def lab_format() -> MotionFormatSpec:
-    return MotionFormatSpec(
-        name="lab",
+motion_formats.register(
+    LabFormat.CAPTURE,
+    MotionFormatSpec(
+        name="lab_capture",
         joint_vocabulary=LabJoint,
         root_joint=LabJoint.ROOT,
         frame_convention=FrameConvention.Y_UP_RIGHT_HANDED,
         default_height_m=1.75,
-    )
+    ),
+)
 ```
 
-`joint_names` is derived from enum declaration order. The root must be a member
-of that exact vocabulary.
+The joint order is `tuple(LabJoint)`. Contact semantics remain separate and are
+produced by an observation recipe.
 
 ## Add A Loader
 
-Loaders parse storage. They do not align recordings, infer contacts, or resolve
-robot links.
+Loaders parse one external storage layout. They do not synchronize recordings,
+infer contacts, or resolve robot links.
 
 ```python
 from pathlib import Path
 
+from retarget import MotionLoaderKind, SampleTimeline
 from retarget.motion import MotionFormatSpec, MotionSequence, motion_loaders
 
 
-@motion_loaders.register(".labmotion")
+class LabLoaderKind(MotionLoaderKind):
+    LAB = ".labmotion"
+
+
+@motion_loaders.register(LabLoaderKind.LAB)
 class LabMotionLoader:
     def load(
         self,
@@ -54,22 +60,14 @@ class LabMotionLoader:
         data = parse_lab_file(path)
         return MotionSequence(
             name=name or path.stem,
-            joint_names=spec.joint_names,
+            joint_vocabulary=spec.joint_vocabulary,
+            joints=spec.joints,
+            root_joint=spec.root_joint,
             joint_positions=data.global_joint_positions,
-            fps=data.fps,
+            timeline=SampleTimeline.uniform(data.frame_count, data.fps),
             frame=spec.frame_convention,
         )
 ```
 
-`load_motion` converts the loader output to the internal Z-up frame. Load root
-translation and orientation into `MotionSequence.root_poses` when available.
-
-Built-in loaders support `.json`, `.npy`, `.npz`, and `.csv`. The array formats
-accept global joint positions and optional root-pose arrays. CSV columns use
-`{joint}_x`, `{joint}_y`, and `{joint}_z`; optional `time_s` values determine
-the sample rate.
-
-For heterogeneous capture, prefer native `HumanPoseRecording` or
-`MocapRecording` sources and an `ObservationRecipe`. `MotionSequence` is the
-robot-adaptation representation produced after an observation already has one
-timeline and world frame.
+For heterogeneous sensors, load native `HumanPoseRecording` or
+`MocapRecording` objects and fuse them in an `ObservationRecipe`.

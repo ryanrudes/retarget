@@ -24,8 +24,8 @@ loosening thresholds.
 ## Optional Capture Backends
 
 - ROS 2 bags require `uv sync --extra capture-ros`.
-- Video decoding integrations require `uv sync --extra capture-video`.
-- The GVHMR process adapter requires a configured external checkout plus
+- Video decoding requires `uv sync --extra capture-video`.
+- The `GvhmrEstimator` backend requires a configured external checkout plus
   `uv sync --extra capture-gvhmr`.
 
 `GvhmrEstimator` runs the configured command in a temporary workspace. Missing

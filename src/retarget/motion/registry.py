@@ -15,7 +15,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import cast
 
-from retarget.core.enums import MotionFormat, MotionJoint
+from retarget.core.enums import MotionFormat, MotionFormatKind, MotionJoint, MotionLoaderKind
 from retarget.core.protocols import MotionLoader
 from retarget.core.registry import Registry
 from retarget.motion.spec import MotionFormatSpec
@@ -39,14 +39,16 @@ def _motion_loader_from_decorator(value: object) -> MotionLoader:
     return candidate
 
 
-motion_formats: Registry[MotionFormatSpec] = Registry(
+motion_formats: Registry[MotionFormatKind, MotionFormatSpec] = Registry(
     "motion format",
+    MotionFormatKind,
     decorator_transform=_motion_format_from_decorator,
 )
 """Registry of built-in :class:`~retarget.motion.spec.MotionFormatSpec` entries."""
 
-motion_loaders: Registry[MotionLoader] = Registry(
+motion_loaders: Registry[MotionLoaderKind, MotionLoader] = Registry(
     "motion loader",
+    MotionLoaderKind,
     decorator_transform=_motion_loader_from_decorator,
 )
 """Registry of file-suffix :class:`~retarget.core.protocols.MotionLoader` implementations."""

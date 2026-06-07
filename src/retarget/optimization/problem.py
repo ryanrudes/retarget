@@ -12,10 +12,9 @@ if TYPE_CHECKING:
     from retarget.core.pose import Pose
     from retarget.core.protocols import KinematicsBackend
     from retarget.mesh import LaplacianWeighting
-    from retarget.motion.contact import ContactFrame
     from retarget.motion.qpos import NominalQposFrame
-    from retarget.motion.targets import TargetFrame
-    from retarget.pipeline.problem import RetargetingProblem
+    from retarget.pipeline.compiled import CompiledContactFrame, CompiledRetargetingProblem, CompiledTargetFrame
+    from retarget.pipeline.problem import AnyRetargetingProblem
 
 FloatArray = NDArray[np.float64]
 
@@ -117,13 +116,14 @@ class TermContext:
         nominal_qpos_frame (NominalQposFrame | None): Optional nominal qpos target view.
     """
 
-    problem: RetargetingProblem
+    problem: AnyRetargetingProblem
+    compiled: CompiledRetargetingProblem
     backend: KinematicsBackend
     q_current: FloatArray
     q_previous: FloatArray
     frame_idx: int
-    contact_frame: ContactFrame | None
-    target_frame: TargetFrame | None
+    contact_frame: CompiledContactFrame | None
+    target_frame: CompiledTargetFrame | None
     robot_point_names: tuple[str, ...]
     robot_points: FloatArray
     robot_jacobians: FloatArray

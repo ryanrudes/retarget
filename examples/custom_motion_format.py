@@ -1,10 +1,10 @@
 """Register a custom motion format."""
 
-from retarget import MotionJoint, RetargetEnum
+from retarget import MotionFormatKind, MotionJoint
 from retarget.motion import MotionFormatSpec, motion_formats
 
 
-class DemoMotionFormat(RetargetEnum):
+class DemoMotionFormat(MotionFormatKind):
     MINIMAL_LOWER_BODY = "minimal_lower_body"
 
 

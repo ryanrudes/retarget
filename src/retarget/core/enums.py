@@ -21,6 +21,14 @@ class RobotLink(NameEnum):
     """Base enum for robot link names."""
 
 
+class RobotGeometry(NameEnum):
+    """Base enum for robot collision and visual geometry names."""
+
+
+class SceneGeometry(NameEnum):
+    """Base enum for target-independent scene geometry groups."""
+
+
 class MotionJoint(NameEnum):
     """Base enum for source motion joint names."""
 
@@ -71,8 +79,60 @@ class ContactPatch(NameEnum):
     """Base enum for contact patch labels."""
 
 
-class GeometryName(NameEnum):
-    """Base enum for collision or visual geometry names."""
+class RegistryKind(RetargetEnum):
+    """Base class for extensible registry-key vocabularies."""
+
+
+class ObjectiveKind(RegistryKind):
+    """Base enum for objective registrations."""
+
+
+class ConstraintKind(RegistryKind):
+    """Base enum for constraint registrations."""
+
+
+class SolverKind(RegistryKind):
+    """Base enum for solver registrations."""
+
+
+class RobotKind(RegistryKind):
+    """Base enum for robot registrations."""
+
+
+class RobotProviderKind(RegistryKind):
+    """Base enum for robot-provider registrations."""
+
+
+class MotionFormatKind(RegistryKind):
+    """Base enum for motion-format registrations."""
+
+
+class MotionLoaderKind(RegistryKind):
+    """Base enum for motion-loader registrations."""
+
+
+class ObservationRecipeKindBase(RegistryKind):
+    """Base enum for observation-recipe registrations."""
+
+
+class RetargetingRecipeKindBase(RegistryKind):
+    """Base enum for retargeting-recipe registrations."""
+
+
+class ExporterKind(RegistryKind):
+    """Base enum for exporter registrations."""
+
+
+class VisualizerKind(RegistryKind):
+    """Base enum for visualizer registrations."""
+
+
+class KinematicsKind(RegistryKind):
+    """Base enum for kinematics-backend registrations."""
+
+
+class MetricKind(RegistryKind):
+    """Base enum for metric registrations."""
 
 
 class TaskKind(StrEnum):
@@ -113,7 +173,7 @@ class QuaternionOrder(StrEnum):
     XYZW = "xyzw"
 
 
-class SolverBackend(StrEnum):
+class SolverBackend(SolverKind):
     """Optimization backend choices.
 
     Attributes:
@@ -135,7 +195,7 @@ class ConvergenceMode(RetargetEnum):
     NONE = "none"
 
 
-class Robot(StrEnum):
+class Robot(RobotKind):
     """Built-in robot registry keys.
 
     Attributes:
@@ -149,7 +209,7 @@ class Robot(StrEnum):
     T1_LIKE = "t1_like"
 
 
-class RobotProviderName(StrEnum):
+class RobotProviderName(RobotProviderKind):
     """Built-in robot provider registry keys.
 
     Attributes:
@@ -164,7 +224,7 @@ class RobotProviderName(StrEnum):
     HOLOSOMA = "holosoma"
 
 
-class ObservationRecipeKind(RetargetEnum):
+class ObservationRecipeKind(ObservationRecipeKindBase):
     """Built-in observation-recipe kinds for declarative run configs."""
 
     MOTION_FILE = "motion_file"
@@ -172,7 +232,7 @@ class ObservationRecipeKind(RetargetEnum):
     HOLOSOMA_CLIMB = "holosoma_climb"
 
 
-class RetargetingRecipeKind(RetargetEnum):
+class RetargetingRecipeKind(RetargetingRecipeKindBase):
     """Built-in robot-adaptation recipe kinds for declarative run configs."""
 
     ROLE_MAPPING = "role_mapping"
@@ -195,7 +255,7 @@ class CropPolicy(RetargetEnum):
     FULL = "full"
 
 
-class MotionFormat(StrEnum):
+class MotionFormat(MotionFormatKind):
     """Built-in motion format registry keys.
 
     Attributes:
@@ -213,7 +273,7 @@ class MotionFormat(StrEnum):
     SMPLX = "smplx"
 
 
-class MotionLoaderSuffix(StrEnum):
+class MotionLoaderSuffix(MotionLoaderKind):
     """Built-in motion loader suffix registry keys.
 
     Attributes:
@@ -229,7 +289,7 @@ class MotionLoaderSuffix(StrEnum):
     NPZ = ".npz"
 
 
-class Objective(StrEnum):
+class Objective(ObjectiveKind):
     """Built-in objective term registry keys.
 
     Attributes:
@@ -247,7 +307,7 @@ class Objective(StrEnum):
     DIAGONAL_REGULARIZATION = "diagonal_regularization"
 
 
-class Constraint(StrEnum):
+class Constraint(ConstraintKind):
     """Built-in constraint term registry keys.
 
     Attributes:
@@ -267,7 +327,7 @@ class Constraint(StrEnum):
     SELF_COLLISION = "self_collision"
 
 
-class ExportFormat(StrEnum):
+class ExportFormat(ExporterKind):
     """Built-in exporter registry keys.
 
     Attributes:
@@ -277,7 +337,7 @@ class ExportFormat(StrEnum):
     MUJOCO_NPZ = "mujoco_npz"
 
 
-class VisualizerName(StrEnum):
+class VisualizerName(VisualizerKind):
     """Built-in visualizer registry keys.
 
     Attributes:
@@ -289,7 +349,7 @@ class VisualizerName(StrEnum):
     VISER = "viser"
 
 
-class KinematicsBackendName(StrEnum):
+class KinematicsBackendName(KinematicsKind):
     """Built-in kinematics backend registry keys.
 
     Attributes:
@@ -331,13 +391,6 @@ class NonPenetrationSource(RetargetEnum):
     SUPPORT = "support"
     SCENE_POINTS = "scene_points"
     GEOMETRY = "geometry"
-
-
-class GeometrySource(RetargetEnum):
-    """How geometry-pair constraints are resolved."""
-
-    EXPLICIT = "explicit"
-    BACKEND_CANDIDATES = "backend_candidates"
 
 
 class NominalFallback(RetargetEnum):
@@ -388,7 +441,7 @@ class RunStatus(StrEnum):
     SKIPPED = "skipped"
 
 
-class MetricName(StrEnum):
+class MetricName(MetricKind):
     """Built-in evaluation metric names.
 
     Attributes:

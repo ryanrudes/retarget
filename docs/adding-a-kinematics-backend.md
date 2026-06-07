@@ -9,16 +9,22 @@ Required operations:
 - `point_jacobians` for point positions and translational Jacobians used by the optimizer
 - `qpos_to_qvel` and `integrate_qvel` for simulator-safe qpos/qvel conversion
 - `joint_limits` for actuator bounds used directly by the optimizer
-- `geom_distances` and `collision_candidates` for collision-aware constraints and metrics
+- `geom_distances` for explicit geometry pairs used by collision-aware constraints
 
-Register a backend factory:
+Register a backend factory with a typed key:
 
 ```python
+from retarget import KinematicsKind
 from retarget.kinematics import kinematics_backends
-from retarget.robots import RobotSpec
+from retarget.pipeline.compiled import CompiledRobotSpec
 
-@kinematics_backends.register("my_backend")
-def make_backend(robot: RobotSpec) -> MyKinematicsBackend:
+
+class LabKinematics(KinematicsKind):
+    BACKEND = "lab_backend"
+
+
+@kinematics_backends.register(LabKinematics.BACKEND)
+def make_backend(robot: CompiledRobotSpec) -> MyKinematicsBackend:
     return MyKinematicsBackend(robot)
 ```
 

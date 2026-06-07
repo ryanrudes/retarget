@@ -14,12 +14,11 @@ from retarget import (
     InteractionMeshRetargetingEngine,
     Retargeter,
     RetargetingExperiment,
+    RobotProviderName,
     ViconRecordingSource,
 )
-from retarget.kinematics.backends import (
-    MuJoCoKinematicsBackend,
-    SimpleKinematicsBackend,
-)
+from retarget.kinematics.backends import MuJoCoKinematicsBackend
+from retarget.pipeline.compiled import compile_robot
 from retarget.recipes.skateboarding import (
     DEFAULT_DEMO,
     GVHMR_SCHEMA,
@@ -58,11 +57,6 @@ def parse_args() -> argparse.Namespace:
         default=REPO_ROOT / ".retarget_assets",
     )
     parser.add_argument("--robot", default="g1")
-    parser.add_argument(
-        "--kinematics",
-        choices=("auto", "mujoco", "simple"),
-        default="auto",
-    )
     parser.add_argument("--download-assets", action="store_true")
     parser.add_argument("--scale-to-robot", action="store_true")
     parser.add_argument("--output", type=Path)
@@ -82,7 +76,7 @@ def main() -> None:
     ).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     robot = _load_robot(args, console)
-    backend = _kinematics_backend(robot, args.kinematics, console)
+    backend = _kinematics_backend(robot)
     observation_recipe = SkateboardingObservationRecipe(
         mocap=ViconRecordingSource(
             args.vicon_root.expanduser() / args.demo,
@@ -120,7 +114,7 @@ def main() -> None:
 
 def _load_robot(args: argparse.Namespace, console: Console) -> RobotSpec:
     try:
-        return robot_providers.get("asset_store").load(
+        return robot_providers.get(RobotProviderName.ASSET_STORE).load(
             args.robot, store=args.store.expanduser()
         )
     except (FileNotFoundError, KeyError, ValueError) as exc:
@@ -140,34 +134,19 @@ def _load_robot(args: argparse.Namespace, console: Console) -> RobotSpec:
         ],
         check=True,
     )
-    return robot_providers.get("asset_store").load(
+    return robot_providers.get(RobotProviderName.ASSET_STORE).load(
         args.robot, store=args.store.expanduser()
     )
 
 
 def _kinematics_backend(
     robot: RobotSpec,
-    mode: str,
-    console: Console,
-) -> MuJoCoKinematicsBackend | SimpleKinematicsBackend:
-    if mode == "simple":
-        return SimpleKinematicsBackend(robot)
+) -> MuJoCoKinematicsBackend:
     if robot.mujoco_xml_path is None or not robot.mujoco_xml_path.exists():
-        if mode == "mujoco":
-            raise RuntimeError(
-                f"MuJoCo XML path is missing for robot {robot.name!r}"
-            )
-        console.print(
-            "[yellow]MuJoCo XML missing; using simple kinematics.[/yellow]"
+        raise RuntimeError(
+            f"MuJoCo XML path is missing for robot {robot.name!r}"
         )
-        return SimpleKinematicsBackend(robot)
-    try:
-        return MuJoCoKinematicsBackend(robot)
-    except RuntimeError:
-        if mode == "mujoco":
-            raise
-        console.print("[yellow]MuJoCo unavailable; using simple kinematics.[/yellow]")
-        return SimpleKinematicsBackend(robot)
+    return MuJoCoKinematicsBackend(compile_robot(robot))
 
 
 if __name__ == "__main__":

@@ -6,11 +6,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from retarget.core.enums import GeometrySource, NominalFallback, NonPenetrationSource
+from retarget.core.enums import NominalFallback, NonPenetrationSource
 from retarget.optimization import (
     ConstraintConfigUnion,
     DiagonalRegularizationObjectiveConfig,
     FootStickingConstraintConfig,
+    GeometryPair,
     JointLimitsConstraintConfig,
     LaplacianObjectiveConfig,
     NominalTrackingObjectiveConfig,
@@ -19,8 +20,6 @@ from retarget.optimization import (
     SmoothnessObjectiveConfig,
     TrustRegionConstraintConfig,
 )
-
-from .vocabulary import HolosomaGeometryName
 
 
 @dataclass(frozen=True)
@@ -47,7 +46,7 @@ class HolosomaClimbOptimizationPolicy:
 def holosoma_climb_profile(
     *,
     qpos_size: int,
-    geometry_pairs: tuple[tuple[str, str], ...] = (),
+    geometry_pairs: tuple[GeometryPair, ...] = (),
     policy: HolosomaClimbOptimizationPolicy | None = None,
 ) -> OptimizationProfile:
     """Return the typed optimization profile matching Holosoma's climbing defaults."""
@@ -63,18 +62,14 @@ def holosoma_climb_profile(
         FootStickingConstraintConfig(tolerance=1e-3),
     )
     if geometry_pairs:
-        scene_keywords = (HolosomaGeometryName.MULTI_BOXES.value, HolosomaGeometryName.GROUND.value)
         constraints = (
             *constraints,
             NonPenetrationConstraintConfig(
                 sources=(NonPenetrationSource.GEOMETRY,),
-                geometry_source=GeometrySource.BACKEND_CANDIDATES,
                 tolerance=1e-3,
                 scene_clearance=1e-3,
                 activation_distance=policy.collision_activation_distance,
                 geometry_pairs=geometry_pairs,
-                scene_geometry_keywords=scene_keywords,
-                excluded_geometry_keyword_pairs=(scene_keywords,),
             ),
         )
     return OptimizationProfile(
@@ -90,5 +85,5 @@ def holosoma_climb_profile(
             SmoothnessObjectiveConfig(weight=0.2),
         ),
         constraints=constraints,
-        metadata={"source": "holosoma"},
+        provenance={"source": "holosoma"},
     )

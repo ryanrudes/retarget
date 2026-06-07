@@ -9,7 +9,7 @@ from retarget.motion.spec import MotionFormatSpec
 
 from .vocabulary import HolosomaMocapJoint
 
-_MOCAP_JOINT_NAMES = tuple(joint.value for joint in HolosomaMocapJoint)
+_MOCAP_JOINTS = tuple(HolosomaMocapJoint)
 
 
 def mocap_motion_format(
@@ -34,7 +34,7 @@ def preprocess_mocap_climb(
     *,
     scale: float,
     mat_height: float = 0.1,
-    demo_joints: tuple[str, ...] = _MOCAP_JOINT_NAMES,
+    demo_joints: tuple[HolosomaMocapJoint, ...] = _MOCAP_JOINTS,
     foot_names: tuple[HolosomaMocapJoint, HolosomaMocapJoint] = (
         HolosomaMocapJoint.LEFT_TOE_BASE,
         HolosomaMocapJoint.RIGHT_TOE_BASE,
@@ -43,8 +43,8 @@ def preprocess_mocap_climb(
     """Apply Holosoma's climbing MOCAP height normalization and scaling."""
 
     joints = np.asarray(human_joints, dtype=np.float64).copy()
-    left_idx = demo_joints.index(foot_names[0].value)
-    right_idx = demo_joints.index(foot_names[1].value)
+    left_idx = demo_joints.index(foot_names[0])
+    right_idx = demo_joints.index(foot_names[1])
     z_min = float(joints[:, (left_idx, right_idx), 2].min())
     if z_min >= mat_height:
         z_min -= mat_height
@@ -57,7 +57,7 @@ def compute_climb_q_init(
     object_poses: np.ndarray,
     *,
     robot_dof: int,
-    demo_joints: tuple[str, ...] = _MOCAP_JOINT_NAMES,
+    demo_joints: tuple[HolosomaMocapJoint, ...] = _MOCAP_JOINTS,
     spine_joint_name: HolosomaMocapJoint = HolosomaMocapJoint.SPINE1,
 ) -> np.ndarray:
     """Compute Holosoma's initial floating-base qpos for climbing."""
@@ -67,7 +67,7 @@ def compute_climb_q_init(
         object_poses[0],
         np.zeros(3, dtype=np.float64),
     )
-    spine_idx = demo_joints.index(spine_joint_name.value)
+    spine_idx = demo_joints.index(spine_joint_name)
     return np.concatenate([human_joints[0, spine_idx], quaternion, np.zeros(robot_dof, dtype=np.float64)])
 
 

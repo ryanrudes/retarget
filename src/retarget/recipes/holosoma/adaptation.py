@@ -14,13 +14,13 @@ from retarget.motion import InitialQposPlan, MotionSequence
 from retarget.observation import SceneObservation
 from retarget.optimization import SolverSpec
 from retarget.optimization.variables import QposVariableSpec
-from retarget.pipeline import RetargetingProblem
+from retarget.pipeline import LinkBinding, RetargetingProblem
 from retarget.robots.spec import RobotSpec
 from retarget.scene import ObjectTrajectory, SceneSpec
 
 from .geometry import object_non_penetration_geometry_pairs
 from .layout import default_holosoma_root, holosoma_climb_layout
-from .motion import compute_climb_q_init, mocap_motion_format
+from .motion import compute_climb_q_init
 from .object import ensure_scaled_multi_boxes_assets
 from .profile import HolosomaClimbOptimizationPolicy, holosoma_climb_profile
 from .vocabulary import (
@@ -51,11 +51,7 @@ class HolosomaClimbRetargetingRecipe:
         observed_object = observation.observed_object(HolosomaObservationRole.CLIMBING_STRUCTURE)
         scale = robot.height_m / float(observation.actor.source_height_m or robot.height_m)
         human_joints = (
-            np.stack(
-                [track.values for track in observation.actor.joints],
-                axis=1,
-            )
-            * scale
+            observation.actor.joint_positions * scale
         )
         object_positions = observed_object.pose.positions * scale
         object_quaternions = observed_object.pose.quaternions
@@ -66,7 +62,7 @@ class HolosomaClimbRetargetingRecipe:
         q_init = compute_climb_q_init(
             human_joints,
             np.concatenate([object_quaternions, object_positions], axis=1),
-            demo_joints=tuple(track.role.value for track in observation.actor.joints),
+            demo_joints=observation.actor.joints,
             robot_dof=robot.dof,
         )
         root = (Path(self.holosoma_root) if self.holosoma_root is not None else default_holosoma_root()).resolve()
@@ -95,12 +91,13 @@ class HolosomaClimbRetargetingRecipe:
         fps = observation.timeline.nominal_fps
         if fps is None:
             raise ValueError("Holosoma observations require at least two samples")
-        joint_names = tuple(track.role.value for track in observation.actor.joints)
         motion = MotionSequence(
             name=observation.name,
+            joint_vocabulary=observation.actor.joint_vocabulary,
+            joints=observation.actor.joints,
+            root_joint=observation.actor.root_joint,
             joint_positions=human_joints,
-            joint_names=joint_names,
-            fps=fps,
+            timeline=observation.timeline,
             frame=observation.world_frame,
             root_poses=PoseSequence.from_arrays(
                 np.tile(q_init[:3], (observation.timeline.sample_count, 1)),
@@ -109,7 +106,7 @@ class HolosomaClimbRetargetingRecipe:
                 frame=observation.world_frame,
             ),
             source_height_m=robot.height_m,
-            metadata={"observation": observation.name},
+            provenance={"observation": observation.name},
         )
         scene = SceneSpec.climbing(
             object_spec=observed_object.geometry.model_copy(
@@ -145,7 +142,6 @@ class HolosomaClimbRetargetingRecipe:
             q_init,
             object_poses_mujoco,
         )
-        link_mapping = {joint.value: problem_robot.link_for_role(role) for joint, role in MOCAP_TO_ROBOT_ROLE.items()}
         return RetargetingProblem(
             name=observation.name,
             task_kind=TaskKind.CLIMBING,
@@ -154,11 +150,10 @@ class HolosomaClimbRetargetingRecipe:
             scene=scene,
             contacts=contacts,
             initial_qpos=initial_qpos,
-            motion_format=mocap_motion_format(
-                default_fps=fps,
-                default_height_m=float(observation.actor.source_height_m or robot.height_m),
+            link_bindings=tuple(
+                LinkBinding(joint, problem_robot.link_for_role(role))
+                for joint, role in MOCAP_TO_ROBOT_ROLE.items()
             ),
-            link_mapping=link_mapping,
             variables=QposVariableSpec.holosoma_q_a(-7),
             mesh=InteractionMeshSpec(laplacian_weighting=LaplacianWeighting.UNIFORM),
             solver=SolverSpec(
@@ -172,7 +167,7 @@ class HolosomaClimbRetargetingRecipe:
             constraints=profile.constraints,
             scale_to_robot=False,
             show_progress=self.show_progress,
-            metadata={
+            provenance={
                 "recipe": "holosoma_climb",
                 "include_object_collision": self.include_object_collision,
             },

@@ -12,6 +12,8 @@ EXAMPLES = (
     "custom_motion_format.py",
     "custom_objective.py",
     "custom_robot.py",
+    "declarative_config.py",
+    "in_memory_capture.py",
     "object_interaction.py",
 )
 

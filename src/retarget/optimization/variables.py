@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Self
+from typing import Any, Self, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import QposVariableKind
+from retarget.core.enums import QposVariableKind, RobotJoint
 from retarget.robots.spec import RobotSpec
+
+JointT = TypeVar("JointT", bound=RobotJoint)
 
 
 @dataclass(frozen=True)
@@ -77,16 +79,6 @@ class ResolvedQposVariables:
             if quat.shape == (4,) and norm > 0.0:
                 q[start:stop] = quat / norm
         return q
-
-    def metadata(self) -> dict[str, object]:
-        """JSON-safe provenance for result metadata."""
-
-        return {
-            **self.spec.model_dump(mode="json"),
-            "indices": [int(index) for index in self.indices],
-            "size": self.size,
-        }
-
 
 class QposVariableSpec(BaseModel):
     """Configuration describing which qpos coordinates the optimizer may change.
@@ -192,10 +184,10 @@ class QposVariableSpec(BaseModel):
 
     def resolve(
         self,
-        robot: RobotSpec,
+        robot: RobotSpec[JointT, Any, Any, Any],
         *,
         qpos_size: int,
-        joint_limits: Mapping[str, tuple[float, float]] | None = None,
+        joint_limits: Mapping[JointT, tuple[float, float]] | None = None,
     ) -> ResolvedQposVariables:
         """Resolve this policy against a robot and concrete qpos width."""
 
@@ -214,7 +206,7 @@ class QposVariableSpec(BaseModel):
             quaternion_slice=robot.qpos_layout.root_quaternion,
         )
 
-    def _indices(self, robot: RobotSpec, *, qpos_size: int) -> NDArray[np.int64]:
+    def _indices(self, robot: RobotSpec[Any, Any, Any, Any], *, qpos_size: int) -> NDArray[np.int64]:
         layout = robot.qpos_layout
         joint_stop = layout.joint_start + robot.dof
         raw: Iterable[int]
@@ -245,10 +237,10 @@ class QposVariableSpec(BaseModel):
 
 
 def _limits_for_indices(
-    robot: RobotSpec,
+    robot: RobotSpec[JointT, Any, Any, Any],
     indices: NDArray[np.int64],
     *,
-    joint_limits: Mapping[str, tuple[float, float]] | None,
+    joint_limits: Mapping[JointT, tuple[float, float]] | None,
     unbounded_limit: float,
 ) -> tuple[FloatArray, FloatArray]:
     lower = np.full(indices.shape, -unbounded_limit, dtype=np.float64)
@@ -264,8 +256,8 @@ def _limits_for_indices(
             lower[col] = -1.0
             upper[col] = 1.0
         elif joint_start <= index < joint_stop:
-            joint_name = robot.joint_names[index - joint_start]
-            lo, hi = limits.get(joint_name, robot.joint_limits.get(joint_name, (-unbounded_limit, unbounded_limit)))
+            joint = robot.joints[index - joint_start]
+            lo, hi = limits.get(joint, robot.joint_limits.get(joint, (-unbounded_limit, unbounded_limit)))
             lower[col] = float(lo)
             upper[col] = float(hi)
     return lower, upper

@@ -49,7 +49,7 @@ robot spec, and `RetargetingExperiment`; they are not a second workflow.
 | Run a small experiment | [Quickstart](quickstart.md) |
 | Process heterogeneous sensors | [Introduction](introduction.md) |
 | Understand the abstraction hierarchy | [Architecture](architecture.md) |
-| Follow the capture-to-retarget workflow | [Ecosystem](ecosystem/index.md) |
+| Follow the capture-to-retarget workflow | [Capture to retarget](pipeline/index.md) |
 | Work with frames and clocks | [Coordinate Conventions](coordinate-conventions.md) |
 | Extend formats, robots, or recipes | [Extending](extending.md) |
 | Browse the API | [API](api/index.md) |

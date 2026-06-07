@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from scipy import sparse
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import Constraint, GeometrySource, NominalFallback, NonPenetrationSource, Objective
+from retarget.core.enums import Constraint, NominalFallback, NonPenetrationSource, Objective
 from retarget.kinematics.types import GeometryDistanceJacobian
 from retarget.mesh.interaction import laplacian_matrix
 from retarget.motion.support import SupportPlane
@@ -41,7 +41,7 @@ class LaplacianObjective:
     """Least-squares term matching interaction-mesh Laplacian coordinates."""
 
     weight: float = 10.0
-    name: str = Objective.LAPLACIAN.value
+    kind = Objective.LAPLACIAN
     config_type: type[LaplacianObjectiveConfig] = LaplacianObjectiveConfig
 
     def describe(self) -> str:
@@ -78,7 +78,7 @@ class SmoothnessObjective:
     """Penalize actuated-joint changes between consecutive frames."""
 
     weight: float = 0.2
-    name: str = Objective.SMOOTHNESS.value
+    kind = Objective.SMOOTHNESS
     config_type: type[SmoothnessObjectiveConfig] = SmoothnessObjectiveConfig
 
     def describe(self) -> str:
@@ -102,7 +102,7 @@ class LinkTrackingObjective:
     """Track named robot links to per-frame world-space target positions."""
 
     weight: float = 1.0
-    name: str = Objective.LINK_TRACKING.value
+    kind = Objective.LINK_TRACKING
     config_type: type[LinkTrackingObjectiveConfig] = LinkTrackingObjectiveConfig
 
     def describe(self) -> str:
@@ -137,7 +137,7 @@ class DiagonalRegularizationObjective:
     """Penalize selected qpos variables toward zero."""
 
     weight: float = 1.0
-    name: str = Objective.DIAGONAL_REGULARIZATION.value
+    kind = Objective.DIAGONAL_REGULARIZATION
     config_type: type[DiagonalRegularizationObjectiveConfig] = DiagonalRegularizationObjectiveConfig
 
     def describe(self) -> str:
@@ -170,7 +170,7 @@ class NominalTrackingObjective:
     """Pull selected joints toward the robot's nominal posture."""
 
     weight: float = 5.0
-    name: str = Objective.NOMINAL_TRACKING.value
+    kind = Objective.NOMINAL_TRACKING
     config_type: type[NominalTrackingObjectiveConfig] = NominalTrackingObjectiveConfig
 
     def describe(self) -> str:
@@ -202,7 +202,7 @@ class NominalTrackingObjective:
 class JointLimitConstraint:
     """Box limits on actuated joint increments from current ``qpos``."""
 
-    name: str = Constraint.JOINT_LIMITS.value
+    kind = Constraint.JOINT_LIMITS
     config_type: type[JointLimitsConstraintConfig] = JointLimitsConstraintConfig
 
     def describe(self) -> str:
@@ -224,7 +224,7 @@ class TrustRegionConstraint:
     """Cap the Euclidean norm of each SQP joint update."""
 
     radius: float = 0.2
-    name: str = Constraint.TRUST_REGION.value
+    kind = Constraint.TRUST_REGION
     config_type: type[TrustRegionConstraintConfig] = TrustRegionConstraintConfig
 
     def describe(self) -> str:
@@ -243,7 +243,7 @@ class FootStickingConstraint:
     """Lock active support links in the support tangent plane."""
 
     tolerance: float = 1e-3
-    name: str = Constraint.FOOT_STICKING.value
+    kind = Constraint.FOOT_STICKING
     config_type: type[FootStickingConstraintConfig] = FootStickingConstraintConfig
 
     def describe(self) -> str:
@@ -263,7 +263,7 @@ class FootLockConstraint:
     """Pin contact links to a support plane during contact or configured frame windows."""
 
     tolerance: float = 5e-3
-    name: str = Constraint.FOOT_LOCK.value
+    kind = Constraint.FOOT_LOCK
     config_type: type[FootLockConstraintConfig] = FootLockConstraintConfig
 
     def describe(self) -> str:
@@ -282,7 +282,7 @@ class NonPenetrationConstraint:
     """Separate contact links from ground and sampled scene geometry."""
 
     tolerance: float = 1e-3
-    name: str = Constraint.NON_PENETRATION.value
+    kind = Constraint.NON_PENETRATION
     config_type: type[NonPenetrationConstraintConfig] = NonPenetrationConstraintConfig
 
     def describe(self) -> str:
@@ -308,7 +308,7 @@ class SelfCollisionConstraint:
     """Maintain minimum separation between configured body pairs."""
 
     tolerance: float = 0.02
-    name: str = Constraint.SELF_COLLISION.value
+    kind = Constraint.SELF_COLLISION
     config_type: type[SelfCollisionConstraintConfig] = SelfCollisionConstraintConfig
 
     def describe(self) -> str:
@@ -355,11 +355,7 @@ def foot_lock_constraints(*, context: TermContext, config: FootLockConstraintCon
 
     active_links = _support_contact_links(context)
     if not active_links and config.windows:
-        active_links = tuple(
-            link
-            for link in context.problem.robot.contact_links
-            if _link_locked(link, config.windows, context.frame_idx)
-        )
+        active_links = _window_locked_links(context, config)
     if not active_links:
         return []
     current_positions, current_jacobians = _point_jacobians_for_context(context, active_links)
@@ -474,21 +470,19 @@ def geometry_non_penetration_constraints(
     """Build backend geometry non-penetration constraints."""
 
     max_distance = config.activation_distance or config.scene_clearance
-    if config.geometry_source == GeometrySource.BACKEND_CANDIDATES:
-        distances = _candidate_geom_distance_jacobians_for_context(
-            context,
-            max_distance=max_distance,
-            scene_geometry_keywords=config.scene_geometry_keywords,
-            excluded_geometry_keyword_pairs=config.excluded_geometry_keyword_pairs,
-        )
-    else:
-        if not config.geometry_pairs:
-            return []
-        distances = _geom_distance_jacobians_for_context(
-            context,
-            geom_pairs=config.geometry_pairs,
-            max_distance=max_distance,
-        )
+    if not config.geometry_pairs:
+        return []
+    distances = _geom_distance_jacobians_for_context(
+        context,
+        geom_pairs=tuple(
+            (
+                context.compiled.geometry_name(geometry.first),
+                context.compiled.geometry_name(geometry.second),
+            )
+            for geometry in config.geometry_pairs
+        ),
+        max_distance=max_distance,
+    )
     constraints: list[LinearConstraint] = []
     for row in distances:
         distance = row.distance.distance
@@ -504,31 +498,6 @@ def geometry_non_penetration_constraints(
     return constraints
 
 
-def _candidate_geom_distance_jacobians_for_context(
-    context: TermContext,
-    *,
-    max_distance: float,
-    scene_geometry_keywords: tuple[str, ...],
-    excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...],
-) -> tuple[GeometryDistanceJacobian, ...]:
-    method = getattr(context.backend, "collision_candidate_jacobians", None)
-    if callable(method):
-        result = method(
-            context.q_current,
-            context.active_qpos_indices,
-            max_distance=max_distance,
-            scene_geometry_keywords=scene_geometry_keywords,
-            excluded_geometry_keyword_pairs=excluded_geometry_keyword_pairs,
-        )
-        return cast(tuple[GeometryDistanceJacobian, ...], result)
-    if scene_geometry_keywords or excluded_geometry_keyword_pairs:
-        raise TypeError(
-            f"{type(context.backend).__name__} must implement collision_candidate_jacobians "
-            "for filtered backend candidate non-penetration"
-        )
-    return _geom_distance_jacobians_for_context(context, geom_pairs=None, max_distance=max_distance)
-
-
 def self_collision_constraints(
     *,
     context: TermContext,
@@ -540,7 +509,13 @@ def self_collision_constraints(
         return []
     candidates = _geom_distance_jacobians_for_context(
         context,
-        geom_pairs=config.pairs or None,
+        geom_pairs=tuple(
+            (
+                context.compiled.geometry_name(pair.first),
+                context.compiled.geometry_name(pair.second),
+            )
+            for pair in config.pairs
+        ),
         max_distance=config.margin or config.minimum_distance,
     )
     if not candidates:
@@ -603,26 +578,36 @@ def _support_tangent_basis(support: SupportPlane | None) -> FloatArray | None:
     return np.stack([tangent_a, tangent_b], axis=0)
 
 
-def _link_locked(link_name: str, windows: dict[str, tuple[tuple[int, int], ...]], frame_idx: int) -> bool:
-    lower = link_name.lower()
-    for key, ranges in windows.items():
-        key_lower = key.lower()
-        if key_lower not in lower and not lower.startswith(key_lower[:1]):
+def _window_locked_links(context: TermContext, config: FootLockConstraintConfig) -> tuple[str, ...]:
+    links: list[str] = []
+    for window in config.windows:
+        if not any(start <= context.frame_idx <= end for start, end in window.ranges):
             continue
-        if any(start <= frame_idx <= end for start, end in ranges):
-            return True
-    return False
+        if window.link is not None:
+            links.append(context.compiled.link_name(window.link))
+            continue
+        if context.contact_frame is None or window.subject is None:
+            continue
+        for track in context.contact_frame.tracks:
+            if track.subject == window.subject.value:
+                links.extend(track.link_names)
+    return tuple(dict.fromkeys(links))
 
 
 def _non_penetration_links(
     context: TermContext,
     config: NonPenetrationConstraintConfig,
 ) -> tuple[str, ...]:
-    if config.links:
-        return config.links
-    if context.problem.robot.contact_links:
-        return context.problem.robot.contact_links
-    return tuple(dict.fromkeys(context.problem.resolved_link_mapping().values()))
+    links = [context.compiled.link_name(link) for link in config.links]
+    if config.subjects and context.contact_frame is not None:
+        selected_subjects = {subject.value for subject in config.subjects}
+        links.extend(
+            link
+            for track in context.contact_frame.tracks
+            if track.subject in selected_subjects
+            for link in track.link_names
+        )
+    return tuple(dict.fromkeys(links))
 
 
 def _collision_scene_points(context: TermContext) -> FloatArray | None:
@@ -670,7 +655,7 @@ def _point_jacobians_for_context(
 def _geom_distance_jacobians_for_context(
     context: TermContext,
     *,
-    geom_pairs: tuple[tuple[str, str], ...] | None,
+    geom_pairs: tuple[tuple[str, str], ...],
     max_distance: float,
 ) -> tuple[GeometryDistanceJacobian, ...]:
     method = getattr(context.backend, "geom_distance_jacobians", None)
@@ -760,12 +745,10 @@ def _selected_nominal_qpos_indices(
     config: NominalTrackingObjectiveConfig,
 ) -> tuple[int, ...]:
     selected: list[int] = list(config.qpos_indices)
-    joint_names = config.joint_names
-    if not selected and not joint_names:
-        joint_names = context.problem.robot.nominal_tracking_joints
+    joints = config.joints
     joint_start = context.problem.robot.qpos_layout.joint_start
-    for joint_name in joint_names:
-        selected.append(joint_start + context.problem.robot.joint_index(joint_name))
+    for joint in joints:
+        selected.append(joint_start + context.problem.robot.joint_index(joint))
     return tuple(dict.fromkeys(selected))
 
 

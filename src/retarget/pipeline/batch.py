@@ -10,10 +10,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from retarget.core.enums import RunStatus
+from retarget.core.enums import MotionFormatKind, RobotKind, RunStatus
 
 BatchWorker = Callable[["BatchJob"], Mapping[str, Any] | None]
-"""Callable invoked for each :class:`BatchJob`; return value is stored as run metadata on success."""
+"""Callable invoked for each :class:`BatchJob`; return value is stored as run provenance."""
 
 
 class BatchJob(BaseModel):
@@ -24,7 +24,10 @@ class BatchJob(BaseModel):
         motion (Path): Input motion artifact path for the worker.
         output (Path): Expected output artifact path; existing files may be skipped.
         name (str | None): Optional display name; defaults to ``id`` in callers.
-        metadata (dict[str, Any]): Opaque tags forwarded to the worker unchanged.
+        motion_format (MotionFormatKind | None): Typed source motion format override.
+        robot (RobotKind | None): Typed robot registry override.
+        config_path (Path | None): Optional declarative experiment config.
+        provenance (dict[str, Any]): Origin and scheduling history for the job.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -33,7 +36,10 @@ class BatchJob(BaseModel):
     motion: Path
     output: Path
     name: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    motion_format: MotionFormatKind | None = None
+    robot: RobotKind | None = None
+    config_path: Path | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 class BatchRunRecord(BaseModel):
@@ -48,7 +54,7 @@ class BatchRunRecord(BaseModel):
         finished_at (datetime): UTC timestamp when execution completed.
         message (str): Human-readable summary or error text.
         error_type (str | None): Exception class name when ``status`` is failed.
-        metadata (dict[str, Any]): Worker-returned fields on success; resume hints when skipped.
+        provenance (dict[str, Any]): Worker-returned processing history or resume information.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -61,7 +67,7 @@ class BatchRunRecord(BaseModel):
     finished_at: datetime
     message: str = ""
     error_type: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def duration_s(self) -> float:
@@ -176,7 +182,7 @@ class BatchRunner:
         Args:
             jobs: Iterable of retargeting jobs to execute.
             worker: Pickleable callable invoked per pending job; must accept a
-                :class:`BatchJob` and return optional metadata on success.
+                :class:`BatchJob` and return optional provenance on success.
             manifest_path: JSON manifest path updated after each job finishes.
             max_workers: Process pool size; ``1`` runs jobs sequentially in-process.
             force: When true, rerun jobs even if ``output`` already exists.
@@ -253,7 +259,7 @@ class BatchRunner:
 def _execute_batch_job(job: BatchJob, worker: BatchWorker) -> BatchRunRecord:
     started_at = _utc_now()
     try:
-        metadata = dict(worker(job) or {})
+        provenance = dict(worker(job) or {})
     except Exception as exc:  # pragma: no cover - exact worker failures are caller-specific
         finished_at = _utc_now()
         return BatchRunRecord(
@@ -274,15 +280,15 @@ def _execute_batch_job(job: BatchJob, worker: BatchWorker) -> BatchRunRecord:
         status=RunStatus.SUCCESS,
         started_at=started_at,
         finished_at=finished_at,
-        metadata=metadata,
+        provenance=provenance,
     )
 
 
 def _skipped_record(job: BatchJob, previous: BatchRunRecord | None) -> BatchRunRecord:
     now = _utc_now()
-    metadata: dict[str, Any] = {}
+    provenance: dict[str, Any] = {}
     if previous is not None:
-        metadata["previous_status"] = previous.status.value
+        provenance["previous_status"] = previous.status.value
     return BatchRunRecord(
         job_id=job.id,
         motion=job.motion,
@@ -291,7 +297,7 @@ def _skipped_record(job: BatchJob, previous: BatchRunRecord | None) -> BatchRunR
         started_at=now,
         finished_at=now,
         message="output exists; pass force=True or --force to rerun",
-        metadata=metadata,
+        provenance=provenance,
     )
 
 

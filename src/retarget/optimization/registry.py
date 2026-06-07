@@ -6,6 +6,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import Any, cast
 
+from retarget.core.enums import ConstraintKind, ObjectiveKind, SolverKind
 from retarget.core.protocols import ConstraintTerm, ObjectiveTerm, Solver
 from retarget.core.registry import Registry
 from retarget.optimization.spec import SolverSpec
@@ -36,19 +37,21 @@ def _constraint_term_from_decorator(value: object) -> ConstraintTerm[Any]:
     return candidate
 
 
-objective_terms: Registry[ObjectiveTerm[Any]] = Registry(
+objective_terms: Registry[ObjectiveKind, ObjectiveTerm[Any]] = Registry(
     "objective term",
+    ObjectiveKind,
     decorator_transform=_objective_term_from_decorator,
 )
 """Registry of built-in and user-registered objective terms keyed by name."""
 
-constraint_terms: Registry[ConstraintTerm[Any]] = Registry(
+constraint_terms: Registry[ConstraintKind, ConstraintTerm[Any]] = Registry(
     "constraint term",
+    ConstraintKind,
     decorator_transform=_constraint_term_from_decorator,
 )
 """Registry of built-in and user-registered constraint terms keyed by name."""
 
-solver_factories: Registry[SolverFactory] = Registry("solver factory")
+solver_factories: Registry[SolverKind, SolverFactory] = Registry("solver factory", SolverKind)
 """Registry of solver factories keyed by :class:`~retarget.core.enums.SolverBackend` name."""
 
 __all__ = ["SolverFactory", "constraint_terms", "objective_terms", "solver_factories"]

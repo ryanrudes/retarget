@@ -82,9 +82,9 @@ AMBIGUOUS_SHORT_NAMES = frozenset(
 PREFER_CLASS_FOR_SHORT: dict[str, str] = {
     "frame_count": "RetargetingResult",
     "fps": "MotionSequence",
-    "joint_names": "MotionSequence",
+    "joints": "MotionSequence",
     "joint_positions": "MotionSequence",
-    "metadata": "RetargetingResult",
+    "provenance": "RetargetingResult",
 }
 
 FIELD_SHORT_BLOCKLIST = frozenset(

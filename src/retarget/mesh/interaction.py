@@ -124,7 +124,6 @@ class InteractionMeshBuilder:
         *,
         topology: MeshTopology | str | None = None,
         k_neighbors: int | None = None,
-        use_delaunay: bool | None = None,
     ) -> None:
         """Configure mesh topology for subsequent :meth:`build` calls.
 
@@ -132,17 +131,15 @@ class InteractionMeshBuilder:
             spec (InteractionMeshSpec | None): Full mesh configuration; mutually exclusive with keyword overrides.
             topology (MeshTopology | str | None): Override topology when ``spec`` is omitted.
             k_neighbors (int | None): Neighbor count for ``K_NEAREST`` topology.
-            use_delaunay (bool | None): Legacy flag; ``False`` selects chain topology when ``topology`` is omitted.
-
         Raises:
             ValueError: If ``spec`` is combined with explicit mesh keyword options.
         """
-        if spec is not None and (topology is not None or k_neighbors is not None or use_delaunay is not None):
+        if spec is not None and (topology is not None or k_neighbors is not None):
             raise ValueError("Pass either spec or explicit mesh options, not both")
         if spec is not None:
             self.spec = spec
             return
-        resolved_topology = MeshTopology.DELAUNAY if use_delaunay is not False else MeshTopology.CHAIN
+        resolved_topology = MeshTopology.DELAUNAY
         if topology is not None:
             resolved_topology = MeshTopology(topology)
         self.spec = InteractionMeshSpec(

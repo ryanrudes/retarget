@@ -60,7 +60,9 @@ def test_laplacian_keeps_explicit_inverse_distance_mode():
 
 
 def test_interaction_mesh_builder_chain_fallback():
-    mesh = InteractionMeshBuilder(use_delaunay=False).build(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+    mesh = InteractionMeshBuilder(topology=MeshTopology.CHAIN).build(
+        np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    )
     assert mesh.vertices.shape == (2, 3)
     assert mesh.simplices.shape == (1, 2)
 

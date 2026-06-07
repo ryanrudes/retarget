@@ -1,18 +1,40 @@
-name = "two_joint_bot"
-dof = 2
+name = "three_point_bot"
 height_m = 1.0
-joint_names = ["hip", "knee"]
-link_names = ["pelvis", "left_foot"]
-contact_links = ["left_foot"]
+joints = ["root_sway", "left_leg", "right_leg"]
+links = ["pelvis", "left_foot", "right_foot"]
+contact_links = ["left_foot", "right_foot"]
+geometries = []
+
+[vocabulary]
+joints = "examples.vocabularies:DemoRobotJoint"
+links = "examples.vocabularies:DemoRobotLink"
+geometries = "examples.vocabularies:DemoRobotGeometry"
+roles = "examples.vocabularies:DemoRobotRole"
 
 [joint_limits]
-hip = [-1.0, 1.0]
-knee = [-2.0, 0.0]
-
-[joint_roles]
-pelvis = "hip"
-left_knee = "knee"
+root_sway = [-1.0, 1.0]
+left_leg = [-1.0, 1.0]
+right_leg = [-1.0, 1.0]
 
 [link_roles]
 pelvis = "pelvis"
 left_foot = "left_foot"
+right_foot = "right_foot"
+
+[simple_kinematics.pelvis]
+joint = "root_sway"
+offset = [0.0, 0.0, 0.0]
+axis = [0.0, 1.0, 0.0]
+
+[simple_kinematics.left_foot]
+joint = "left_leg"
+offset = [-0.15, 0.0, -0.8]
+axis = [0.0, 0.0, 1.0]
+
+[simple_kinematics.right_foot]
+joint = "right_leg"
+offset = [0.15, 0.0, -0.8]
+axis = [0.0, 0.0, 1.0]
+
+[provenance]
+source = "typed_file_example"

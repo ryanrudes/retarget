@@ -1,16 +1,10 @@
-"""Helpers for loading Holosoma-style MuJoCo robot models for kinematics."""
+"""Helpers for preparing and resolving external MuJoCo models."""
 
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-
-# Holosoma G1 uses URDF link names in specs; MuJoCo bodies use shorter names.
-G1_BODY_ALIASES: dict[str, str] = {
-    "pelvis_contour_link": "pelvis",
-    "head_link": "torso_link",
-}
 
 
 def strip_floor_contact_pairs(xml_path: Path) -> bool:
@@ -73,14 +67,11 @@ def build_mujoco_body_name_map(
 ) -> dict[str, str]:
     """Return link/body names that resolve in the loaded MuJoCo model."""
 
-    merged_aliases = dict(G1_BODY_ALIASES)
-    if aliases:
-        merged_aliases.update(aliases)
     mapping: dict[str, str] = {}
     for name in names:
         if not name or name in mapping:
             continue
-        resolved = resolve_mujoco_body_name(mujoco, model, name, merged_aliases)
+        resolved = resolve_mujoco_body_name(mujoco, model, name, aliases)
         if resolved is not None:
             mapping[name] = resolved
     return mapping

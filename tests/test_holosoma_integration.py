@@ -3,15 +3,20 @@ import pytest
 
 from retarget.core.enums import (
     ConvergenceMode,
-    GeometrySource,
     NonPenetrationSource,
     ObjectQposMode,
     ObjectSampleSpace,
     SolverBackend,
     TaskKind,
 )
+from retarget.kinematics import MuJoCoKinematicsBackend
 from retarget.optimization import NonPenetrationConstraintConfig
-from retarget.pipeline import RetargetingExperiment
+from retarget.pipeline import (
+    InteractionMeshRetargetingEngine,
+    Retargeter,
+    RetargetingExperiment,
+)
+from retarget.pipeline.compiled import compile_robot
 from retarget.recipes.holosoma import (
     G1_LEFT_FOOT_STICKING_LINKS,
     G1_RIGHT_FOOT_STICKING_LINKS,
@@ -105,6 +110,11 @@ def test_holosoma_uses_same_observation_and_experiment_hierarchy():
         ),
         recipe=recipe,
         robot=robot,
+        retargeter_factory=lambda problem: Retargeter(
+            engine=InteractionMeshRetargetingEngine(
+                kinematics=MuJoCoKinematicsBackend(compile_robot(problem.robot))
+            )
+        ),
     )
 
     observation = experiment.observe()
@@ -149,11 +159,11 @@ def test_holosoma_resolves_semantic_contacts_and_geometry_policy():
     assert observation.contacts is not None
     assert observation.contacts.tracks[0].subject == HolosomaContactSubject.LEFT_FOOT
     assert problem.contacts is not None
-    assert problem.contacts.tracks[0].link_names == G1_LEFT_FOOT_STICKING_LINKS
-    assert problem.contacts.tracks[1].link_names == G1_RIGHT_FOOT_STICKING_LINKS
+    assert problem.contacts.tracks[0].links == G1_LEFT_FOOT_STICKING_LINKS
+    assert problem.contacts.tracks[1].links == G1_RIGHT_FOOT_STICKING_LINKS
     non_penetration = problem.constraints[-1]
     assert isinstance(non_penetration, NonPenetrationConstraintConfig)
     assert non_penetration.sources == (NonPenetrationSource.GEOMETRY,)
-    assert non_penetration.geometry_source == GeometrySource.BACKEND_CANDIDATES
-    assert non_penetration.scene_geometry_keywords == ("multi_boxes", "ground")
+    assert non_penetration.geometry_pairs
+    assert all(pair.first is not pair.second for pair in non_penetration.geometry_pairs)
     assert np.isfinite(problem.motion.joint_positions).all()

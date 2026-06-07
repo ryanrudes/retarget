@@ -39,7 +39,7 @@ view_result(RetargetingResult.load_npz("tutorials_first_result.npz"), dry_run=Tr
 
 ## Export MuJoCo-style tracking NPZ
 
-The `mujoco_npz` exporter writes `qpos` and `qvel` arrays plus schema metadata:
+The `mujoco_npz` exporter writes `qpos`, `qvel`, `time_s`, and a strict JSON manifest:
 
 ```bash
 uv run retarget export \
@@ -75,6 +75,7 @@ Qvel timing uses forward difference on frame 0, then previous-interval differenc
 ## Python export API
 
 ```python
+from retarget import ExportFormat
 from retarget.export import ExportSpec, export_tracking
 from retarget.results import RetargetingResult
 
@@ -82,7 +83,7 @@ result = RetargetingResult.load_npz("tutorials_first_result.npz")
 exported = export_tracking(
     result,
     ExportSpec(
-        format_name="mujoco_npz",
+        format_name=ExportFormat.MUJOCO_NPZ,
         output_path="tutorials_tracking.npz",
         output_fps=50,
     ),
@@ -92,9 +93,9 @@ print(exported.frame_count, exported.fps, exported.path)
 
 Register custom exporters on the `exporters` registry when your lab needs CSV, HDF5, or environment-specific bundles.
 
-## Inspect exported NPZ without pickle
+## Inspect the strict exported NPZ
 
-Tracking files expose JSON metadata keys:
+Tracking files expose one JSON manifest and numeric arrays:
 
 ```python
 import json
@@ -102,8 +103,8 @@ import numpy as np
 
 with np.load("tutorials_tracking.npz", allow_pickle=False) as data:
     print(data["qpos"].shape, data["qvel"].shape)
-    meta = json.loads(str(data["metadata_json"]))
-    print(meta.get("qvel_scheme"))
+    manifest = json.loads(str(data["manifest_json"]))
+    print(manifest["report"]["qvel_scheme"])
 ```
 
 ## End-to-end checklist

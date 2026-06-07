@@ -40,15 +40,14 @@ same two recipes and experiment:
 uv run retarget run --config examples/skateboarding/run_config.toml
 ```
 
-For MuJoCo-backed kinematics:
+Install MuJoCo before running the experiment:
 
 ```bash
 uv sync --extra mujoco
 uv run python examples/skateboarding/run_retarget.py \
   --demo pushoff5_twoshoes \
   --vicon-root /path/to/vicon-recordings \
-  --gvhmr-root /path/to/gvhmr-output \
-  --kinematics mujoco
+  --gvhmr-root /path/to/gvhmr-output
 ```
 
 Results are written under `examples/skateboarding/generated/`.

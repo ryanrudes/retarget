@@ -1,12 +1,21 @@
 # Add A Robot
 
-`RobotSpec` binds a robot-specific joint and link vocabulary to semantic roles.
-Observation and retargeting recipes depend on roles, not spelling conventions
-or side-name heuristics.
+A robot defines concrete enum vocabularies and binds semantic robot roles to
+those members.
 
 ```python
-from retarget import RobotJoint, RobotLink, RobotRole
-from retarget.robots import RobotSpec, robots
+from retarget import (
+    RobotGeometry,
+    RobotJoint,
+    RobotKind,
+    RobotLink,
+    RobotRole,
+)
+from retarget.robots import RobotSpec, RobotVocabulary, robots
+
+
+class LabRobot(RobotKind):
+    BIPED = "lab_biped"
 
 
 class LabRole(RobotRole):
@@ -24,20 +33,29 @@ class LabLink(RobotLink):
     LEFT_FOOT = "left_foot_link"
 
 
-@robots.register("lab_robot")
-def lab_robot() -> RobotSpec:
+class LabGeometry(RobotGeometry):
+    LEFT_FOOT = "left_foot_geom"
+
+
+@robots.register(LabRobot.BIPED)
+def lab_robot() -> RobotSpec[LabJoint, LabLink, LabGeometry, LabRole]:
     return RobotSpec(
-        name="lab_robot",
-        dof=2,
+        name="lab_biped",
         height_m=1.0,
-        joint_names=tuple(LabJoint),
-        link_names=tuple(LabLink),
+        vocabulary=RobotVocabulary(
+            joints=LabJoint,
+            links=LabLink,
+            geometries=LabGeometry,
+            roles=LabRole,
+        ),
+        joints=tuple(LabJoint),
+        links=tuple(LabLink),
+        geometries=tuple(LabGeometry),
         contact_links=(LabLink.LEFT_FOOT,),
         joint_limits={
             LabJoint.HIP: (-1.0, 1.0),
             LabJoint.KNEE: (-2.0, 0.0),
         },
-        role_vocabulary=LabRole,
         joint_roles={LabRole.PELVIS: LabJoint.HIP},
         link_roles={
             LabRole.PELVIS: LabLink.PELVIS,
@@ -46,47 +64,38 @@ def lab_robot() -> RobotSpec:
     )
 ```
 
-`RobotSpec` normalizes enum values for serialization while retaining and
-validating the declared `role_vocabulary`. A retargeting recipe must pass
-members of that exact role enum to `joint_for_role`, `link_for_role`, and
-`links_for_role`.
+`RobotSpec` never normalizes these members to strings. Passing a member from a
+different enum class fails even if its value matches.
 
-Geometry names, MuJoCo body aliases, asset paths, qpos layout, and nominal joint
-selection are explicit fields. `metadata` is provenance-only and must not
-control behavior.
+Nominal tracking selections belong in an optimization profile, not the robot
+spec. MuJoCo body aliases remain strings because they are foreign model
+identifiers.
 
 ## File Specs
 
-TOML and YAML cannot serialize Python enum classes, so file-backed specs use
-the standard `HumanoidRobotRole` vocabulary and its string values:
+Serialized robot specs reference importable enum classes explicitly:
 
 ```toml
-name = "two_joint_bot"
-dof = 2
+name = "three_point_bot"
 height_m = 1.0
-joint_names = ["hip", "knee"]
-link_names = ["pelvis", "left_foot"]
-contact_links = ["left_foot"]
+joints = ["root_sway", "left_leg", "right_leg"]
+links = ["pelvis", "left_foot", "right_foot"]
+contact_links = ["left_foot", "right_foot"]
+geometries = []
 
-[joint_roles]
-pelvis = "hip"
-left_knee = "knee"
-
-[link_roles]
-pelvis = "pelvis"
-left_foot = "left_foot"
+[vocabulary]
+joints = "examples.vocabularies:DemoRobotJoint"
+links = "examples.vocabularies:DemoRobotLink"
+geometries = "examples.vocabularies:DemoRobotGeometry"
+roles = "examples.vocabularies:DemoRobotRole"
 ```
 
-Load file and asset-store specs through the same provider API:
+The strings are deserialized into members of those exact classes. See
+`examples/custom_robot.toml` for the complete file and
+`examples/custom_robot.py` for the programmatic equivalent.
 
 ```python
-from retarget.robots import robot_providers
+from retarget.robots import RobotSpec
 
-robot = robot_providers.get("file").load(
-    "two_joint_bot",
-    path="examples/custom_robot.toml",
-)
+robot = RobotSpec.load("examples/custom_robot.toml")
 ```
-
-Use a custom Python `RobotSpec` when the standard humanoid role vocabulary is
-not appropriate. Asset paths remain explicit fields regardless of provider.

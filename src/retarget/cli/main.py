@@ -16,7 +16,7 @@ from retarget.cli.config import (
     RetargetingRunConfig,
     RoleMappingRecipeConfig,
 )
-from retarget.core.enums import AssetKind, KinematicsBackendName, RunStatus, TaskKind
+from retarget.core.enums import AssetKind, KinematicsBackendName, MotionFormat, Robot, RunStatus, TaskKind
 from retarget.core.protocols import KinematicsBackend
 from retarget.export import ExportSpec, export_tracking, exporters
 from retarget.kinematics import kinematics_backends
@@ -32,6 +32,7 @@ from retarget.pipeline import (
     Retargeter,
     RetargetingProblem,
 )
+from retarget.pipeline.compiled import compile_problem, compile_robot
 from retarget.results import EvaluationManifest, EvaluationRecord, RetargetingResult
 from retarget.robots import RobotSpec, robots
 from retarget.visualization import view_result, visualizers
@@ -319,7 +320,7 @@ def export(
     exported = export_tracking(
         RetargetingResult.load_npz(result),
         ExportSpec(
-            format_name=format_name,
+            format_name=exporters.key_from_serialized(format_name),
             output_path=output,
             output_fps=output_fps,
             kinematics_backend=backend,
@@ -498,7 +499,11 @@ def _run_config_from_inputs(
 
 
 def _default_role_recipe(format_name: str) -> RoleMappingRecipeConfig:
-    if format_name != "minimal":
+    try:
+        motion_format = motion_formats.key_from_serialized(format_name)
+    except KeyError as exc:
+        raise typer.BadParameter(_exception_message(exc)) from exc
+    if motion_format is not MotionFormat.MINIMAL:
         raise typer.BadParameter(
             "direct --motion runs only define the minimal role recipe; use --config for other typed motion vocabularies"
         )
@@ -533,7 +538,7 @@ def _run_from_config(config: RetargetingRunConfig) -> RetargetingResult:
     try:
         experiment = config.build_experiment(retargeter_factory=_retargeter_for_problem)
         result = experiment.run()
-    except (ImportError, KeyError, ValueError, FileNotFoundError) as exc:
+    except (ImportError, KeyError, RuntimeError, ValueError, FileNotFoundError) as exc:
         raise typer.BadParameter(_exception_message(exc)) from exc
     result.save_npz(config.output)
     return result
@@ -550,10 +555,7 @@ def _preferred_config_kinematics(problem: RetargetingProblem) -> KinematicsBacke
     xml_path = problem.robot.mujoco_xml_path
     if xml_path is None or not xml_path.exists():
         return None
-    try:
-        return kinematics_backends.get(KinematicsBackendName.MUJOCO)(problem.robot)
-    except (ImportError, KeyError, RuntimeError, ValueError):
-        return None
+    return kinematics_backends.get(KinematicsBackendName.MUJOCO)(compile_problem(problem).robot)
 
 
 def _problem_from_config(config: RetargetingRunConfig) -> RetargetingProblem:
@@ -709,11 +711,9 @@ def _build_batch_jobs(
                 motion=motion_path,
                 output=_batch_output_path(input_dir, output_dir, motion_path),
                 name=Path(job_id).with_suffix("").as_posix(),
-                metadata={
-                    "format_name": format_name or "",
-                    "robot_name": robot_name or "",
-                    "config_path": config_value,
-                },
+                motion_format=motion_formats.key_from_serialized(format_name) if format_name else None,
+                robot=robots.key_from_serialized(robot_name) if robot_name else None,
+                config_path=Path(config_value) if config_value else None,
             )
         )
     return tuple(jobs)
@@ -735,35 +735,27 @@ def _batch_output_path(input_dir: Path, output_dir: Path, motion_path: Path) -> 
 
 
 def _run_batch_job(job: BatchJob) -> dict[str, Any]:
-    format_name = _metadata_string(job, "format_name")
-    robot_name = _metadata_string(job, "robot_name")
-    config_path = _metadata_string(job, "config_path")
-    if config_path:
-        run_config = RetargetingRunConfig.load(config_path).with_overrides(
+    format_name = job.motion_format.value if job.motion_format is not None else None
+    robot_name = job.robot.value if job.robot is not None else None
+    if job.config_path is not None:
+        run_config = RetargetingRunConfig.load(job.config_path).with_overrides(
             motion=job.motion,
             output=job.output,
-            format_name=format_name or None,
-            robot=robot_name or None,
+            format_name=format_name,
+            robot=robot_name,
             name=job.name,
         )
         result = _run_from_config(run_config)
     else:
         result = _run_one(
             job.motion,
-            format_name=format_name or "minimal",
-            robot_name=robot_name or "synthetic_humanoid",
+            format_name=format_name or MotionFormat.MINIMAL.value,
+            robot_name=robot_name or Robot.SYNTHETIC_HUMANOID.value,
             task_kind=TaskKind.ROBOT_ONLY,
             output=job.output,
             name=job.name,
         )
     return {"result_name": result.name, "frames": result.frame_count, "fps": result.fps}
-
-
-def _metadata_string(job: BatchJob, key: str) -> str:
-    value = job.metadata.get(key, "")
-    return value if isinstance(value, str) else str(value)
-
-
 def _resolve_export_backend(
     robot_name: str | None,
     robot_spec: Path | None,
@@ -782,16 +774,16 @@ def _resolve_export_backend(
         if robot_name is None:
             raise typer.BadParameter("--robot or --robot-spec is required when --kinematics-backend is provided")
         try:
-            robots.require_all((robot_name,))
+            robot_key = robots.key_from_serialized(robot_name)
         except KeyError as exc:
             raise typer.BadParameter(_exception_message(exc)) from exc
-        robot = robots.get(robot_name)
+        robot = robots.get(robot_key)
     resolved_backend_name = backend_name or "simple"
     try:
-        kinematics_backends.require_all((resolved_backend_name,))
+        backend_key = kinematics_backends.key_from_serialized(resolved_backend_name)
     except KeyError as exc:
         raise typer.BadParameter(_exception_message(exc)) from exc
-    return kinematics_backends.get(resolved_backend_name)(robot)
+    return kinematics_backends.get(backend_key)(compile_robot(robot))
 
 
 def _can_import(module: str) -> bool:

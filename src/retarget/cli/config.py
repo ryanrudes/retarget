@@ -22,8 +22,10 @@ from retarget.core.enums import (
     CropPolicy,
     FrameConvention,
     ObservationRecipeKind,
+    ObservationRecipeKindBase,
     QuaternionOrder,
     RetargetingRecipeKind,
+    RetargetingRecipeKindBase,
     SolverBackend,
     TaskKind,
     TimelineSelection,
@@ -82,7 +84,7 @@ class BaseObservationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: ObservationRecipeKind
+    kind: ObservationRecipeKindBase
 
     def resolve_paths(self, base_dir: Path) -> BaseObservationConfig:
         """Return a copy with relative paths resolved."""
@@ -95,7 +97,7 @@ class BaseAdaptationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: RetargetingRecipeKind
+    kind: RetargetingRecipeKindBase
 
     def resolve_paths(self, base_dir: Path) -> BaseAdaptationConfig:
         """Return a copy with relative paths resolved."""
@@ -147,8 +149,14 @@ class AdaptationConfigBuilder(Protocol):
         """Append invalid registry references."""
 
 
-observation_config_builders: Registry[ObservationConfigBuilder] = Registry("observation recipe config")
-adaptation_config_builders: Registry[AdaptationConfigBuilder] = Registry("retargeting recipe config")
+observation_config_builders: Registry[ObservationRecipeKindBase, ObservationConfigBuilder] = Registry(
+    "observation recipe config",
+    ObservationRecipeKindBase,
+)
+adaptation_config_builders: Registry[RetargetingRecipeKindBase, AdaptationConfigBuilder] = Registry(
+    "retargeting recipe config",
+    RetargetingRecipeKindBase,
+)
 
 
 class MotionFileObservationConfig(BaseObservationConfig):
@@ -294,7 +302,7 @@ class ObjectConfig(BaseModel):
     trajectory_quaternions: tuple[tuple[float, float, float, float], ...] | None = None
     trajectory_quaternion_order: QuaternionOrder = QuaternionOrder.WXYZ
     trajectory_frame: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_sample_count")
     @classmethod
@@ -326,7 +334,7 @@ class TerrainConfig(BaseModel):
     sample_points_path: Path | None = None
     mesh_sample_count: int = 128
     sample_points_frame: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_sample_count")
     @classmethod
@@ -353,7 +361,7 @@ class SceneConfig(BaseModel):
     terrain: TerrainConfig | None = None
     ground_range: tuple[float, float] = (-1.0, 1.0)
     ground_size: int = 15
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     def resolve_paths(self, base_dir: Path) -> SceneConfig:
         return self.model_copy(
@@ -380,7 +388,7 @@ class RoleMappingRecipeConfig(BaseAdaptationConfig):
     objectives: tuple[ObjectiveConfigInput, ...] | None = None
     constraints: tuple[ConstraintConfigInput, ...] | None = None
     scene: SceneConfig = Field(default_factory=SceneConfig)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     def resolve_paths(self, base_dir: Path) -> RoleMappingRecipeConfig:
         return self.model_copy(update={"scene": self.scene.resolve_paths(base_dir)})
@@ -465,7 +473,7 @@ class ConfiguredSceneRecipe:
                 terrain=terrain_spec or TerrainSpec(),
                 ground_range=self.config.ground_range,
                 ground_size=self.config.ground_size,
-                metadata=self.config.metadata,
+                provenance=self.config.provenance,
             )
         if self.task_kind == TaskKind.OBJECT_INTERACTION:
             return SceneSpec(
@@ -474,7 +482,7 @@ class ConfiguredSceneRecipe:
                 terrain=terrain_spec,
                 ground_range=self.config.ground_range,
                 ground_size=self.config.ground_size,
-                metadata=self.config.metadata,
+                provenance=self.config.provenance,
             )
         return SceneSpec(
             task_kind=self.task_kind,
@@ -482,7 +490,7 @@ class ConfiguredSceneRecipe:
             terrain=terrain_spec or TerrainSpec(name="terrain"),
             ground_range=self.config.ground_range,
             ground_size=self.config.ground_size,
-            metadata=self.config.metadata,
+            provenance=self.config.provenance,
         )
 
 
@@ -512,8 +520,10 @@ class RetargetingRunConfig(BaseModel):
             return value
         if not isinstance(value, dict):
             raise ValueError("observation must be a typed mapping")
-        kind = ObservationRecipeKind(str(value.get("kind", "")))
-        return observation_config_builders.get(kind).config_type.model_validate(value)
+        kind = observation_config_builders.key_from_serialized(str(value.get("kind", "")))
+        return observation_config_builders.get(kind).config_type.model_validate(
+            {**value, "kind": kind}
+        )
 
     @field_validator("recipe", mode="before")
     @classmethod
@@ -522,8 +532,10 @@ class RetargetingRunConfig(BaseModel):
             return value
         if not isinstance(value, dict):
             raise ValueError("recipe must be a typed mapping")
-        kind = RetargetingRecipeKind(str(value.get("kind", "")))
-        return adaptation_config_builders.get(kind).config_type.model_validate(value)
+        kind = adaptation_config_builders.key_from_serialized(str(value.get("kind", "")))
+        return adaptation_config_builders.get(kind).config_type.model_validate(
+            {**value, "kind": kind}
+        )
 
     @field_validator("imports", mode="before")
     @classmethod
@@ -604,7 +616,7 @@ class RetargetingRunConfig(BaseModel):
     def load_robot(self) -> RobotSpec:
         """Resolve the configured target robot."""
 
-        return robot_providers.get(self.robot_provider).load(self.robot, **self.robot_options)
+        return robot_providers.get_serialized(self.robot_provider).load(self.robot, **self.robot_options)
 
     def build_experiment(
         self,
@@ -660,7 +672,7 @@ class MotionFileObservationBuilder:
         source = cast(MotionFileObservationConfig, config)
         return MotionFileObservationRecipe.registered(
             source.path,
-            source.format_name,
+            motion_formats.key_from_serialized(source.format_name),
             name=run_name,
         )
 
@@ -752,7 +764,7 @@ class RoleMappingAdaptationBuilder:
         recipe_config = cast(RoleMappingRecipeConfig, config)
         if not isinstance(observation, MotionFileObservationConfig):
             raise TypeError("role_mapping recipes currently require a motion_file observation")
-        motion_format = motion_formats.get(observation.format_name)
+        motion_format = motion_formats.get_serialized(observation.format_name)
         return RoleRetargetingRecipe(
             task_kind=recipe_config.task_kind,
             motion_format=motion_format,
@@ -761,11 +773,11 @@ class RoleMappingAdaptationBuilder:
                 config=recipe_config.scene,
             ),
             joint_roles={
-                motion_format.joint_vocabulary(source): robot.role_vocabulary(target)
+                motion_format.joint_vocabulary(source): robot.vocabulary.roles(target)
                 for source, target in recipe_config.joint_roles.items()
             },
             link_roles={
-                motion_format.joint_vocabulary(source): robot.role_vocabulary(target)
+                motion_format.joint_vocabulary(source): robot.vocabulary.roles(target)
                 for source, target in recipe_config.link_roles.items()
             },
             mesh=recipe_config.mesh,
@@ -777,7 +789,7 @@ class RoleMappingAdaptationBuilder:
             output_fps=recipe_config.output_fps,
             show_progress=recipe_config.show_progress,
             name=run_name,
-            metadata=recipe_config.metadata,
+            provenance=recipe_config.provenance,
         )
 
     def validate_registry_references(
@@ -945,10 +957,15 @@ def _import_extension(reference: str) -> None:
 
 def _append_missing_registry_messages(
     messages: list[str],
-    registry: Registry[Any],
+    registry: Registry[Any, Any],
     keys: tuple[str, ...],
 ) -> None:
-    missing = registry.missing(keys)
+    missing: list[str] = []
+    for key in keys:
+        try:
+            registry.key_from_serialized(key)
+        except KeyError:
+            missing.append(key)
     if missing:
         available = ", ".join(registry.names()) or "<none>"
         messages.append(f"{registry.name}: {', '.join(missing)} (available: {available})")
@@ -958,7 +975,7 @@ def _config_kinds(items: tuple[Any, ...], *, label: str) -> tuple[str, ...]:
     kinds: list[str] = []
     for item in items:
         if isinstance(item, (ObjectiveConfig, ConstraintConfig)):
-            kinds.append(item.kind)
+            kinds.append(item.kind.value)
         elif isinstance(item, dict) and isinstance(item.get("kind"), str):
             kinds.append(item["kind"])
         else:
@@ -972,7 +989,9 @@ def _resolve_objective_configs(
     return tuple(
         item
         if isinstance(item, ObjectiveConfig)
-        else objective_terms.get(str(item["kind"])).config_type.model_validate(item)
+        else objective_terms.get_serialized(str(item["kind"])).config_type.model_validate(
+            {key: value for key, value in item.items() if key != "kind"}
+        )
         for item in items
     )
 
@@ -983,7 +1002,9 @@ def _resolve_constraint_configs(
     return tuple(
         item
         if isinstance(item, ConstraintConfig)
-        else constraint_terms.get(str(item["kind"])).config_type.model_validate(item)
+        else constraint_terms.get_serialized(str(item["kind"])).config_type.model_validate(
+            {key: value for key, value in item.items() if key != "kind"}
+        )
         for item in items
     )
 
@@ -1034,7 +1055,7 @@ def _object_spec(
             frame_count=frame_count,
             fps=fps,
         ),
-        metadata=config.metadata,
+        provenance=config.provenance,
     )
 
 
@@ -1051,7 +1072,7 @@ def _terrain_spec(config: TerrainConfig | None) -> TerrainSpec | None:
             mesh_path=config.mesh_path,
             mesh_sample_count=config.mesh_sample_count,
         ),
-        metadata=config.metadata,
+        provenance=config.provenance,
     )
 
 

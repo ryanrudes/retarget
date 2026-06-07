@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from scipy.optimize import Bounds, NonlinearConstraint, OptimizeResult, minimize
 from scipy.optimize import LinearConstraint as ScipyLinearConstraint
 
-from retarget.core.enums import SolverBackend
+from retarget.core.enums import SolverBackend, SolverKind
 from retarget.core.protocols import Solver
 from retarget.optimization.problem import LinearConstraint, QuadraticProblem, SolverResult
 from retarget.optimization.registry import solver_factories
@@ -111,19 +111,19 @@ def create_solver(spec: SolverSpec) -> Solver:
     return solver_factories.get(resolve_solver_backend_name(spec))(spec)
 
 
-def resolve_solver_backend_name(spec: SolverSpec) -> str:
+def resolve_solver_backend_name(spec: SolverSpec) -> SolverKind:
     """Return the concrete solver registry key selected for a solver spec."""
 
-    backend_name = spec.backend_name
-    if backend_name != SolverBackend.AUTO.value:
-        return backend_name
+    backend = spec.backend
+    if backend != SolverBackend.AUTO:
+        return backend
     return _auto_solver_backend_name()
 
 
-def _auto_solver_backend_name() -> str:
+def _auto_solver_backend_name() -> SolverBackend:
     if _module_available("cvxpy") and _module_available("clarabel"):
-        return SolverBackend.CVXPY_CLARABEL.value
-    return SolverBackend.NUMPY_LEAST_SQUARES.value
+        return SolverBackend.CVXPY_CLARABEL
+    return SolverBackend.NUMPY_LEAST_SQUARES
 
 
 def _module_available(module_name: str) -> bool:
@@ -200,5 +200,5 @@ def _to_scipy_constraint(constraint: LinearConstraint) -> ScipyLinearConstraint:
     return ScipyLinearConstraint(constraint.matrix, lower, upper)
 
 
-solver_factories.register(SolverBackend.NUMPY_LEAST_SQUARES.value, lambda _spec: NumpyLeastSquaresSolver())
-solver_factories.register(SolverBackend.CVXPY_CLARABEL.value, lambda spec: CvxpyClarabelSolver(verbose=spec.verbose))
+solver_factories.register(SolverBackend.NUMPY_LEAST_SQUARES, lambda _spec: NumpyLeastSquaresSolver())
+solver_factories.register(SolverBackend.CVXPY_CLARABEL, lambda spec: CvxpyClarabelSolver(verbose=spec.verbose))

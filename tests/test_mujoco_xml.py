@@ -42,7 +42,7 @@ def test_strip_floor_contact_pairs_allows_kinematics_load(tmp_path: Path) -> Non
     assert strip_floor_contact_pairs(xml_path) is False
 
 
-def test_build_mujoco_body_name_map_resolves_g1_aliases(tmp_path: Path) -> None:
+def test_build_mujoco_body_name_map_uses_only_explicit_aliases(tmp_path: Path) -> None:
     import mujoco
 
     xml_path = tmp_path / "robot.xml"
@@ -67,6 +67,10 @@ def test_build_mujoco_body_name_map_resolves_g1_aliases(tmp_path: Path) -> None:
         mujoco,
         model,
         ("pelvis_contour_link", "head_link", "torso_link"),
+        aliases={
+            "pelvis_contour_link": "pelvis",
+            "head_link": "torso_link",
+        },
     )
     assert mapping["pelvis_contour_link"] == "pelvis"
     assert mapping["head_link"] == "torso_link"

@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 
 from retarget.capture import (
-    HumanPoseRecording,
-    JointTrack,
     MocapArraySource,
     MocapRecording,
     ObservationSource,
 )
 from retarget.capture.tracks import PoseTrack
 from retarget.core.enums import FrameConvention, ObjectSampleSpace, QuaternionOrder
+from retarget.motion import MotionSequence
 from retarget.observation import ObservedObject, SceneObservation
 from retarget.scene import ObjectSpec
 
@@ -24,7 +24,6 @@ from .layout import default_holosoma_root, holosoma_climb_layout
 from .motion import preprocess_mocap_climb
 from .object import dummy_object_poses, object_visual_parts_from_urdf, sample_multi_boxes_like_holosoma
 from .vocabulary import (
-    HolosomaGeometryName,
     HolosomaMocapJoint,
     HolosomaObservationRole,
 )
@@ -103,27 +102,22 @@ class HolosomaClimbObservationRecipe:
                 raise ValueError("frame_count must be positive")
             frame_count = min(frame_count, self.frame_count)
         timeline = mocap.timeline.slice(slice(0, frame_count))
-        joint_names = tuple(track.role.value for track in mocap.joints)
+        joints = _holosoma_joints(mocap)
         joint_positions = np.stack([track.values[:frame_count] for track in mocap.joints], axis=1)
         joint_positions = preprocess_mocap_climb(
             joint_positions,
             scale=1.0,
             mat_height=self.policy.mat_height_m,
-            demo_joints=joint_names,
+            demo_joints=joints,
         )
-        actor = HumanPoseRecording(
+        actor = MotionSequence(
             name=mocap.name,
+            joint_vocabulary=HolosomaMocapJoint,
+            joints=joints,
+            root_joint=HolosomaMocapJoint.HIPS,
+            joint_positions=joint_positions,
             timeline=timeline,
             frame=FrameConvention.Z_UP_RIGHT_HANDED,
-            joints=tuple(
-                JointTrack(
-                    role=track.role,
-                    values=joint_positions[:, index],
-                    validity=np.asarray(track.validity, dtype=bool)[:frame_count],
-                    provenance=track.provenance,
-                )
-                for index, track in enumerate(mocap.joints)
-            ),
             source_height_m=self.policy.source_height_m,
             provenance=dict(mocap.provenance or {}),
         )
@@ -142,7 +136,7 @@ class HolosomaClimbObservationRecipe:
                 quaternion_order=QuaternionOrder.WXYZ,
             ),
             geometry=ObjectSpec(
-                name=HolosomaGeometryName.MULTI_BOXES.value,
+                name="multi_boxes",
                 mesh_path=self.object_mesh_path,
                 urdf_path=self.object_urdf_path,
                 visual_parts=object_visual_parts_from_urdf(self.object_urdf_path),
@@ -154,7 +148,7 @@ class HolosomaClimbObservationRecipe:
         contacts = foot_sticking_contacts(
             timeline,
             joint_positions,
-            demo_joints=joint_names,
+            demo_joints=joints,
             velocity_threshold=self.policy.contact_velocity_threshold,
         )
         return SceneObservation(
@@ -164,5 +158,12 @@ class HolosomaClimbObservationRecipe:
             actor=actor,
             objects=(observed_object,),
             contacts=contacts,
-            metadata={"source": "holosoma_fixture"},
+            provenance={"source": "holosoma_fixture"},
         )
+
+
+def _holosoma_joints(mocap: MocapRecording) -> tuple[HolosomaMocapJoint, ...]:
+    joints = tuple(track.role for track in mocap.joints)
+    if not all(isinstance(joint, HolosomaMocapJoint) for joint in joints):
+        raise TypeError("Holosoma mocap source must use HolosomaMocapJoint")
+    return tuple(cast(HolosomaMocapJoint, joint) for joint in joints)

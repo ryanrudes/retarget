@@ -11,6 +11,7 @@ from retarget import (
     RetargetingExperiment,
 )
 from retarget.kinematics import MuJoCoKinematicsBackend
+from retarget.pipeline.compiled import compile_robot
 from retarget.recipes.holosoma import (
     HolosomaClimbObservationRecipe,
     HolosomaClimbRetargetingRecipe,
@@ -52,7 +53,9 @@ def main() -> None:
         ),
         robot=g1_spherehand_robot(root),
         retargeter_factory=lambda problem: Retargeter(
-            engine=InteractionMeshRetargetingEngine(kinematics=MuJoCoKinematicsBackend(problem.robot))
+            engine=InteractionMeshRetargetingEngine(
+                kinematics=MuJoCoKinematicsBackend(compile_robot(problem.robot))
+            )
         ),
     )
     result = experiment.run()

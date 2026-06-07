@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -13,38 +14,188 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from retarget.core.array import FloatArray, as_float_array
-from retarget.core.enums import RunStatus
+from retarget.core.enums import (
+    FrameConvention,
+    ObjectQposMode,
+    ObjectSampleSpace,
+    QuaternionOrder,
+    RunStatus,
+    SolverKind,
+    TaskKind,
+)
 from retarget.core.timing import resample_linear
+from retarget.mesh.interaction import InteractionMeshSpec
 
 
-class RetargetingResult(BaseModel):
-    """Serialized retargeting output.
+class VocabularyManifest(BaseModel):
+    """Qualified identity and ordered values for one enum vocabulary."""
 
-    Attributes:
-        schema_version (int): On-disk format version for forward-compatible loading.
-        name (str): Run or clip label.
-        status (RunStatus): Outcome of the retargeting job.
-        qpos (FloatArray): Robot generalized coordinates with shape ``(frames, nq)``.
-        fps (float): Sampling rate of ``qpos`` in Hz.
-        cost (FloatArray | None): Per-frame or scalar objective cost.
-        human_joints (FloatArray | None): Reference human joints with shape ``(frames, joints, 3)``.
-        robot_link_positions (FloatArray | None): FK link positions with shape ``(frames, links, 3)``.
-        warnings (tuple[str, ...]): Non-fatal messages emitted during the run.
-        metadata (dict[str, Any]): Opaque sidecar fields (config hashes, timings, …).
-    """
+    module: str
+    qualname: str
+    values: tuple[str, ...]
+
+    @classmethod
+    def from_members(cls, members: tuple[StrEnum, ...]) -> VocabularyManifest | None:
+        """Build a manifest from members of one concrete enum class."""
+
+        if not members:
+            return None
+        vocabulary = type(members[0])
+        if not all(type(member) is vocabulary for member in members):
+            raise TypeError("vocabulary manifest members must use one enum class")
+        return cls(
+            module=vocabulary.__module__,
+            qualname=vocabulary.__qualname__,
+            values=tuple(member.value for member in members),
+        )
+
+
+class RegistryKeyManifest(BaseModel):
+    """Qualified identity for one extensible registry enum member."""
+
+    module: str
+    qualname: str
+    name: str
+    value: str
+
+    @classmethod
+    def from_member(cls, member: StrEnum) -> RegistryKeyManifest:
+        """Preserve the concrete enum class and member identity."""
+
+        return cls(
+            module=type(member).__module__,
+            qualname=type(member).__qualname__,
+            name=member.name,
+            value=member.value,
+        )
+
+    def resolve(self, base: type[SolverKind] = SolverKind) -> SolverKind:
+        """Resolve the recorded member and validate its registry-key base."""
+
+        target: object = importlib.import_module(self.module)
+        for part in self.qualname.split("."):
+            target = getattr(target, part)
+        if not isinstance(target, type) or not issubclass(target, base):
+            raise TypeError(f"{self.module}:{self.qualname} is not a {base.__name__} vocabulary")
+        member = target[self.name]
+        if member.value != self.value:
+            raise ValueError("serialized registry member value does not match its vocabulary")
+        return member
+
+
+class SolverRunReport(BaseModel):
+    """Typed solver execution report."""
+
+    requested_backend: RegistryKeyManifest
+    resolved_backend: RegistryKeyManifest
+    frame_statuses: tuple[str, ...]
+    iterations: tuple[int, ...]
+
+
+class MeshRunReport(BaseModel):
+    """Interaction-mesh configuration used by one run."""
+
+    spec: InteractionMeshSpec
+    custom_builder: bool = False
+
+
+class ResamplingReport(BaseModel):
+    """Explicit result resampling operation."""
+
+    source_fps: float
+    target_fps: float
+
+
+class RetargetingRunReport(BaseModel):
+    """Structured behavioral report emitted by the retargeting engine."""
+
+    algorithm: str
+    task_kind: TaskKind
+    robot_name: str
+    motion_name: str
+    runtime_s: float
+    input_fps: float
+    output_fps: float
+    requested_output_fps: float | None = None
+    scale_to_robot: bool
+    motion_scale_factor: float | None = None
+    solver: SolverRunReport
+    mesh: MeshRunReport
+    resampling: ResamplingReport | None = None
+
+
+class ResultRobotSpec(BaseModel):
+    """Backend-facing robot information required for playback."""
+
+    name: str
+    link_names: tuple[str, ...]
+    joint_names: tuple[str, ...]
+    joint_start: int
+    joint_vocabulary: VocabularyManifest
+    link_vocabulary: VocabularyManifest
+    urdf_path: Path | None = None
+    mujoco_xml_path: Path | None = None
+
+
+class ResultObjectVisualPart(BaseModel):
+    """One object visual part persisted for playback."""
+
+    name: str
+    mesh_path: Path
+    asset_scale: tuple[float, float, float]
+    rgba: tuple[float, float, float, float] | None = None
+
+
+class ResultObjectSpec(BaseModel):
+    """Typed object definition required for result playback."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    schema_version: int = 1
+    name: str
+    sample_points: FloatArray
+    sample_space: ObjectSampleSpace
+    qpos_mode: ObjectQposMode
+    frame_convention: FrameConvention = FrameConvention.Z_UP_RIGHT_HANDED
+    quaternion_order: QuaternionOrder = QuaternionOrder.WXYZ
+    qpos_slice: tuple[int, int] | None = None
+    mesh_path: Path | None = None
+    asset_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    visual_parts: tuple[ResultObjectVisualPart, ...] = ()
+
+    @field_validator("sample_points", mode="before")
+    @classmethod
+    def _validate_sample_points(cls, value: Any) -> FloatArray:
+        points = as_float_array(value, shape_tail=(3,), name="sample_points")
+        if points.ndim != 2:
+            raise ValueError("sample_points must have shape (points, 3)")
+        return points
+
+
+class ResultPlaybackSpec(BaseModel):
+    """Typed robot and object playback definition."""
+
+    robot: ResultRobotSpec
+    object: ResultObjectSpec | None = None
+
+
+class RetargetingResult(BaseModel):
+    """Strict pickle-free retargeting checkpoint."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    schema_version: int = 2
     name: str
     status: RunStatus
     qpos: FloatArray
     fps: float = 30.0
     cost: FloatArray | None = None
     human_joints: FloatArray | None = None
+    human_vocabulary: VocabularyManifest | None = None
     robot_link_positions: FloatArray | None = None
+    run: RetargetingRunReport | None = None
+    playback: ResultPlaybackSpec | None = None
     warnings: tuple[str, ...] = ()
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("qpos", mode="before")
     @classmethod
@@ -111,10 +262,14 @@ class RetargetingResult(BaseModel):
     def resampled(self, fps: float, *, name: str | None = None) -> RetargetingResult:
         """Return this result sampled on a new FPS grid."""
 
-        metadata = dict(self.metadata)
-        if not np.isclose(float(fps), self.fps):
-            metadata["resampled_from_fps"] = self.fps
-            metadata["resampled_to_fps"] = float(fps)
+        run = self.run
+        if run is not None and not np.isclose(float(fps), self.fps):
+            run = run.model_copy(
+                update={
+                    "output_fps": float(fps),
+                    "resampling": ResamplingReport(source_fps=self.fps, target_fps=float(fps)),
+                }
+            )
         cost = None
         if self.cost is not None:
             cost = (
@@ -138,9 +293,12 @@ class RetargetingResult(BaseModel):
             fps=fps,
             cost=cost,
             human_joints=human_joints,
+            human_vocabulary=self.human_vocabulary,
             robot_link_positions=robot_link_positions,
+            run=run,
+            playback=self.playback,
             warnings=self.warnings,
-            metadata=metadata,
+            provenance=dict(self.provenance),
         )
 
     def save_npz(self, path: str | Path) -> Path:
@@ -148,16 +306,19 @@ class RetargetingResult(BaseModel):
 
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
+        manifest = self.model_dump(
+            mode="json",
+            exclude={
+                "qpos": True,
+                "cost": True,
+                "human_joints": True,
+                "robot_link_positions": True,
+                "playback": {"object": {"sample_points": True}},
+            },
+        )
         payload: dict[str, Any] = {
-            "schema_version": np.asarray(self.schema_version),
-            "name": self.name,
-            "status": self.status.value,
+            "manifest_json": json.dumps(manifest, default=_json_default),
             "qpos": self.qpos,
-            "fps": np.asarray(self.fps),
-            "metadata_json": json.dumps(self.metadata, default=_json_default),
-            "metadata": np.asarray(self.metadata, dtype=object),
-            "warnings_json": json.dumps(self.warnings),
-            "warnings": np.asarray(self.warnings, dtype=object),
         }
         if self.cost is not None:
             payload["cost"] = self.cost
@@ -165,33 +326,33 @@ class RetargetingResult(BaseModel):
             payload["human_joints"] = self.human_joints
         if self.robot_link_positions is not None:
             payload["robot_link_positions"] = self.robot_link_positions
+        if self.playback is not None and self.playback.object is not None:
+            payload["object_sample_points"] = self.playback.object.sample_points
         np.savez(output, **payload)
         return output
 
     @classmethod
-    def load_npz(cls, path: str | Path, *, allow_pickle: bool = False) -> RetargetingResult:
-        """Load a `.npz` result.
+    def load_npz(cls, path: str | Path) -> RetargetingResult:
+        """Load the current strict `.npz` checkpoint schema."""
 
-        Pickle loading is disabled by default. Modern result files include
-        `metadata_json` and `warnings_json`, so object-array compatibility keys
-        do not need to be read during normal loading.
-        """
-
-        data = np.load(path, allow_pickle=allow_pickle)
-        metadata = _load_metadata(data)
-        warnings = _load_warnings(data)
-        return cls(
-            schema_version=int(np.asarray(data["schema_version"]).reshape(())) if "schema_version" in data else 1,
-            name=str(data["name"]) if "name" in data else Path(path).stem,
-            status=RunStatus(str(data["status"])) if "status" in data else RunStatus.SUCCESS,
-            qpos=data["qpos"],
-            fps=float(np.asarray(data["fps"]).reshape(())) if "fps" in data else 30.0,
-            cost=data.get("cost", None),
-            human_joints=data.get("human_joints", None),
-            robot_link_positions=data.get("robot_link_positions", None),
-            metadata=metadata,
-            warnings=warnings,
-        )
+        with np.load(path, allow_pickle=False) as data:
+            if "manifest_json" not in data or "qpos" not in data:
+                raise ValueError("not a current RetargetingResult checkpoint")
+            manifest = json.loads(str(np.asarray(data["manifest_json"]).reshape(())))
+            if not isinstance(manifest, dict):
+                raise ValueError("manifest_json must contain a JSON object")
+            manifest.update(
+                qpos=data["qpos"],
+                cost=data.get("cost", None),
+                human_joints=data.get("human_joints", None),
+                robot_link_positions=data.get("robot_link_positions", None),
+            )
+            playback = manifest.get("playback")
+            if isinstance(playback, dict) and isinstance(playback.get("object"), dict):
+                if "object_sample_points" not in data:
+                    raise ValueError("result object manifest requires object_sample_points")
+                playback["object"]["sample_points"] = data["object_sample_points"]
+            return cls.model_validate(manifest)
 
 
 class EvaluationReport(BaseModel):
@@ -329,43 +490,6 @@ class EvaluationManifest(BaseModel):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(self.model_dump_json(indent=2))
         return output
-
-
-def _load_metadata(data: Any) -> dict[str, Any]:
-    if "metadata_json" in data:
-        loaded = json.loads(str(np.asarray(data["metadata_json"]).reshape(())))
-        if not isinstance(loaded, dict):
-            raise ValueError("metadata_json must contain a JSON object")
-        return loaded
-    if "metadata" in data:
-        loaded = _legacy_object_array(data, "metadata").item()
-        if not isinstance(loaded, dict):
-            raise ValueError("metadata must contain a mapping")
-        return loaded
-    return {}
-
-
-def _load_warnings(data: Any) -> tuple[str, ...]:
-    if "warnings_json" in data:
-        loaded = json.loads(str(np.asarray(data["warnings_json"]).reshape(())))
-        if not isinstance(loaded, list):
-            raise ValueError("warnings_json must contain a JSON list")
-        return tuple(str(value) for value in loaded)
-    if "warnings" in data:
-        return tuple(str(v) for v in _legacy_object_array(data, "warnings"))
-    return ()
-
-
-def _legacy_object_array(data: Any, key: str) -> np.ndarray:
-    try:
-        return np.asarray(data[key])
-    except ValueError as exc:
-        if "allow_pickle=False" in str(exc):
-            raise ValueError(
-                f"{key!r} uses legacy pickled object-array storage; "
-                "pass allow_pickle=True to RetargetingResult.load_npz only for trusted files"
-            ) from exc
-        raise
 
 
 def _json_default(value: Any) -> Any:

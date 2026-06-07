@@ -8,11 +8,12 @@ from typing import cast
 
 import numpy as np
 
-from retarget.core.enums import MetricName, RunStatus
+from retarget.core.enums import MetricKind, MetricName, RunStatus
 from retarget.core.protocols import Metric
 from retarget.core.registry import Registry
 from retarget.kinematics.backends import SimpleKinematicsBackend
 from retarget.optimization.spec import NonPenetrationConstraintConfig
+from retarget.pipeline.compiled import compile_problem
 from retarget.pipeline.problem import RetargetingProblem
 from retarget.results.spec import EvaluationReport, RetargetingResult
 
@@ -28,7 +29,11 @@ def _metric_from_decorator(value: object) -> Metric:
     return candidate
 
 
-metrics: Registry[Metric] = Registry("metric", decorator_transform=_metric_from_decorator)
+metrics: Registry[MetricKind, Metric] = Registry(
+    "metric",
+    MetricKind,
+    decorator_transform=_metric_from_decorator,
+)
 """Registry of built-in and user-registered result metrics keyed by :class:`~retarget.core.enums.MetricName`."""
 
 METRIC_UNITS = {
@@ -42,7 +47,7 @@ METRIC_UNITS = {
 class OptimizationCostMetric:
     """Mean optimization cost."""
 
-    name = MetricName.OPTIMIZATION_COST.value
+    name = MetricName.OPTIMIZATION_COST
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
         """Return the mean per-frame optimization cost.
@@ -63,7 +68,7 @@ class OptimizationCostMetric:
 class FootSlidingMetric:
     """Mean stance-foot xy speed during explicitly planned contact."""
 
-    name = MetricName.FOOT_SLIDING.value
+    name = MetricName.FOOT_SLIDING
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
         """Return mean stance-foot horizontal speed while in contact.
@@ -97,7 +102,7 @@ class FootSlidingMetric:
 class ContactPreservationMetric:
     """Fraction of contact labels preserved by the retargeted contact links."""
 
-    name = MetricName.CONTACT_PRESERVATION.value
+    name = MetricName.CONTACT_PRESERVATION
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
         """Return the fraction of frames with matching human/robot contact labels.
@@ -126,7 +131,7 @@ class ContactPreservationMetric:
 class PenetrationMetric:
     """Ground and scene clearance violation depth for configured contact links."""
 
-    name = MetricName.PENETRATION.value
+    name = MetricName.PENETRATION
 
     def evaluate(self, result: RetargetingResult, problem: RetargetingProblem | None = None) -> float:
         """Return maximum ground or scene penetration depth for contact links.
@@ -147,10 +152,10 @@ class PenetrationMetric:
         return 0.0
 
 
-metrics.register(OptimizationCostMetric.name, OptimizationCostMetric())
-metrics.register(FootSlidingMetric.name, FootSlidingMetric())
-metrics.register(ContactPreservationMetric.name, ContactPreservationMetric())
-metrics.register(PenetrationMetric.name, PenetrationMetric())
+metrics.register(MetricName.OPTIMIZATION_COST, OptimizationCostMetric())
+metrics.register(MetricName.FOOT_SLIDING, FootSlidingMetric())
+metrics.register(MetricName.CONTACT_PRESERVATION, ContactPreservationMetric())
+metrics.register(MetricName.PENETRATION, PenetrationMetric())
 
 
 def evaluate_result(result: RetargetingResult, problem: RetargetingProblem | None = None) -> EvaluationReport:
@@ -180,10 +185,20 @@ def evaluate_result(result: RetargetingResult, problem: RetargetingProblem | Non
         qpos_dimension=int(result.qpos.shape[1]),
         fps=result.fps,
         task_kind=(
-            metric_problem.task_kind.value if metric_problem is not None else _metadata_string(result, "task_kind")
+            metric_problem.task_kind.value
+            if metric_problem is not None
+            else result.run.task_kind.value if result.run is not None else None
         ),
-        robot_name=metric_problem.robot.name if metric_problem is not None else _metadata_string(result, "robot"),
-        motion_name=metric_problem.motion.name if metric_problem is not None else _metadata_string(result, "motion"),
+        robot_name=(
+            metric_problem.robot.name
+            if metric_problem is not None
+            else result.run.robot_name if result.run is not None else None
+        ),
+        motion_name=(
+            metric_problem.motion.name
+            if metric_problem is not None
+            else result.run.motion_name if result.run is not None else None
+        ),
         metrics=values,
         metric_units={name: METRIC_UNITS.get(name, "unitless") for name in values},
         details=_evaluation_details(result, metric_problem, original_problem=problem),
@@ -192,20 +207,17 @@ def evaluate_result(result: RetargetingResult, problem: RetargetingProblem | Non
 
 
 def _contact_link_positions(result: RetargetingResult, problem: RetargetingProblem) -> np.ndarray:
-    backend = SimpleKinematicsBackend(problem.robot)
+    compiled = compile_problem(problem)
+    backend = SimpleKinematicsBackend(compiled.robot)
+    links = tuple(compiled.link_name(link) for link in problem.robot.contact_links)
     return np.stack(
-        [backend.link_positions(qpos, problem.robot.contact_links) for qpos in result.qpos],
+        [backend.link_positions(qpos, links) for qpos in result.qpos],
         axis=0,
     )
 
 
 def _partial_status(status: RunStatus) -> RunStatus:
     return RunStatus.PARTIAL if status == RunStatus.SUCCESS else status
-
-
-def _metadata_string(result: RetargetingResult, key: str) -> str | None:
-    value = result.metadata.get(key)
-    return value if isinstance(value, str) and value else None
 
 
 def _problem_aligned_to_result(
@@ -238,13 +250,12 @@ def _evaluation_details(
             "task_kind": problem.task_kind.value,
             "robot": problem.robot.name,
             "motion": problem.motion.name,
-            "motion_format": problem.motion_format.name if problem.motion_format is not None else None,
             "motion_frame_count": problem.motion.frame_count,
-            "contact_links": list(problem.robot.contact_links),
+            "contact_links": [link.value for link in problem.robot.contact_links],
             "contacts": _contact_plan_details(problem),
-            "objectives": [objective.kind for objective in problem.objectives],
-            "constraints": [constraint.kind for constraint in problem.constraints if constraint.enabled],
-            "solver_backend": problem.solver.backend_name,
+            "objectives": [objective.kind.value for objective in problem.objectives],
+            "constraints": [constraint.kind.value for constraint in problem.constraints if constraint.enabled],
+            "solver_backend": problem.solver.backend.value,
             "aligned_to_result": _problem_was_aligned(original_problem, problem),
         }
     return details
@@ -334,9 +345,9 @@ def _contact_plan_to_mask(problem: RetargetingProblem) -> np.ndarray:
     assert problem.contacts is not None
     frame_count = cast(int, problem.contacts.frame_count)
     mask = np.zeros((frame_count, len(problem.robot.contact_links)), dtype=np.bool_)
-    link_index = {name: idx for idx, name in enumerate(problem.robot.contact_links)}
+    link_index = {link: idx for idx, link in enumerate(problem.robot.contact_links)}
     for track in problem.contacts.tracks:
-        mapped_indices = tuple(link_index[link_name] for link_name in track.link_names if link_name in link_index)
+        mapped_indices = tuple(link_index[link] for link in track.links if link in link_index)
         indices = mapped_indices
         if not indices:
             continue
@@ -351,7 +362,7 @@ def _contact_plan_details(problem: RetargetingProblem) -> dict[str, object] | No
     frame_count = cast(int, problem.contacts.frame_count)
     return {
         "frame_count": frame_count,
-        "subjects": [track.subject for track in problem.contacts.tracks],
+        "subjects": [track.subject.value for track in problem.contacts.tracks],
         "track_count": len(problem.contacts.tracks),
         "has_support": problem.contacts.support is not None,
     }

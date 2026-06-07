@@ -37,5 +37,5 @@ uv run pytest
 uv run mkdocs build --strict
 ```
 
-Continue with [Introduction](introduction.md), [Capture system](ecosystem/index.md),
+Continue with [Introduction](introduction.md), [Capture to retarget](pipeline/index.md),
 and [Architecture](architecture.md).

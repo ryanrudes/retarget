@@ -46,7 +46,10 @@ destination = "terrain/climbing_holds"
 
 HTTP(S) sources are refused unless `--allow-downloads` is supplied. File `sha256` checks are supported for copied or referenced files. Directory hashes are intentionally not inferred; keep complex dataset integrity checks in the asset provider that knows the dataset layout.
 
-Robot assets can be loaded through `robot_providers.get("asset_store")` when the registered asset is a spec file or a directory containing `robot.toml`, `robot.yaml`, `robot.yml`, or `robot.json`.
+Robot assets can be loaded through
+`robot_providers.get(RobotProviderName.ASSET_STORE)` when the registered asset
+is a spec file or a directory containing `robot.toml`, `robot.yaml`,
+`robot.yml`, or `robot.json`.
 
 Object and terrain assets can be referenced from run specs with `mesh_path`. When explicit `sample_points` are not supplied, the run config or scene spec (`mesh_sample_count` under `[scene.object]` or `[scene.terrain]`) samples deterministic surface points for non-penetration and interaction-mesh constraints. OBJ files are supported dependency-free; other mesh formats need `trimesh`, which is installed with the `mujoco` or `viz` extras (`uv sync --extra mujoco` or `uv sync --extra viz`), not as a standalone extra.
 

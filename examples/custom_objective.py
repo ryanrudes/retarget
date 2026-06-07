@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from retarget import RetargetEnum
+from retarget import ObjectiveKind
 from retarget.optimization import (
     ObjectiveConfig,
     ObjectiveContribution,
@@ -14,18 +14,18 @@ from retarget.optimization import (
 )
 
 
-class DemoObjective(RetargetEnum):
+class DemoObjective(ObjectiveKind):
     ENERGY = "energy"
 
 
 class EnergyObjectiveConfig(ObjectiveConfig):
-    kind: DemoObjective = DemoObjective.ENERGY
+    kind = DemoObjective.ENERGY
 
 
 @objective_terms.register(DemoObjective.ENERGY)
 @dataclass(frozen=True)
 class EnergyObjective:
-    name: DemoObjective = DemoObjective.ENERGY
+    kind: DemoObjective = DemoObjective.ENERGY
     config_type: type[EnergyObjectiveConfig] = EnergyObjectiveConfig
 
     def describe(self) -> str:
@@ -42,4 +42,4 @@ class EnergyObjective:
 
 print(objective_terms.get(DemoObjective.ENERGY).describe())
 profile = OptimizationProfile.defaults().with_objective(EnergyObjectiveConfig(weight=0.1))
-print(profile.objective_names)
+print(profile.objective_kinds)

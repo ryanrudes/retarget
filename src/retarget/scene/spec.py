@@ -49,7 +49,7 @@ class ObjectVisualPart(BaseModel):
         name (str): Stable part label used in scene paths.
         mesh_path (Path): Mesh file for this visual part.
         asset_scale (tuple[float, float, float] | None): Optional part-local scale; inherits the
-            parent object scale when omitted by playback metadata builders.
+            parent object scale when omitted by playback spec builders.
         rgba (tuple[float, float, float, float] | None): Optional material color with alpha in ``[0, 1]``.
     """
 
@@ -114,7 +114,7 @@ class ObjectSpec(BaseModel):
         sample_space (ObjectSampleSpace): Coordinate space for ``sample_points``.
         trajectory (ObjectTrajectory | None): Time-varying object pose track.
         qpos_mode (ObjectQposMode): Whether the trajectory is appended to qpos or treated as an external scene pose.
-        metadata (dict[str, Any]): Provenance-only object tags.
+        provenance (dict[str, Any]): Origin and processing history for the object.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -128,7 +128,7 @@ class ObjectSpec(BaseModel):
     sample_space: ObjectSampleSpace = ObjectSampleSpace.OBJECT_LOCAL
     trajectory: ObjectTrajectory | None = None
     qpos_mode: ObjectQposMode = ObjectQposMode.APPENDED
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_path", "urdf_path", mode="before")
     @classmethod
@@ -164,9 +164,9 @@ class ObjectSpec(BaseModel):
             raise ValueError("sample_points must have shape (N, 3)")
         return arr
 
-    @field_validator("metadata")
+    @field_validator("provenance")
     @classmethod
-    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def _reject_behavior_provenance(cls, value: dict[str, Any]) -> dict[str, Any]:
         blocked = {
             "asset_scale",
             "mesh_path",
@@ -179,7 +179,7 @@ class ObjectSpec(BaseModel):
         }
         present = sorted(blocked & set(value))
         if present:
-            raise ValueError("ObjectSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+            raise ValueError("ObjectSpec provenance cannot contain behavior: " + ", ".join(present))
         return dict(value)
 
     def scaled_sample_points(self, default: FloatArray | None = None) -> FloatArray | None:
@@ -203,7 +203,7 @@ class TerrainSpec(BaseModel):
         name (str): Terrain label used in scene exports and logs.
         mesh_path (Path | None): Optional terrain mesh file.
         sample_points (FloatArray | None): Precomputed terrain surface points with shape ``(N, 3)``.
-        metadata (dict[str, Any]): Provenance-only terrain tags.
+        provenance (dict[str, Any]): Origin and processing history for terrain.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -211,20 +211,20 @@ class TerrainSpec(BaseModel):
     name: str = "ground"
     mesh_path: Path | None = None
     sample_points: FloatArray | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mesh_path", mode="before")
     @classmethod
     def _path_or_none(cls, value: Any) -> Path | None:
         return None if value in (None, "") else Path(value)
 
-    @field_validator("metadata")
+    @field_validator("provenance")
     @classmethod
-    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def _reject_behavior_provenance(cls, value: dict[str, Any]) -> dict[str, Any]:
         blocked = {"mesh_path", "sample_points"}
         present = sorted(blocked & set(value))
         if present:
-            raise ValueError("TerrainSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+            raise ValueError("TerrainSpec provenance cannot contain behavior: " + ", ".join(present))
         return dict(value)
 
 
@@ -237,7 +237,7 @@ class SceneSpec(BaseModel):
         terrain (TerrainSpec | None): Static ground or climbable terrain definition.
         ground_range (tuple[float, float]): XY extent of the procedural ground grid (meters).
         ground_size (int): Number of samples per axis for :meth:`ground_points`.
-        metadata (dict[str, Any]): Provenance-only scene tags.
+        provenance (dict[str, Any]): Origin and processing history for the scene.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -247,11 +247,11 @@ class SceneSpec(BaseModel):
     terrain: TerrainSpec | None = None
     ground_range: tuple[float, float] = (-1.0, 1.0)
     ground_size: int = 15
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("metadata")
+    @field_validator("provenance")
     @classmethod
-    def _reject_behavior_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def _reject_behavior_provenance(cls, value: dict[str, Any]) -> dict[str, Any]:
         blocked = {
             "ground_range",
             "ground_size",
@@ -263,7 +263,7 @@ class SceneSpec(BaseModel):
         }
         present = sorted(blocked & set(value))
         if present:
-            raise ValueError("SceneSpec metadata is provenance-only; use typed fields instead: " + ", ".join(present))
+            raise ValueError("SceneSpec provenance cannot contain behavior: " + ", ".join(present))
         return dict(value)
 
     @model_validator(mode="after")

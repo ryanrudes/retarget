@@ -1,6 +1,6 @@
 schema_version = 1
 
-[metadata]
+[provenance]
 description = "Template for local research assets that are not distributed with retarget."
 
 [[assets]]

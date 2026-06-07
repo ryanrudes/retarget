@@ -12,6 +12,7 @@ from collections.abc import Callable
 from inspect import isclass
 from typing import cast
 
+from retarget.core.enums import ExporterKind
 from retarget.core.protocols import Exporter
 from retarget.core.registry import Registry
 
@@ -27,6 +28,10 @@ def _exporter_from_decorator(value: object) -> Exporter:
     return candidate
 
 
-exporters: Registry[Exporter] = Registry("exporter", decorator_transform=_exporter_from_decorator)
+exporters: Registry[ExporterKind, Exporter] = Registry(
+    "exporter",
+    ExporterKind,
+    decorator_transform=_exporter_from_decorator,
+)
 
 __all__ = ["exporters"]

@@ -14,6 +14,8 @@ from .vocabulary import (
 VICON_SCHEMA = ViconSourceSchema(
     rigid_bodies={body.value: body for body in SkateboardingRigidBody},
     markers={},
+    rigid_body_order=tuple(body.value for body in SkateboardingRigidBody),
+    marker_order=(),
 )
 
 GVHMR_SCHEMA = HumanPoseSourceSchema(

@@ -1,95 +1,96 @@
 # Architecture
 
-The design separates facts observed in the world from choices made for a target
-robot.
+`retarget` has one typed path from native capture to backend execution:
 
 ```mermaid
 flowchart LR
-  native["VideoRecording / MocapRecording / HumanPoseRecording"]
-  observe["ObservationRecipe.observe()"]
+  source["ObservationSource[T]"]
+  native["Native recording"]
+  observe["ObservationRecipe"]
   scene["SceneObservation"]
-  adapt["RetargetingRecipe.build_problem()"]
+  adapt["RetargetingRecipe"]
   problem["RetargetingProblem"]
-  run["Retargeter.run()"]
+  compile["compile_problem()"]
+  backend["CompiledRetargetingProblem"]
   result["RetargetingResult"]
 
-  native --> observe --> scene --> adapt --> problem --> run --> result
+  source --> native --> observe --> scene --> adapt --> problem --> compile --> backend --> result
   robot["RobotSpec"] --> adapt
 ```
 
-`RetargetingExperiment` owns this orchestration. It accepts either an
-`ObservationRecipe` or an existing `SceneObservation`, so expensive capture
-processing can be inspected, checkpointed explicitly, and reused with several
-robots or adaptation recipes.
+`RetargetingExperiment` composes observation, adaptation, and execution. It
+accepts either an `ObservationRecipe` or an existing `SceneObservation`, so an
+expensive fused observation can be inspected, explicitly checkpointed, and
+retargeted to several robots.
 
-## Native Recordings
+## Typed Domain Layer
 
-Each recording owns its native `SampleTimeline`, frame convention, enum
-vocabulary, validity masks, and provenance:
+Semantic names are enum members in public Python objects. User vocabularies
+subclass empty extension bases:
 
-- `VideoRecording`
-- `MocapRecording`
-- `HumanPoseRecording`
-- `PointTrack`, `PoseTrack`, `CategoricalTrack`, and their specialized track types
+- `MotionJoint`, `RobotJoint`, `RobotLink`, and `RobotGeometry`
+- `ObservationRole` and `RobotRole`
+- `ContactSubject`, `ContactState`, and `ContactPatch`
 
-Recordings do not pretend to share a clock. `ClockTransform` represents the
-estimated affine mapping between clocks. Point tracks interpolate linearly, pose
-tracks use SLERP, and categorical tracks use nearest-neighbor sampling.
-Registration failures raise `AlignmentError` carrying the rejected
-`AlignmentReport`; there is no zero-lag fallback.
+Registry extensions use the same pattern through `ObjectiveKind`,
+`ConstraintKind`, `SolverKind`, `RobotKind`, `MotionFormatKind`, and the other
+registry-key bases. A member from a different enum class is rejected even when
+its string value is equal.
 
-Fusion recipes declare `TimelineSelection` and `CropPolicy` directly.
-Skateboarding can retain the human-pose grid, retain the transformed mocap
-grid, or construct an explicit uniform grid. Selecting `UNIFORM` also requires
-`uniform_fps`; no global timing constant chooses this implicitly.
+`MotionSequence[JointT]`, `RobotVocabulary`, `RobotSpec`, `ContactPlan`, and
+`LinkTargetPlan` preserve those concrete enum classes. Recipes bind source
+members to robot roles; `RobotSpec` resolves roles to concrete robot members.
+No optimizer component guesses left/right, foot, hand, pelvis, or geometry
+meaning from a name.
 
-## Scene Observation
+## Native Capture
 
-`SceneObservation` is the canonical target-independent output of capture
-processing. It has one timeline and world frame, actor motion, semantic
-landmarks, rigid bodies, observed objects, semantic contacts, support geometry,
-alignment reports, and provenance-only metadata.
+`VideoRecording`, `MocapRecording`, and `HumanPoseRecording` each own a native
+`SampleTimeline`, coordinate frame, typed tracks, validity masks, and
+provenance. They do not pretend to share a clock.
 
-`SemanticContactSequence` names subjects, patches, and states. It does not name
-robot links. Link resolution happens only in the adaptation recipe.
+Observation recipes compose:
 
-Checkpoints are explicit:
+- `ClockTransform` and typed temporal registration
+- track-owned interpolation
+- frame conversion and rigid spatial registration
+- semantic landmarks, observed objects, contacts, and support geometry
 
-```python
-observation.save_npz("observation.npz")
-restored = SceneObservation.load_npz("observation.npz")
+The canonical fused result is `SceneObservation`. There is no synchronization
+API and no required synchronized archive. `SceneObservation.save_npz()` is an
+explicit optional checkpoint, never an automatic handoff.
+
+## Compilation Boundary
+
+Strings and numeric indices appear once, at backend compilation:
+
+```text
+RetargetingProblem[typed vocabularies]
+-> compile_problem(...)
+-> CompiledRetargetingProblem[names, indices, arrays]
+-> KinematicsBackend / solver
 ```
 
-No recipe writes a stage file or cache automatically.
+Compilation validates every referenced joint, link, body alias, and geometry.
+Geometry pairs are always explicit. The simple backend uses
+`SimpleKinematicPoint` declarations from the robot spec; it does not derive
+kinematics from semantic names.
 
-## Robot Adaptation
+External identifiers remain strings only where the external system requires
+them, such as MuJoCo body aliases, filesystem paths, ROS topics, and serialized
+config values.
 
-Source vocabularies subclass `MotionJoint`, `MocapRigidBody`,
-`ObservationRole`, `ContactSubject`, `ContactState`, and `ContactPatch`.
-Robots declare a `RobotRole` vocabulary and bind those roles to concrete joints,
-links, and link groups through `RobotSpec`.
+## Persistence
 
-Adaptation recipes map observation or motion enum members to robot-role enum
-members. They then create the robot-resolved `MotionSequence`, `ContactPlan`,
-`LinkTargetPlan`, scene, objective profile, and constraints. There are no
-side-name heuristics or default source-name mappings in the optimization core.
-Workflow-specific numeric behavior belongs in typed policy objects such as
-`HolosomaClimbObservationPolicy` and `HolosomaClimbOptimizationPolicy`, not in
-vocabulary or metadata dictionaries.
-
-## Retargeting Core
-
-`Retargeter` applies optional output-rate resampling and delegates to
-`InteractionMeshRetargetingEngine`. The engine builds the configured interaction
-mesh, queries the selected kinematics backend, and lowers typed objective and
-constraint configs into a local quadratic problem for each SQP iteration.
-
-Heavy integrations such as MuJoCo, CVXPY, Viser, Torch, SMPL-X, ROS bag readers,
-and GVHMR execution remain optional behind protocols or source implementations.
+`SceneObservation` and `RetargetingResult` use strict, pickle-free NPZ schemas.
+Enum vocabularies and registry members are recorded with qualified module,
+class, member, and value identity where reconstruction is required. Behavioral
+state lives in typed fields and structured reports. Free-form `provenance`
+contains origin, source files, versions, and processing history only.
 
 ## Declarative Runs
 
-Run configs serialize constructor arguments for the same public hierarchy:
+TOML, YAML, and JSON configs are serialization frontends over the same objects:
 
 ```toml
 [observation]
@@ -99,5 +100,7 @@ kind = "motion_file"
 kind = "role_mapping"
 ```
 
-`RetargetingRunConfig.build_experiment()` returns a `RetargetingExperiment`.
-The CLI does not have a separate preparation or synchronization workflow.
+`RetargetingRunConfig.build_experiment()` returns a
+`RetargetingExperiment`. Serialized strings are resolved through registered
+enum members before the experiment is built; unknown keys fail during config
+preflight.

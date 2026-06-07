@@ -26,7 +26,7 @@ def test_batch_runner_process_pool_and_resume(tmp_path):
 
     assert manifest.success_count == 2
     assert manifest.failed_count == 0
-    assert BatchManifest.load(manifest_path).records[0].metadata["job_id"] == "motion_0.json"
+    assert BatchManifest.load(manifest_path).records[0].provenance["job_id"] == "motion_0.json"
 
     resumed = BatchRunner().run(jobs, _write_batch_output, manifest_path=manifest_path)
 

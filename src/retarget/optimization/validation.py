@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from enum import StrEnum
 from typing import Any
 
 from retarget.core.registry import Registry
@@ -35,7 +36,7 @@ def validate_optimization_references(
         raise KeyError("Unknown optimization registry references: " + "; ".join(messages))
 
 
-def _append_missing(messages: list[str], registry: Registry[Any], keys: Iterable[str]) -> None:
+def _append_missing(messages: list[str], registry: Registry[Any, Any], keys: Iterable[StrEnum]) -> None:
     missing = registry.missing(keys)
     if not missing:
         return

@@ -32,11 +32,11 @@ Typed specs and results passed through the pipeline.
     options:
       members:
         - name
-        - joint_names
+        - joints
         - joint_positions
-        - fps
+        - timeline
         - root_poses
-        - metadata
+        - provenance
 
 ::: retarget.motion.spec.MotionFormatSpec
 

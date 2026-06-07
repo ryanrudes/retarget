@@ -36,7 +36,7 @@ def skateboarding_link_targets(
         landmark = observation.landmark(role)
         tracks.append(
             LinkTargetTrack(
-                link_name=robot.link_for_role(OBSERVATION_TO_ROBOT_ROLE[role]),
+                link=robot.link_for_role(OBSERVATION_TO_ROBOT_ROLE[role]),
                 positions=landmark.values,
                 weights=weight,
                 active_mask=landmark.validity,
@@ -66,7 +66,7 @@ def skateboarding_link_targets(
         )
         tracks.append(
             LinkTargetTrack(
-                link_name=robot.link_for_role(OBSERVATION_TO_ROBOT_ROLE[role]),
+                link=robot.link_for_role(OBSERVATION_TO_ROBOT_ROLE[role]),
                 positions=body.positions,
                 weights=np.where(active, 80.0, 8.0),
                 active_mask=body.validity,

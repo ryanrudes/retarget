@@ -20,7 +20,7 @@ An input such as `motions/subject_a/walk.npz` writes `results/subject_a/walk.npz
 Batch runs write `batch_manifest.json` after every completed job. The manifest records:
 
 - `total`, `success_count`, `skipped_count`, and `failed_count`
-- one record per input motion, with output path, status, timestamps, error type, and worker metadata
+- one record per input motion, with output path, status, timestamps, error type, and worker provenance
 - the input directory, output directory, and glob pattern used for the run
 
 Rerunning the same command resumes the batch: existing outputs are marked `skipped`, missing or failed outputs are retried, and `--force` reruns everything. `--max-workers` uses a process pool; custom workers must therefore be pickleable when parallelism is enabled.

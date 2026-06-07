@@ -3,9 +3,15 @@
 The normal public entry point is `RetargetingExperiment`.
 
 ```python
-from retarget import HumanoidRobotRole, RetargetingExperiment, TaskKind
+from retarget import (
+    HumanoidRobotRole,
+    MinimalMotionJoint,
+    MotionFormat,
+    RetargetingExperiment,
+    Robot,
+    TaskKind,
+)
 from retarget.motion import motion_formats
-from retarget.motion.registry import MinimalMotionJoint
 from retarget.recipes import (
     MotionFileObservationRecipe,
     RobotOnlySceneRecipe,
@@ -15,11 +21,11 @@ from retarget.robots import robots
 
 observation = MotionFileObservationRecipe.registered(
     "tests/fixtures/minimal_motion.json",
-    "minimal",
+    MotionFormat.MINIMAL,
 )
 adaptation = RoleRetargetingRecipe(
     task_kind=TaskKind.ROBOT_ONLY,
-    motion_format=motion_formats.get("minimal"),
+    motion_format=motion_formats.get(MotionFormat.MINIMAL),
     scene=RobotOnlySceneRecipe(),
     link_roles={
         MinimalMotionJoint.PELVIS: HumanoidRobotRole.PELVIS,
@@ -30,7 +36,7 @@ adaptation = RoleRetargetingRecipe(
 experiment = RetargetingExperiment(
     observation=observation,
     recipe=adaptation,
-    robot=robots.get("synthetic_humanoid"),
+    robot=robots.get(Robot.SYNTHETIC_HUMANOID),
 )
 result = experiment.run()
 ```

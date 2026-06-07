@@ -1,8 +1,8 @@
 {
   "name": "minimal_motion",
   "fps": 30,
-  "height_m": 1.7,
-  "joint_names": [
+  "source_height_m": 1.7,
+  "joints": [
     "Pelvis",
     "L_Hip",
     "L_Knee",

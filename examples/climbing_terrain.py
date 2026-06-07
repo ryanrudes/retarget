@@ -6,10 +6,12 @@ import numpy as np
 
 from retarget import (
     HumanoidRobotRole,
+    JointLimitsConstraintConfig,
     MinimalMotionJoint,
     MotionFileObservationRecipe,
     MotionFormat,
-    OptimizationProfile,
+    NonPenetrationConstraintConfig,
+    NonPenetrationSource,
     RetargetingExperiment,
     Robot,
     RoleRetargetingRecipe,
@@ -17,9 +19,11 @@ from retarget import (
     StaticSceneRecipe,
     TaskKind,
     TerrainSpec,
+    TrustRegionConstraintConfig,
     motion_formats,
     robots,
 )
+from retarget.robots.registry import SyntheticLink
 
 repo_root = Path(__file__).resolve().parents[1]
 motion_format = motion_formats.get(MotionFormat.MINIMAL)
@@ -53,10 +57,21 @@ recipe = RoleRetargetingRecipe(
         MinimalMotionJoint.LEFT_TOE: HumanoidRobotRole.LEFT_FOOT,
         MinimalMotionJoint.RIGHT_TOE: HumanoidRobotRole.RIGHT_FOOT,
     },
-    constraints=OptimizationProfile.climbing(
-        floor_z=-2.0,
-        scene_clearance=0.025,
-    ).constraints,
+    constraints=(
+        JointLimitsConstraintConfig(),
+        TrustRegionConstraintConfig(),
+        NonPenetrationConstraintConfig(
+            sources=(NonPenetrationSource.SCENE_POINTS,),
+            links=(
+                SyntheticLink.LEFT_TOE,
+                SyntheticLink.RIGHT_TOE,
+                SyntheticLink.LEFT_HAND,
+                SyntheticLink.RIGHT_HAND,
+            ),
+            floor_z=-2.0,
+            scene_clearance=0.025,
+        ),
+    ),
 )
 RetargetingExperiment(
     observation=observation,

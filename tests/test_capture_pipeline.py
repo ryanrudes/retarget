@@ -318,7 +318,7 @@ def _observation() -> SceneObservation:
         name="checkpoint",
         timeline=timeline,
         world_frame=FrameConvention.Z_UP_RIGHT_HANDED,
-        actor=actor,
+        actor=actor.to_motion_sequence(Joint.ROOT),
     )
 
 
@@ -332,11 +332,11 @@ def test_scene_observation_checkpoint_is_explicit_and_round_trips(tmp_path):
 
     assert path.exists()
     assert restored.timeline == observation.timeline
-    assert restored.actor.joint_roles == (Joint.ROOT, Joint.HAND)
-    assert restored.actor.root_pose is not None
+    assert restored.actor.joints == (Joint.ROOT, Joint.HAND)
+    assert restored.actor.root_poses is not None
     assert np.allclose(
-        restored.actor.root_pose.quaternions,
-        observation.actor.root_pose.quaternions,
+        restored.actor.root_poses.quaternions(),
+        observation.actor.root_poses.quaternions(),
     )
 
 
@@ -519,7 +519,7 @@ def test_real_skateboarding_capture_observes_without_intermediate_handoff(
         abs=1e-9,
     )
     assert np.allclose(
-        observation.actor.joint(SkateboardingMotionJoint.PELVIS).values[[0, -1]],
+        observation.actor.joint(SkateboardingMotionJoint.PELVIS)[[0, -1]],
         [
             [-1.80534119, -0.71068665, -0.37344692],
             [-1.80636166, -0.71235210, -0.37245519],
@@ -535,13 +535,13 @@ def test_real_skateboarding_capture_observes_without_intermediate_handoff(
         robots.get(Robot.G1_LIKE),
     )
     assert problem.targets is not None
-    assert problem.targets.link_names == (
-        "left_hip_pitch",
-        "right_hip_pitch",
+    assert tuple(link.value for link in problem.targets.links) == (
+        "left_hip",
+        "right_hip",
         "left_knee",
         "right_knee",
-        "left_ankle_pitch",
-        "right_ankle_pitch",
+        "left_ankle",
+        "right_ankle",
         "torso",
         "left_foot",
         "right_foot",

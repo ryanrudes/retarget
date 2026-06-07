@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from retarget.core.enums import ExporterKind, ExportFormat
 from retarget.core.protocols import KinematicsBackend
 
 
@@ -19,16 +20,16 @@ class ExportSpec(BaseModel):
         output_fps (int | None): Optional resample rate before export; uses result fps when omitted.
         kinematics_backend (KinematicsBackend | None): Optional backend for analytic qvel; finite
             differences when omitted.
-        metadata (dict[str, Any]): Extra key-value metadata merged into export output.
+        provenance (dict[str, Any]): Origin information copied into the export.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    format_name: str = "mujoco_npz"
+    format_name: ExporterKind = ExportFormat.MUJOCO_NPZ
     output_path: Path
     output_fps: int | None = None
     kinematics_backend: KinematicsBackend | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("output_path", mode="before")
     @classmethod
@@ -44,14 +45,18 @@ class ExportResult(BaseModel):
         path (Path): Written output file path.
         frame_count (int): Number of exported frames.
         fps (float): Exported playback frame rate.
-        metadata (dict[str, Any]): Summary metadata (dimensions, source name, etc.).
+        qpos_dimension (int | None): Exported generalized-position width.
+        qvel_dimension (int | None): Exported generalized-velocity width.
+        provenance (dict[str, Any]): Origin information for the export.
     """
 
-    format_name: str
+    format_name: ExporterKind
     path: Path
     frame_count: int
     fps: float
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    qpos_dimension: int | None = None
+    qvel_dimension: int | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("path", mode="before")
     @classmethod

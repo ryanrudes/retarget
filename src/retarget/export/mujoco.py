@@ -16,9 +16,24 @@ from retarget.export.registry import exporters
 from retarget.export.spec import ExportResult, ExportSpec
 from retarget.results.spec import RetargetingResult
 
-# Qvel policy label stored in export metadata: frame 0 uses forward difference to frame 1;
+# Qvel policy label stored in the structured report: frame 0 uses forward difference to frame 1;
 # frames 1..N-1 use the interval from the previous qpos sample.
 QVEL_SCHEME = "first_frame_forward_difference_then_previous_interval"
+
+
+class MuJoCoTrackingReport(BaseModel):
+    """Structured details of MuJoCo tracking conversion."""
+
+    qvel_source: str
+    qvel_scheme: str
+    source_fps: float
+    output_fps: float
+    source_frame_count: int
+    frame_count: int
+    duration_s: float
+    resampled: bool
+    qpos_dimension: int
+    qvel_dimension: int
 
 
 class MuJoCoTrackingData(BaseModel):
@@ -26,23 +41,25 @@ class MuJoCoTrackingData(BaseModel):
 
     Attributes:
         schema_version (int): NPZ schema version written by :meth:`save_npz` (default ``1``).
-        source_name (str): Retargeting result or clip name carried into metadata.
+        source_name (str): Retargeting result or clip name carried into the export.
         qpos (FloatArray): Generalized positions with shape ``(frames, nq)``.
         qvel (FloatArray): Generalized velocities with shape ``(frames, nv)``, aligned with ``qpos``.
         time_s (FloatArray): Sample times in seconds with shape ``(frames,)``.
         fps (float): Playback frame rate used to build ``time_s`` and qvel.
-        metadata (dict[str, Any]): Export metadata (qvel source, resampling flags, dimensions, etc.).
+        report (MuJoCoTrackingReport): Structured conversion report.
+        provenance (dict[str, Any]): Origin information supplied by the caller.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    schema_version: int = 1
+    schema_version: int = 2
     source_name: str
     qpos: FloatArray
     qvel: FloatArray
     time_s: FloatArray
     fps: float
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    report: MuJoCoTrackingReport
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("qpos", "qvel", mode="before")
     @classmethod
@@ -85,22 +102,19 @@ class MuJoCoTrackingData(BaseModel):
         return self
 
     def save_npz(self, path: str | Path) -> Path:
-        """Save in a compatibility-friendly NPZ schema."""
+        """Save the current strict MuJoCo tracking NPZ schema."""
 
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
         np.savez(
             output,
-            schema_version=np.asarray(self.schema_version),
-            fps=np.asarray(self.fps),
+            manifest_json=json.dumps(
+                self.model_dump(mode="json", exclude={"qpos", "qvel", "time_s"}),
+                default=_json_default,
+            ),
             time_s=self.time_s,
             qpos=self.qpos,
             qvel=self.qvel,
-            joint_pos=self.qpos,
-            joint_vel=self.qvel,
-            source_name=self.source_name,
-            metadata_json=json.dumps(self.metadata, default=_json_default),
-            metadata=np.asarray(self.metadata, dtype=object),
         )
         return output
 
@@ -108,7 +122,7 @@ class MuJoCoTrackingData(BaseModel):
 class MuJoCoTrackingExporter:
     """Export `RetargetingResult` objects to MuJoCo-style tracking NPZ files."""
 
-    format_name: str = "mujoco_npz"
+    format_name = ExportFormat.MUJOCO_NPZ
 
     def export(self, result: RetargetingResult, spec: ExportSpec) -> ExportResult:
         """Build tracking arrays and save them to disk."""
@@ -117,7 +131,7 @@ class MuJoCoTrackingExporter:
             result,
             output_fps=spec.output_fps,
             kinematics_backend=spec.kinematics_backend,
-            metadata=spec.metadata,
+            provenance=spec.provenance,
         )
         path = tracking.save_npz(spec.output_path)
         return ExportResult(
@@ -125,12 +139,9 @@ class MuJoCoTrackingExporter:
             path=path,
             frame_count=tracking.frame_count,
             fps=tracking.fps,
-            metadata={
-                "source_name": result.name,
-                "qpos_dimension": tracking.qpos.shape[1],
-                "qvel_dimension": tracking.qvel.shape[1],
-                **tracking.metadata,
-            },
+            qpos_dimension=tracking.report.qpos_dimension,
+            qvel_dimension=tracking.report.qvel_dimension,
+            provenance={"source_name": result.name, **tracking.provenance},
         )
 
 
@@ -139,7 +150,7 @@ def build_mujoco_tracking_data(
     *,
     output_fps: int | None = None,
     kinematics_backend: KinematicsBackend | None = None,
-    metadata: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> MuJoCoTrackingData:
     """Build qpos/qvel arrays for downstream tracking experiments."""
 
@@ -161,20 +172,19 @@ def build_mujoco_tracking_data(
         qvel=qvel,
         time_s=time_s,
         fps=float(fps),
-        metadata={
-            "result_status": result.status.value,
-            "qvel_source": qvel_source,
-            "qvel_scheme": QVEL_SCHEME,
-            "source_fps": result.fps,
-            "output_fps": float(fps),
-            "source_frame_count": result.frame_count,
-            "frame_count": int(qpos.shape[0]),
-            "duration_s": duration_s,
-            "resampled": not np.isclose(fps, result.fps),
-            "qpos_dimension": qpos.shape[1],
-            "qvel_dimension": qvel.shape[1],
-            **(metadata or {}),
-        },
+        report=MuJoCoTrackingReport(
+            qvel_source=qvel_source,
+            qvel_scheme=QVEL_SCHEME,
+            source_fps=result.fps,
+            output_fps=float(fps),
+            source_frame_count=result.frame_count,
+            frame_count=int(qpos.shape[0]),
+            duration_s=duration_s,
+            resampled=not np.isclose(fps, result.fps),
+            qpos_dimension=qpos.shape[1],
+            qvel_dimension=qvel.shape[1],
+        ),
+        provenance={"result_status": result.status.value, **(provenance or {})},
     )
 
 
@@ -188,7 +198,7 @@ def export_tracking_npz(result: RetargetingResult, output_path: str | Path, *, o
     """Export a retargeting result to a MuJoCo-style tracking ``.npz`` file.
 
     Convenience wrapper around :func:`export_tracking` with format ``"mujoco_npz"``.
-    The NPZ contains ``qpos``, ``qvel``, ``time_s``, ``fps``, and JSON metadata
+    The NPZ contains ``qpos``, ``qvel``, ``time_s``, and a strict JSON manifest
     compatible with downstream MuJoCo tracking experiments.
 
     Args:
@@ -202,7 +212,7 @@ def export_tracking_npz(result: RetargetingResult, output_path: str | Path, *, o
 
     export = export_tracking(
         result,
-        ExportSpec(format_name="mujoco_npz", output_path=output_path, output_fps=output_fps),
+        ExportSpec(format_name=ExportFormat.MUJOCO_NPZ, output_path=output_path, output_fps=output_fps),
     )
     return export.path
 

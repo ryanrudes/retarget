@@ -4,15 +4,28 @@ import numpy as np
 import pytest
 
 from retarget.cli.config import (
+    BaseAdaptationConfig,
+    BaseObservationConfig,
     HolosomaClimbAdaptationConfig,
     HolosomaClimbObservationConfig,
     MotionFileObservationConfig,
     RetargetingRunConfig,
     RoleMappingRecipeConfig,
     SkateboardingObservationConfig,
+    adaptation_config_builders,
+    observation_config_builders,
 )
-from retarget.core.enums import CropPolicy, TaskKind, TimelineSelection
+from retarget.core.enums import (
+    CropPolicy,
+    ObservationRecipeKindBase,
+    RetargetingRecipeKindBase,
+    TaskKind,
+    TimelineSelection,
+)
+from retarget.mesh import MeshTopology
+from retarget.motion import MinimalMotionJoint
 from retarget.pipeline import RetargetingExperiment
+from retarget.robots.registry import SyntheticLink
 
 
 def test_run_config_is_a_frontend_over_experiment(tmp_path):
@@ -54,9 +67,9 @@ recipe:
     problem = experiment.build_problem()
     assert problem.name == "yaml_config"
     assert problem.task_kind == TaskKind.ROBOT_ONLY
-    assert problem.mesh.topology == "k_nearest"
+    assert problem.mesh.topology is MeshTopology.K_NEAREST
     assert problem.scene.ground_size == 3
-    assert problem.link_mapping["L_Toe"] == "left_toe"
+    assert problem.link_mapping()[MinimalMotionJoint.LEFT_TOE] is SyntheticLink.LEFT_TOE
 
 
 def test_run_config_rejects_removed_source_boundary(tmp_path):
@@ -98,6 +111,48 @@ def test_example_configs_deserialize_to_typed_recipes():
     assert holosoma.observation.policy.build().object_sample_count == 100
     assert isinstance(holosoma.recipe, HolosomaClimbAdaptationConfig)
     assert holosoma.recipe.policy.build().nominal_qpos_indices == tuple(range(19))
+
+
+def test_run_config_resolves_user_defined_recipe_kinds_through_registries(tmp_path):
+    class LabObservationKind(ObservationRecipeKindBase):
+        CAPTURE = "test_lab_capture"
+
+    class LabRecipeKind(RetargetingRecipeKindBase):
+        ADAPT = "test_lab_adapt"
+
+    class LabObservationConfig(BaseObservationConfig):
+        kind: LabObservationKind = LabObservationKind.CAPTURE
+
+    class LabAdaptationConfig(BaseAdaptationConfig):
+        kind: LabRecipeKind = LabRecipeKind.ADAPT
+
+    class LabObservationBuilder:
+        config_type = LabObservationConfig
+
+    class LabAdaptationBuilder:
+        config_type = LabAdaptationConfig
+
+    observation_config_builders.register(
+        LabObservationKind.CAPTURE,
+        LabObservationBuilder(),
+    )
+    adaptation_config_builders.register(
+        LabRecipeKind.ADAPT,
+        LabAdaptationBuilder(),
+    )
+
+    config = RetargetingRunConfig.model_validate(
+        {
+            "observation": {"kind": LabObservationKind.CAPTURE.value},
+            "recipe": {"kind": LabRecipeKind.ADAPT.value},
+            "output": tmp_path / "result.npz",
+        }
+    )
+
+    assert isinstance(config.observation, LabObservationConfig)
+    assert config.observation.kind is LabObservationKind.CAPTURE
+    assert isinstance(config.recipe, LabAdaptationConfig)
+    assert config.recipe.kind is LabRecipeKind.ADAPT
 
 
 def test_run_config_preflights_references_before_loading(tmp_path):

@@ -53,26 +53,6 @@ G1_LINK_NAMES = (
 
 G1_CONTACT_LINKS = ("left_ankle_roll_link", "right_ankle_roll_link")
 
-G1_NOMINAL_TRACKING_JOINTS = (
-    "waist_yaw_joint",
-    "waist_roll_joint",
-    "waist_pitch_joint",
-    "left_shoulder_pitch_joint",
-    "left_shoulder_roll_joint",
-    "left_shoulder_yaw_joint",
-    "left_elbow_joint",
-    "left_wrist_roll_joint",
-    "left_wrist_pitch_joint",
-    "left_wrist_yaw_joint",
-    "right_shoulder_pitch_joint",
-    "right_shoulder_roll_joint",
-    "right_shoulder_yaw_joint",
-    "right_elbow_joint",
-    "right_wrist_roll_joint",
-    "right_wrist_pitch_joint",
-    "right_wrist_yaw_joint",
-)
-
 G1_JOINT_ROLES = {
     "left_hip": "left_hip_pitch_joint",
     "left_knee": "left_knee_joint",
@@ -130,7 +110,7 @@ def main() -> None:
         copy=False,
         license="Apache-2.0",
         notice="Robot assets copied from amazon-far/holosoma; see HOLOSOMA_LICENSE and HOLOSOMA_NOTICE.",
-        metadata={
+        provenance={
             "source_repository": args.repo,
             "source_ref": args.ref,
             "source_path": str(source_dir.relative_to(source_root)),
@@ -267,15 +247,14 @@ def _g1_toml(
 ) -> str:
     lines: list[str] = [
         'name = "g1"',
-        f"dof = {len(joint_names)}",
         f"height_m = {G1_HEIGHT_M}",
         f"urdf_path = {json.dumps(G1_URDF)}",
         f"mujoco_xml_path = {json.dumps(G1_MUJOCO_XML)}",
         "",
-        f"joint_names = {_toml_array(joint_names)}",
-        f"link_names = {_toml_array(link_names)}",
+        f"joints = {_toml_array(joint_names)}",
+        f"links = {_toml_array(link_names)}",
         f"contact_links = {_toml_array(G1_CONTACT_LINKS)}",
-        f"nominal_tracking_joints = {_toml_array(G1_NOMINAL_TRACKING_JOINTS)}",
+        "geometries = []",
         "",
         "[joint_limits]",
     ]
@@ -295,7 +274,13 @@ def _g1_toml(
     lines.extend(
         [
             "",
-            "[metadata]",
+            "[vocabulary]",
+            'joints = "retarget.recipes.holosoma.vocabulary:G1SpherehandJoint"',
+            'links = "retarget.recipes.holosoma.vocabulary:G1SpherehandLink"',
+            'geometries = "retarget.robots.registry:HumanoidGeometry"',
+            'roles = "retarget.core.enums:HumanoidRobotRole"',
+            "",
+            "[provenance]",
             'asset_source = "holosoma"',
             f"source_repository = {json.dumps(source_repo)}",
             f"source_ref = {json.dumps(source_ref)}",

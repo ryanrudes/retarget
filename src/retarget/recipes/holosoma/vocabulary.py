@@ -6,11 +6,13 @@ from retarget.core.enums import (
     ContactPatch,
     ContactState,
     ContactSubject,
-    GeometryName,
     MotionJoint,
     ObservationRole,
+    RobotGeometry,
+    RobotJoint,
     RobotLink,
     RobotRole,
+    SceneGeometry,
 )
 
 
@@ -72,32 +74,146 @@ class HolosomaMocapJoint(MotionJoint):
     RIGHT_FOOT_MOD = "RightFootMod"
 
 
-class G1SpherehandLink(RobotLink):
-    """G1 spherehand links used by the Holosoma climbing subset."""
+class G1SpherehandJoint(RobotJoint):
+    """Actuated joints in the Holosoma G1 spherehand model."""
 
+    LEFT_HIP_PITCH = "left_hip_pitch_joint"
+    LEFT_HIP_ROLL = "left_hip_roll_joint"
+    LEFT_HIP_YAW = "left_hip_yaw_joint"
+    LEFT_KNEE = "left_knee_joint"
+    LEFT_ANKLE_PITCH = "left_ankle_pitch_joint"
+    LEFT_ANKLE_ROLL = "left_ankle_roll_joint"
+    RIGHT_HIP_PITCH = "right_hip_pitch_joint"
+    RIGHT_HIP_ROLL = "right_hip_roll_joint"
+    RIGHT_HIP_YAW = "right_hip_yaw_joint"
+    RIGHT_KNEE = "right_knee_joint"
+    RIGHT_ANKLE_PITCH = "right_ankle_pitch_joint"
+    RIGHT_ANKLE_ROLL = "right_ankle_roll_joint"
+    WAIST_YAW = "waist_yaw_joint"
+    WAIST_ROLL = "waist_roll_joint"
+    WAIST_PITCH = "waist_pitch_joint"
+    LEFT_SHOULDER_PITCH = "left_shoulder_pitch_joint"
+    LEFT_SHOULDER_ROLL = "left_shoulder_roll_joint"
+    LEFT_SHOULDER_YAW = "left_shoulder_yaw_joint"
+    LEFT_ELBOW = "left_elbow_joint"
+    LEFT_WRIST_ROLL = "left_wrist_roll_joint"
+    LEFT_WRIST_PITCH = "left_wrist_pitch_joint"
+    LEFT_WRIST_YAW = "left_wrist_yaw_joint"
+    RIGHT_SHOULDER_PITCH = "right_shoulder_pitch_joint"
+    RIGHT_SHOULDER_ROLL = "right_shoulder_roll_joint"
+    RIGHT_SHOULDER_YAW = "right_shoulder_yaw_joint"
+    RIGHT_ELBOW = "right_elbow_joint"
+    RIGHT_WRIST_ROLL = "right_wrist_roll_joint"
+    RIGHT_WRIST_PITCH = "right_wrist_pitch_joint"
+    RIGHT_WRIST_YAW = "right_wrist_yaw_joint"
+
+
+class G1SpherehandLink(RobotLink):
+    """Bodies in the Holosoma G1 spherehand model."""
+
+    PELVIS = "pelvis"
     PELVIS_CONTOUR = "pelvis_contour_link"
     LEFT_HIP_PITCH = "left_hip_pitch_link"
+    LEFT_HIP_ROLL = "left_hip_roll_link"
+    LEFT_HIP_YAW = "left_hip_yaw_link"
     LEFT_KNEE = "left_knee_link"
+    LEFT_ANKLE_INTERMEDIATE_1 = "left_ankle_intermediate_1_link"
+    LEFT_ANKLE_PITCH = "left_ankle_pitch_link"
+    LEFT_ANKLE_ROLL = "left_ankle_roll_link"
     LEFT_ANKLE_ROLL_SPHERE_1 = "left_ankle_roll_sphere_1_link"
     LEFT_ANKLE_ROLL_SPHERE_2 = "left_ankle_roll_sphere_2_link"
     LEFT_ANKLE_ROLL_SPHERE_3 = "left_ankle_roll_sphere_3_link"
     LEFT_ANKLE_ROLL_SPHERE_4 = "left_ankle_roll_sphere_4_link"
     LEFT_ANKLE_ROLL_SPHERE_5 = "left_ankle_roll_sphere_5_link"
     RIGHT_HIP_PITCH = "right_hip_pitch_link"
+    RIGHT_HIP_ROLL = "right_hip_roll_link"
+    RIGHT_HIP_YAW = "right_hip_yaw_link"
     RIGHT_KNEE = "right_knee_link"
+    RIGHT_ANKLE_INTERMEDIATE_1 = "right_ankle_intermediate_1_link"
+    RIGHT_ANKLE_PITCH = "right_ankle_pitch_link"
+    RIGHT_ANKLE_ROLL = "right_ankle_roll_link"
     RIGHT_ANKLE_ROLL_SPHERE_1 = "right_ankle_roll_sphere_1_link"
     RIGHT_ANKLE_ROLL_SPHERE_2 = "right_ankle_roll_sphere_2_link"
     RIGHT_ANKLE_ROLL_SPHERE_3 = "right_ankle_roll_sphere_3_link"
     RIGHT_ANKLE_ROLL_SPHERE_4 = "right_ankle_roll_sphere_4_link"
     RIGHT_ANKLE_ROLL_SPHERE_5 = "right_ankle_roll_sphere_5_link"
+    WAIST_YAW = "waist_yaw_link"
+    WAIST_ROLL = "waist_roll_link"
+    TORSO = "torso_link"
+    HEAD = "head_link"
+    HEAD_MOCAP = "head_mocap"
+    IMU_IN_TORSO = "imu_in_torso"
+    LEFT_SHOULDER_PITCH = "left_shoulder_pitch_link"
     LEFT_SHOULDER_ROLL = "left_shoulder_roll_link"
+    LEFT_SHOULDER_YAW = "left_shoulder_yaw_link"
     LEFT_ELBOW = "left_elbow_link"
+    LEFT_WRIST_ROLL = "left_wrist_roll_link"
+    LEFT_WRIST_PITCH = "left_wrist_pitch_link"
+    LEFT_WRIST_YAW = "left_wrist_yaw_link"
     LEFT_SPHERE_HAND = "left_sphere_hand_link"
+    LEFT_SPHERE_HAND_TIP = "left_sphere_hand_tip_link"
+    RIGHT_SHOULDER_PITCH = "right_shoulder_pitch_link"
     RIGHT_SHOULDER_ROLL = "right_shoulder_roll_link"
+    RIGHT_SHOULDER_YAW = "right_shoulder_yaw_link"
     RIGHT_ELBOW = "right_elbow_link"
+    RIGHT_WRIST_ROLL = "right_wrist_roll_link"
+    RIGHT_WRIST_PITCH = "right_wrist_pitch_link"
+    RIGHT_WRIST_YAW = "right_wrist_yaw_link"
     RIGHT_SPHERE_HAND = "right_sphere_hand_link"
+    RIGHT_SPHERE_HAND_TIP = "right_sphere_hand_tip_link"
+
+
+class G1SpherehandGeometry(RobotGeometry):
+    """Named geometries in the Holosoma G1 spherehand model."""
+
+    GROUND = "ground"
+    PELVIS = "pelvis"
+    LEFT_HIP_PITCH = "left_hip_pitch_link"
+    LEFT_HIP_ROLL = "left_hip_roll_link"
+    LEFT_HIP_YAW = "left_hip_yaw_link"
+    LEFT_KNEE = "left_knee_link"
     LEFT_ANKLE_INTERMEDIATE_1 = "left_ankle_intermediate_1_link"
+    LEFT_ANKLE_PITCH = "left_ankle_pitch_link"
+    LEFT_ANKLE_ROLL = "left_ankle_roll_link"
+    LEFT_ANKLE_ROLL_SPHERE_1 = "left_ankle_roll_sphere_1_link"
+    LEFT_ANKLE_ROLL_SPHERE_2 = "left_ankle_roll_sphere_2_link"
+    LEFT_ANKLE_ROLL_SPHERE_3 = "left_ankle_roll_sphere_3_link"
+    LEFT_ANKLE_ROLL_SPHERE_4 = "left_ankle_roll_sphere_4_link"
+    LEFT_ANKLE_ROLL_SPHERE_5 = "left_ankle_roll_sphere_5_link"
+    RIGHT_HIP_PITCH = "right_hip_pitch_link"
+    RIGHT_HIP_ROLL = "right_hip_roll_link"
+    RIGHT_HIP_YAW = "right_hip_yaw_link"
+    RIGHT_KNEE = "right_knee_link"
     RIGHT_ANKLE_INTERMEDIATE_1 = "right_ankle_intermediate_1_link"
+    RIGHT_ANKLE_PITCH = "right_ankle_pitch_link"
+    RIGHT_ANKLE_ROLL = "right_ankle_roll_link"
+    RIGHT_ANKLE_ROLL_SPHERE_1 = "right_ankle_roll_sphere_1_link"
+    RIGHT_ANKLE_ROLL_SPHERE_2 = "right_ankle_roll_sphere_2_link"
+    RIGHT_ANKLE_ROLL_SPHERE_3 = "right_ankle_roll_sphere_3_link"
+    RIGHT_ANKLE_ROLL_SPHERE_4 = "right_ankle_roll_sphere_4_link"
+    RIGHT_ANKLE_ROLL_SPHERE_5 = "right_ankle_roll_sphere_5_link"
+    WAIST_YAW = "waist_yaw_link"
+    WAIST_ROLL = "waist_roll_link"
+    TORSO = "torso_link"
+    HEAD = "head_link"
+    LEFT_SHOULDER_PITCH = "left_shoulder_pitch_link"
+    LEFT_SHOULDER_ROLL = "left_shoulder_roll_link"
+    LEFT_SHOULDER_YAW = "left_shoulder_yaw_link"
+    LEFT_ELBOW = "left_elbow_link"
+    LEFT_WRIST_ROLL = "left_wrist_roll_link"
+    LEFT_WRIST_PITCH = "left_wrist_pitch_link"
+    LEFT_WRIST_YAW = "left_wrist_yaw_link"
+    LEFT_SPHERE_HAND = "left_sphere_hand_link"
+    LEFT_SPHERE_HAND_TIP = "left_sphere_hand_tip_link"
+    RIGHT_SHOULDER_PITCH = "right_shoulder_pitch_link"
+    RIGHT_SHOULDER_ROLL = "right_shoulder_roll_link"
+    RIGHT_SHOULDER_YAW = "right_shoulder_yaw_link"
+    RIGHT_ELBOW = "right_elbow_link"
+    RIGHT_WRIST_ROLL = "right_wrist_roll_link"
+    RIGHT_WRIST_PITCH = "right_wrist_pitch_link"
+    RIGHT_WRIST_YAW = "right_wrist_yaw_link"
+    RIGHT_SPHERE_HAND = "right_sphere_hand_link"
+    RIGHT_SPHERE_HAND_TIP = "right_sphere_hand_tip_link"
 
 
 class HolosomaObservationRole(ObservationRole):
@@ -149,10 +265,12 @@ class HolosomaContactState(ContactState):
     STICKING = "sticking"
 
 
-class HolosomaGeometryName(GeometryName):
-    """Scene geometry groups referenced by the climbing recipe."""
+class HolosomaGeometryName(SceneGeometry):
+    """Named fixture geometries referenced by the climbing recipe."""
 
-    MULTI_BOXES = "multi_boxes"
+    MULTI_BOX_1 = "multi_boxes_link_1"
+    MULTI_BOX_2 = "multi_boxes_link_2"
+    MULTI_BOX_3 = "multi_boxes_link_3"
     GROUND = "ground"
 
 

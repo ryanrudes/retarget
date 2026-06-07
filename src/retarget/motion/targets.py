@@ -1,49 +1,49 @@
-"""Typed retargeting target tracks."""
+"""Typed robot-link target tracks."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Generic, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
+from typing_extensions import TypeVar
 
 from retarget.core.array import FloatArray
-from retarget.core.enums import FrameConvention
+from retarget.core.enums import FrameConvention, RobotLink
 from retarget.core.pose import convert_points_frame
 from retarget.core.timing import resampling_times
 
+LinkT = TypeVar("LinkT", bound=RobotLink, default=RobotLink)
+
 
 @dataclass(frozen=True)
-class LinkTargetSample:
-    """One active robot-link target at one frame."""
+class LinkTargetSample(Generic[LinkT]):
+    """One active typed robot-link target at one frame."""
 
-    link_name: str
+    link: LinkT
     position: FloatArray
     weight: float
     provenance: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class LinkTargetTrack:
-    """World-space target trajectory for one robot link."""
+class LinkTargetTrack(Generic[LinkT]):
+    """World-space target trajectory for one typed robot link."""
 
-    link_name: str
+    link: LinkT
     positions: FloatArray
     weights: FloatArray | float = 1.0
     active_mask: np.ndarray | None = None
     provenance: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.link, RobotLink):
+            raise TypeError("target link must be a RobotLink member")
         positions = np.asarray(self.positions, dtype=np.float64)
-        if positions.ndim != 2 or positions.shape[1] != 3:
-            raise ValueError("target positions must have shape (frames, 3)")
-        if positions.shape[0] == 0:
-            raise ValueError("target tracks must contain at least one frame")
-        if not self.link_name:
-            raise ValueError("target link_name must not be empty")
-
+        if positions.ndim != 2 or positions.shape[1] != 3 or positions.shape[0] == 0:
+            raise ValueError("target positions must have shape (positive frames, 3)")
         weights = _weights_array(self.weights, frame_count=positions.shape[0])
         active_mask = (
             np.ones(positions.shape[0], dtype=bool)
@@ -64,7 +64,7 @@ class LinkTargetTrack:
         return int(self.positions.shape[0])
 
     def active_at(self, frame_idx: int) -> bool:
-        """Whether this target is active and finite at one frame."""
+        """Whether this target is active and finite."""
 
         weights = cast(FloatArray, self.weights)
         mask = cast(np.ndarray, self.active_mask)
@@ -75,48 +75,46 @@ class LinkTargetTrack:
             and weights[frame_idx] > 0.0
         )
 
-    def sample(self, frame_idx: int) -> LinkTargetSample | None:
-        """Return this track's sample for one frame, if active."""
+    def sample(self, frame_idx: int) -> LinkTargetSample[LinkT] | None:
+        """Return the sample for one frame when active."""
 
         if not self.active_at(frame_idx):
             return None
         weights = cast(FloatArray, self.weights)
         return LinkTargetSample(
-            link_name=self.link_name,
+            link=self.link,
             position=self.positions[frame_idx],
             weight=float(weights[frame_idx]),
             provenance=dict(self.provenance),
         )
 
-    def resampled_indices(self, indices: np.ndarray) -> LinkTargetTrack:
+    def resampled_indices(self, indices: np.ndarray) -> LinkTargetTrack[LinkT]:
         """Return a copy sampled at frame indices."""
 
-        weights = cast(FloatArray, self.weights)
-        mask = cast(np.ndarray, self.active_mask)
         return LinkTargetTrack(
-            link_name=self.link_name,
+            link=self.link,
             positions=self.positions[indices],
-            weights=weights[indices],
-            active_mask=mask[indices],
+            weights=cast(FloatArray, self.weights)[indices],
+            active_mask=cast(np.ndarray, self.active_mask)[indices],
             provenance=dict(self.provenance),
         )
 
-    def scaled(self, factor: float) -> LinkTargetTrack:
+    def scaled(self, factor: float) -> LinkTargetTrack[LinkT]:
         """Return a copy with positions scaled."""
 
         return LinkTargetTrack(
-            link_name=self.link_name,
+            link=self.link,
             positions=self.positions * float(factor),
             weights=cast(FloatArray, self.weights).copy(),
             active_mask=cast(np.ndarray, self.active_mask).copy(),
             provenance=dict(self.provenance),
         )
 
-    def to_frame(self, source: FrameConvention, target: FrameConvention) -> LinkTargetTrack:
+    def to_frame(self, source: FrameConvention, target: FrameConvention) -> LinkTargetTrack[LinkT]:
         """Return this track represented in another coordinate frame."""
 
         return LinkTargetTrack(
-            link_name=self.link_name,
+            link=self.link,
             positions=convert_points_frame(self.positions, source, target),
             weights=cast(FloatArray, self.weights).copy(),
             active_mask=cast(np.ndarray, self.active_mask).copy(),
@@ -125,50 +123,47 @@ class LinkTargetTrack:
 
 
 @dataclass(frozen=True)
-class TargetFrame:
+class TargetFrame(Generic[LinkT]):
     """Per-frame view of link targets."""
 
     frame_idx: int
-    tracks: tuple[LinkTargetTrack, ...]
+    tracks: tuple[LinkTargetTrack[LinkT], ...]
 
     @property
-    def samples(self) -> tuple[LinkTargetSample, ...]:
+    def samples(self) -> tuple[LinkTargetSample[LinkT], ...]:
         """Active target samples at this frame."""
 
-        out: list[LinkTargetSample] = []
-        for track in self.tracks:
-            sample = track.sample(self.frame_idx)
-            if sample is not None:
-                out.append(sample)
-        return tuple(out)
+        return tuple(sample for track in self.tracks if (sample := track.sample(self.frame_idx)) is not None)
 
     @property
-    def link_names(self) -> tuple[str, ...]:
-        """Active robot link names."""
+    def links(self) -> tuple[LinkT, ...]:
+        """Active typed robot links."""
 
-        return tuple(sample.link_name for sample in self.samples)
+        return tuple(sample.link for sample in self.samples)
 
     @property
     def positions(self) -> FloatArray:
-        """Active target positions with shape ``(targets, 3)``."""
+        """Active target positions."""
 
         samples = self.samples
-        if not samples:
-            return np.zeros((0, 3), dtype=np.float64)
-        return np.asarray([sample.position for sample in samples], dtype=np.float64)
+        return (
+            np.asarray([sample.position for sample in samples], dtype=np.float64)
+            if samples
+            else np.zeros((0, 3), dtype=np.float64)
+        )
 
     @property
     def weights(self) -> FloatArray:
-        """Active target weights with shape ``(targets,)``."""
+        """Active target weights."""
 
         return np.asarray([sample.weight for sample in self.samples], dtype=np.float64)
 
 
 @dataclass(frozen=True)
-class LinkTargetPlan:
-    """Validated set of frame-aligned robot-link targets."""
+class LinkTargetPlan(Generic[LinkT]):
+    """Validated frame-aligned targets using one robot-link vocabulary."""
 
-    tracks: tuple[LinkTargetTrack, ...]
+    tracks: tuple[LinkTargetTrack[LinkT], ...]
     frame_count: int | None = None
     provenance: dict[str, object] = field(default_factory=dict)
 
@@ -177,24 +172,24 @@ class LinkTargetPlan:
         if not tracks:
             raise ValueError("LinkTargetPlan requires at least one track")
         frame_count = self.frame_count if self.frame_count is not None else tracks[0].frame_count
-        if frame_count <= 0:
-            raise ValueError("LinkTargetPlan frame_count must be positive")
-        for track in tracks:
-            if track.frame_count != frame_count:
-                raise ValueError("all target tracks must have frame_count frames")
-        if len({track.link_name for track in tracks}) != len(tracks):
-            raise ValueError("target link names must be unique")
+        if frame_count <= 0 or any(track.frame_count != frame_count for track in tracks):
+            raise ValueError("all target tracks must have the positive frame_count")
+        link_type = type(tracks[0].link)
+        if not all(type(track.link) is link_type for track in tracks):
+            raise TypeError("all targets must use one RobotLink vocabulary")
+        if len({track.link for track in tracks}) != len(tracks):
+            raise ValueError("target links must be unique")
         object.__setattr__(self, "tracks", tracks)
         object.__setattr__(self, "frame_count", int(frame_count))
         object.__setattr__(self, "provenance", dict(self.provenance))
 
     @property
-    def link_names(self) -> tuple[str, ...]:
+    def links(self) -> tuple[LinkT, ...]:
         """Robot links targeted by this plan."""
 
-        return tuple(track.link_name for track in self.tracks)
+        return tuple(track.link for track in self.tracks)
 
-    def frame(self, frame_idx: int) -> TargetFrame:
+    def frame(self, frame_idx: int) -> TargetFrame[LinkT]:
         """Return a per-frame target view."""
 
         frame_count = cast(int, self.frame_count)
@@ -202,7 +197,7 @@ class LinkTargetPlan:
             raise IndexError(frame_idx)
         return TargetFrame(frame_idx=frame_idx, tracks=self.tracks)
 
-    def resampled(self, source_fps: float, target_fps: float) -> LinkTargetPlan:
+    def resampled(self, source_fps: float, target_fps: float) -> LinkTargetPlan[LinkT]:
         """Return nearest-neighbor/masked targets on a new time grid."""
 
         if abs(float(source_fps) - float(target_fps)) <= 1e-9:
@@ -211,17 +206,15 @@ class LinkTargetPlan:
         indices = np.searchsorted(source_times, target_times, side="left")
         indices = np.clip(indices, 0, len(source_times) - 1)
         previous = np.maximum(indices - 1, 0)
-        choose_previous = np.abs(target_times - source_times[previous]) <= np.abs(
-            source_times[indices] - target_times
-        )
-        indices[choose_previous] = previous[choose_previous]
+        use_previous = np.abs(target_times - source_times[previous]) <= np.abs(source_times[indices] - target_times)
+        indices[use_previous] = previous[use_previous]
         return LinkTargetPlan(
             tracks=tuple(track.resampled_indices(indices) for track in self.tracks),
             frame_count=len(indices),
             provenance={**self.provenance, "resampled_from_fps": source_fps, "resampled_to_fps": target_fps},
         )
 
-    def scaled(self, factor: float) -> LinkTargetPlan:
+    def scaled(self, factor: float) -> LinkTargetPlan[LinkT]:
         """Return a copy with all positions scaled."""
 
         return LinkTargetPlan(
@@ -230,8 +223,8 @@ class LinkTargetPlan:
             provenance={**self.provenance, "scale_factor": float(factor)},
         )
 
-    def to_frame(self, source: FrameConvention, target: FrameConvention) -> LinkTargetPlan:
-        """Return this target plan represented in another coordinate frame."""
+    def to_frame(self, source: FrameConvention, target: FrameConvention) -> LinkTargetPlan[LinkT]:
+        """Return this target plan represented in another frame."""
 
         if source == target:
             return self
@@ -245,31 +238,31 @@ class LinkTargetPlan:
     def from_arrays(
         cls,
         *,
-        link_names: tuple[str, ...],
+        links: tuple[LinkT, ...],
         positions: ArrayLike,
         weights: ArrayLike | float = 1.0,
         active_mask: ArrayLike | None = None,
         provenance: Mapping[str, object] | None = None,
-    ) -> LinkTargetPlan:
+    ) -> LinkTargetPlan[LinkT]:
         """Build target tracks from dense ``(frames, links, 3)`` arrays."""
 
         position_array = np.asarray(positions, dtype=np.float64)
         if position_array.ndim != 3 or position_array.shape[2] != 3:
             raise ValueError("target positions must have shape (frames, links, 3)")
-        if position_array.shape[1] != len(link_names):
-            raise ValueError("link_names length must match target positions")
-        weight_array = _dense_weights_array(weights, frame_count=position_array.shape[0], link_count=len(link_names))
-        mask_array = _dense_mask_array(active_mask, frame_count=position_array.shape[0], link_count=len(link_names))
+        if position_array.shape[1] != len(links):
+            raise ValueError("links length must match target positions")
+        weight_array = _dense_weights_array(weights, frame_count=position_array.shape[0], link_count=len(links))
+        mask_array = _dense_mask_array(active_mask, frame_count=position_array.shape[0], link_count=len(links))
         return cls(
             tracks=tuple(
                 LinkTargetTrack(
-                    link_name=link_name,
-                    positions=position_array[:, idx, :],
-                    weights=weight_array[:, idx],
-                    active_mask=mask_array[:, idx],
+                    link=link,
+                    positions=position_array[:, index, :],
+                    weights=weight_array[:, index],
+                    active_mask=mask_array[:, index],
                     provenance=dict(provenance or {}),
                 )
-                for idx, link_name in enumerate(link_names)
+                for index, link in enumerate(links)
             ),
             frame_count=position_array.shape[0],
             provenance=dict(provenance or {}),

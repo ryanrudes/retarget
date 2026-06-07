@@ -8,11 +8,11 @@ from retarget.core.enums import (
     ContactPatch,
     ContactState,
     ContactSubject,
-    GeometryName,
     MocapRigidBody,
     MotionJoint,
     NameEnum,
     ObservationRole,
+    SceneGeometry,
 )
 
 
@@ -98,7 +98,7 @@ class SkateboardingContactPatch(ContactPatch):
     RIGHT_SHOE_SOLE = "right_shoe_sole"
 
 
-class SkateboardingGeometryName(GeometryName):
+class SkateboardingGeometryName(SceneGeometry):
     """Observed geometry names."""
 
     BOARD = "skateboard_deck"

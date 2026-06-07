@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -18,6 +19,10 @@ from retarget.core.enums import (
     MotionJoint,
     NameEnum,
 )
+from retarget.core.pose import PoseSequence
+
+if TYPE_CHECKING:
+    from retarget.motion.spec import MotionSequence
 
 
 @dataclass(frozen=True)
@@ -166,6 +171,39 @@ class HumanPoseRecording:
             if track.role == role:
                 return track
         raise KeyError(f"Unknown joint role {role.value!r}")
+
+    def to_motion_sequence(self, root_joint: MotionJoint) -> MotionSequence[MotionJoint]:
+        """Materialize the canonical shared-timeline actor motion after fusion."""
+
+        from retarget.motion.spec import MotionSequence
+
+        joint_vocabulary = type(self.joints[0].role)
+        if not isinstance(root_joint, joint_vocabulary):
+            raise TypeError(f"root_joint must be a {joint_vocabulary.__name__} member")
+        fps = self.timeline.nominal_fps
+        if fps is None:
+            raise ValueError("actor motion requires at least two timeline samples")
+        root_poses = None
+        if self.root_pose is not None:
+            root_poses = PoseSequence.from_arrays(
+                self.root_pose.positions,
+                self.root_pose.quaternions,
+                fps=fps,
+                quaternion_order=self.root_pose.quaternion_order,
+                frame=self.frame,
+            )
+        return MotionSequence(
+            name=self.name,
+            joint_vocabulary=joint_vocabulary,
+            joints=tuple(track.role for track in self.joints),
+            root_joint=root_joint,
+            joint_positions=np.stack([track.values for track in self.joints], axis=1),
+            timeline=self.timeline,
+            frame=self.frame,
+            root_poses=root_poses,
+            source_height_m=self.source_height_m,
+            provenance=dict(self.provenance or {}),
+        )
 
 
 def _require_one_vocabulary(

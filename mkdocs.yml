@@ -80,11 +80,11 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Introduction: introduction.md
-  - Ecosystem:
-      - Overview: ecosystem/index.md
-      - Workspace setup: ecosystem/workspace-setup.md
-      - End-to-end pipeline: ecosystem/pipeline.md
-      - Custom schemas: ecosystem/custom-schemas.md
+  - Capture To Retarget:
+      - Overview: pipeline/index.md
+      - End-to-end workflows: pipeline/workflows.md
+      - Native schemas: pipeline/schemas.md
+      - Workspace setup: pipeline/workspace.md
   - Tutorials:
       - Overview: tutorials/index.md
       - Your first retarget: tutorials/your-first-retarget.md

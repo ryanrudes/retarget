@@ -6,13 +6,15 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from pathlib import Path
 
-from retarget.robots.spec import RobotSpec
+from retarget.robots.spec import RobotSpec, RobotVocabulary
 
 from .layout import default_holosoma_root, holosoma_g1_robot_dir
 from .vocabulary import (
     G1_FOOT_STICKING_LINKS,
     G1_LEFT_FOOT_STICKING_LINKS,
     G1_RIGHT_FOOT_STICKING_LINKS,
+    G1SpherehandGeometry,
+    G1SpherehandJoint,
     G1SpherehandLink,
     HolosomaRobotRole,
 )
@@ -55,7 +57,7 @@ def g1_spherehand_robot(
     scene_xml_path: str | Path | None = None,
     include_object_collision: bool = False,
     height_m: float = 1.32,
-) -> RobotSpec:
+) -> RobotSpec[G1SpherehandJoint, G1SpherehandLink, G1SpherehandGeometry, HolosomaRobotRole]:
     """Return a G1 spherehand robot spec matching Holosoma's MOCAP task."""
 
     root = Path(holosoma_root) if holosoma_root is not None else default_holosoma_root()
@@ -68,21 +70,39 @@ def g1_spherehand_robot(
         if not path.exists():
             raise FileNotFoundError(path)
     joint_names = tuple(mjcf_joint_names(robot_xml_path))
-    robot_geom_names = tuple(mjcf_geom_names(robot_xml_path))
-    link_names = tuple(mjcf_body_names(robot_xml_path))
-    joint_limits = apply_manual_qpos_bounds(
+    _validate_model_vocabulary(
+        "joints",
+        joint_names,
+        tuple(joint.value for joint in G1SpherehandJoint),
+        ordered=True,
+    )
+    _validate_model_vocabulary(
+        "bodies",
+        tuple(mjcf_body_names(robot_xml_path)),
+        tuple(link.value for link in G1SpherehandLink),
+    )
+    _validate_model_vocabulary(
+        "geometries",
+        tuple(mjcf_geom_names(robot_xml_path)),
+        tuple(geometry.value for geometry in G1SpherehandGeometry),
+    )
+    joint_limits_by_name = apply_manual_qpos_bounds(
         mjcf_joint_limits(robot_xml_path, joint_names),
         joint_names=joint_names,
     )
     return RobotSpec(
         name="holosoma_g1_29dof_spherehand",
-        dof=len(joint_names),
         height_m=height_m,
-        joint_names=joint_names,
-        link_names=link_names,
+        vocabulary=RobotVocabulary(
+            joints=G1SpherehandJoint,
+            links=G1SpherehandLink,
+            geometries=G1SpherehandGeometry,
+            roles=HolosomaRobotRole,
+        ),
+        joints=tuple(G1SpherehandJoint),
+        links=tuple(G1SpherehandLink),
         contact_links=G1_FOOT_STICKING_LINKS,
-        joint_limits=joint_limits,
-        role_vocabulary=HolosomaRobotRole,
+        joint_limits={G1SpherehandJoint(name): bounds for name, bounds in joint_limits_by_name.items()},
         link_roles={
             HolosomaRobotRole.PELVIS: G1SpherehandLink.PELVIS_CONTOUR,
             HolosomaRobotRole.LEFT_HIP: G1SpherehandLink.LEFT_HIP_PITCH,
@@ -104,13 +124,34 @@ def g1_spherehand_robot(
             HolosomaRobotRole.LEFT_FOOT_CONTACT: G1_LEFT_FOOT_STICKING_LINKS,
             HolosomaRobotRole.RIGHT_FOOT_CONTACT: G1_RIGHT_FOOT_STICKING_LINKS,
         },
-        geometry_names=robot_geom_names,
+        mujoco_body_aliases={
+            G1SpherehandLink.PELVIS_CONTOUR: G1SpherehandLink.PELVIS.value,
+            G1SpherehandLink.HEAD: G1SpherehandLink.TORSO.value,
+        },
+        geometries=tuple(G1SpherehandGeometry),
         urdf_path=urdf_path,
         mujoco_xml_path=xml_path if include_object_collision or scene_xml_path is not None else robot_xml_path,
-        metadata={
+        provenance={
             "source": "holosoma",
-        },
+        }
     )
+
+
+def _validate_model_vocabulary(
+    label: str,
+    actual: tuple[str, ...],
+    expected: tuple[str, ...],
+    *,
+    ordered: bool = False,
+) -> None:
+    matches = actual == expected if ordered else set(actual) == set(expected)
+    if not matches:
+        missing = sorted(set(expected) - set(actual))
+        unexpected = sorted(set(actual) - set(expected))
+        raise ValueError(
+            f"G1 spherehand {label} differ from the built-in typed vocabulary; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
 
 
 def ensure_g1_model_assets(holosoma_root: str | Path | None = None) -> tuple[Path, ...]:

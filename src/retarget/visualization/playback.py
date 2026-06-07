@@ -245,7 +245,7 @@ class PlaybackRobot(BaseModel):
         joint_names (tuple[str, ...]): Actuated joint names for URDF configuration.
         joint_start (int): Index in ``qpos`` where actuated joints begin.
         urdf_path (Path | None): Optional URDF for mesh-backed rendering.
-        mujoco_xml_path (Path | None): Optional MuJoCo XML path carried in metadata.
+        mujoco_xml_path (Path | None): Optional MuJoCo XML path carried in the playback spec.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -310,8 +310,8 @@ class PlaybackData(BaseModel):
         root_quaternions (FloatArray): Root orientations (wxyz) with shape ``(frames, 4)``.
         human_points (FloatArray | None): Source human joints ``(frames, points, 3)``, if present.
         robot (PlaybackRobot | None): Robot link playback, if link positions are available.
-        object (PlaybackObject | None): Scene object playback, if object metadata is present.
-        metadata (dict[str, Any]): Result metadata copied for diagnostics overlays.
+        object (PlaybackObject | None): Scene object playback, if an object spec is present.
+        provenance (dict[str, Any]): Origin information copied for diagnostics.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -325,7 +325,7 @@ class PlaybackData(BaseModel):
     human_points: FloatArray | None = None
     robot: PlaybackRobot | None = None
     object: PlaybackObject | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("time_s", mode="before")
     @classmethod
@@ -438,7 +438,7 @@ def build_playback_data(result: RetargetingResult, *, robot_spec: RobotSpec | No
         human_points=result.human_joints,
         robot=playback_robot,
         object=playback_object,
-        metadata={"status": result.status.value, **result.metadata},
+        provenance=dict(result.provenance),
     )
 
 
@@ -463,20 +463,16 @@ def _root_quaternions(qpos: FloatArray, frame_count: int) -> FloatArray:
 
 
 def _object_playback(result: RetargetingResult) -> PlaybackObject | None:
-    object_metadata = _object_playback_metadata(result.metadata)
-    if object_metadata is None:
+    if result.playback is None or result.playback.object is None:
         return None
-    sample_points = object_metadata.get("sample_points")
-    if sample_points is None:
-        return None
+    object_spec = result.playback.object
+    local_points = object_spec.sample_points
 
-    local_points = as_float_array(sample_points, shape_tail=(3,), name="object.sample_points")
-    if local_points.ndim != 2:
-        raise ValueError("object.sample_points must have shape (points, 3)")
-
-    object_slice = _object_slice(object_metadata.get("qpos_slice"), result.qpos.shape[1])
+    object_slice = object_spec.qpos_slice
     if object_slice is not None:
-        start, _stop = object_slice
+        start, stop = object_slice
+        if not (0 <= start < stop <= result.qpos.shape[1] and stop - start >= 7):
+            raise ValueError("object qpos_slice must select a seven-coordinate pose")
         positions = np.asarray(result.qpos[:, start : start + 3], dtype=np.float64)
         quaternions = _normalize_quaternion_rows(result.qpos[:, start + 3 : start + 7])
         world_points = _transform_points(local_points, positions, quaternions)
@@ -486,102 +482,53 @@ def _object_playback(result: RetargetingResult) -> PlaybackObject | None:
         world_points = np.tile(local_points[None, :, :], (result.frame_count, 1, 1))
 
     return PlaybackObject(
-        name=str(object_metadata.get("name", "object")),
+        name=object_spec.name,
         local_points=local_points,
         world_points=world_points,
         positions=positions,
         quaternions=quaternions,
-        mesh_path=_metadata_path(object_metadata.get("mesh_path")),
-        asset_scale=object_metadata.get("asset_scale", (1.0, 1.0, 1.0)),
-        visual_parts=_playback_visual_parts(object_metadata.get("visual_parts")),
+        mesh_path=object_spec.mesh_path,
+        asset_scale=object_spec.asset_scale,
+        visual_parts=tuple(
+            PlaybackObjectVisualPart(
+                name=part.name,
+                mesh_path=part.mesh_path,
+                asset_scale=part.asset_scale,
+                rgba=part.rgba,
+            )
+            for part in object_spec.visual_parts
+        ),
     )
 
 
 def _robot_playback(result: RetargetingResult, *, robot_spec: RobotSpec | None = None) -> PlaybackRobot | None:
     if result.robot_link_positions is None:
         return None
-    metadata = _robot_playback_metadata(result.metadata)
+    persisted = result.playback.robot if result.playback is not None else None
+    name = persisted.name if persisted is not None else "robot"
+    link_names = persisted.link_names if persisted is not None else ()
+    joint_names = persisted.joint_names if persisted is not None else ()
+    joint_start = persisted.joint_start if persisted is not None else 7
+    urdf_path = persisted.urdf_path if persisted is not None else None
+    mujoco_xml_path = persisted.mujoco_xml_path if persisted is not None else None
     if robot_spec is not None:
-        metadata = {
-            **metadata,
-            "name": robot_spec.name,
-            "joint_names": list(robot_spec.joint_names),
-            "joint_start": robot_spec.qpos_layout.joint_start,
-            "urdf_path": str(robot_spec.urdf_path) if robot_spec.urdf_path is not None else None,
-            "mujoco_xml_path": str(robot_spec.mujoco_xml_path) if robot_spec.mujoco_xml_path is not None else None,
-        }
+        name = robot_spec.name
+        joint_names = tuple(joint.value for joint in robot_spec.joints)
+        joint_start = robot_spec.qpos_layout.joint_start
+        urdf_path = robot_spec.urdf_path
+        mujoco_xml_path = robot_spec.mujoco_xml_path
     link_count = result.robot_link_positions.shape[1]
-    link_names = _robot_link_names(metadata, link_count)
+    if len(link_names) != link_count:
+        raise ValueError("result playback link names must match robot_link_positions")
     return PlaybackRobot(
-        name=str(metadata.get("name", "robot")),
+        name=name,
         link_names=link_names,
         link_positions=result.robot_link_positions,
-        joint_names=_string_tuple(metadata.get("joint_names")),
-        joint_start=_integer_value(metadata.get("joint_start"), default=7),
-        urdf_path=_metadata_path(metadata.get("urdf_path")),
-        mujoco_xml_path=_metadata_path(metadata.get("mujoco_xml_path")),
+        joint_names=joint_names,
+        joint_start=joint_start,
+        urdf_path=urdf_path,
+        mujoco_xml_path=mujoco_xml_path,
     )
-
-
-def _robot_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    playback = metadata.get("playback")
-    if not isinstance(playback, dict):
-        return {}
-    robot_metadata = playback.get("robot")
-    return robot_metadata if isinstance(robot_metadata, dict) else {}
-
-
-def _robot_link_names(metadata: dict[str, Any], link_count: int) -> tuple[str, ...]:
-    names = metadata.get("link_names")
-    if isinstance(names, list | tuple) and len(names) == link_count:
-        return tuple(str(name) for name in names)
-    return tuple(f"link_{idx}" for idx in range(link_count))
-
-
-def _string_tuple(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list | tuple):
-        return ()
-    return tuple(str(item) for item in value)
-
-
-def _integer_value(value: Any, *, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _metadata_path(value: Any) -> Path | None:
-    if value in (None, ""):
-        return None
-    return Path(str(value))
-
-
-def _playback_visual_parts(value: Any) -> tuple[PlaybackObjectVisualPart, ...]:
-    if not isinstance(value, list | tuple):
-        return ()
-    return tuple(PlaybackObjectVisualPart.model_validate(item) for item in value if isinstance(item, dict))
-
-
-def _object_playback_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
-    playback = metadata.get("playback")
-    if not isinstance(playback, dict):
-        return None
-    object_metadata = playback.get("object")
-    return object_metadata if isinstance(object_metadata, dict) else None
-
-
-def _object_slice(value: Any, qpos_width: int) -> tuple[int, int] | None:
-    if not isinstance(value, list | tuple) or len(value) != 2:
-        return None
-    try:
-        start = int(value[0])
-        stop = int(value[1])
-    except (TypeError, ValueError):
-        return None
-    if 0 <= start < stop <= qpos_width and stop - start >= 7:
-        return start, stop
-    return None
 
 
 def _normalize_quaternion_rows(quaternions: Any) -> FloatArray:

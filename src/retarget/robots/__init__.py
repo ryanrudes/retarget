@@ -9,7 +9,13 @@ from retarget.robots.registry import (
     robot_providers,
     robots,
 )
-from retarget.robots.spec import JointLimit, QposLayout, RobotSpec
+from retarget.robots.spec import (
+    JointLimit,
+    QposLayout,
+    RobotSpec,
+    RobotVocabulary,
+    SimpleKinematicPoint,
+)
 
 __all__ = [
     "AssetStoreRobotProvider",
@@ -20,6 +26,8 @@ __all__ = [
     "QposLayout",
     "RegistryRobotProvider",
     "RobotSpec",
+    "RobotVocabulary",
+    "SimpleKinematicPoint",
     "robot_providers",
     "robots",
 ]

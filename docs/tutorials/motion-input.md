@@ -85,4 +85,4 @@ artifact automatically.
 - implement `ObservationRecipe` for domain-specific fusion.
 
 See [Add a motion format](../adding-a-motion-format.md) for coherent motion
-files and [Custom schemas](../ecosystem/custom-schemas.md) for native capture.
+files and [Native schemas](../pipeline/schemas.md) for native capture.

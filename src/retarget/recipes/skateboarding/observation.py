@@ -32,7 +32,7 @@ from .scene import (
     observed_board,
     semantic_landmarks,
 )
-from .vocabulary import SkateboardingRigidBody
+from .vocabulary import SkateboardingMotionJoint, SkateboardingRigidBody
 
 
 @dataclass(frozen=True)
@@ -113,13 +113,13 @@ class SkateboardingObservationRecipe:
             name=human.name or mocap.name,
             timeline=timeline,
             world_frame=self.world_frame,
-            actor=actor,
+            actor=actor.to_motion_sequence(SkateboardingMotionJoint.PELVIS),
             landmarks=semantic_landmarks(actor),
             rigid_bodies=bodies,
             objects=(observed_board(board),),
             contacts=contacts,
             alignment_reports=(temporal_report, spatial_report),
-            metadata={
+            provenance={
                 "mocap": mocap.provenance,
                 "human_pose": human.provenance,
             },

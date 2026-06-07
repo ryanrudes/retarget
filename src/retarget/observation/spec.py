@@ -12,9 +12,8 @@ from typing import Any, cast
 import numpy as np
 
 from retarget.capture.alignment import AlignmentReport
-from retarget.capture.recordings import HumanPoseRecording
 from retarget.capture.timeline import ClockTransform, SampleTimeline
-from retarget.capture.tracks import JointTrack, PointTrack, PoseTrack
+from retarget.capture.tracks import PointTrack, PoseTrack
 from retarget.core.enums import (
     ContactPatch,
     ContactState,
@@ -25,6 +24,8 @@ from retarget.core.enums import (
     ObservationRole,
     QuaternionOrder,
 )
+from retarget.core.pose import PoseSequence
+from retarget.motion.spec import MotionSequence
 from retarget.motion.support import SupportPlane
 from retarget.observation.contact import SemanticContactSequence, SemanticContactTrack
 from retarget.scene.spec import ObjectSpec, TerrainSpec
@@ -54,18 +55,20 @@ class SceneObservation:
     name: str
     timeline: SampleTimeline
     world_frame: FrameConvention
-    actor: HumanPoseRecording
+    actor: MotionSequence[Any]
     landmarks: tuple[PointTrack, ...] = ()
     rigid_bodies: tuple[PoseTrack, ...] = ()
     objects: tuple[ObservedObject, ...] = ()
     contacts: SemanticContactSequence | None = None
     terrain: TerrainSpec | None = None
     alignment_reports: tuple[AlignmentReport, ...] = ()
-    metadata: dict[str, object] = field(default_factory=dict)
+    provenance: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("scene observation name must not be empty")
+        if not isinstance(self.actor, MotionSequence):
+            raise TypeError("scene observation actor must be a MotionSequence")
         if self.actor.timeline != self.timeline:
             raise ValueError("actor must use the scene observation timeline")
         if self.actor.frame != self.world_frame:
@@ -101,12 +104,12 @@ class SceneObservation:
             "robot",
             "support_plane",
         }
-        present = sorted(blocked & set(self.metadata))
+        present = sorted(blocked & set(self.provenance))
         if present:
             raise ValueError(
-                "SceneObservation metadata is provenance-only; use typed fields instead: " + ", ".join(present)
+                "SceneObservation provenance cannot contain behavior: " + ", ".join(present)
             )
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "provenance", dict(self.provenance))
 
     def landmark(self, role: ObservationRole) -> PointTrack:
         """Return a semantic landmark track."""
@@ -134,13 +137,10 @@ class SceneObservation:
             "manifest_json": json.dumps(self._manifest(), default=_json_default),
             "timeline": self.timeline.timestamps,
         }
-        for index, joint_track in enumerate(self.actor.joints):
-            payload[f"actor_joint_{index}_values"] = joint_track.values
-            payload[f"actor_joint_{index}_validity"] = joint_track.validity
-        if self.actor.root_pose is not None:
-            payload["actor_root_positions"] = self.actor.root_pose.positions
-            payload["actor_root_quaternions"] = self.actor.root_pose.quaternions
-            payload["actor_root_validity"] = self.actor.root_pose.validity
+        payload["actor_joint_positions"] = self.actor.joint_positions
+        if self.actor.root_poses is not None:
+            payload["actor_root_positions"] = self.actor.root_poses.positions
+            payload["actor_root_quaternions"] = self.actor.root_poses.quaternions()
         for index, landmark_track in enumerate(self.landmarks):
             payload[f"landmark_{index}_values"] = landmark_track.values
             payload[f"landmark_{index}_validity"] = landmark_track.validity
@@ -172,28 +172,18 @@ class SceneObservation:
                 data["timeline"],
                 clock=str(manifest["timeline"]["clock"]),
             )
-            actor = HumanPoseRecording(
+            actor_joints = tuple(_load_enum(item) for item in manifest["actor"]["joints"])
+            joint_vocabulary = type(actor_joints[0])
+            actor = MotionSequence(
                 name=str(manifest["actor"]["name"]),
+                joint_vocabulary=joint_vocabulary,
+                joints=actor_joints,
+                root_joint=_load_enum(manifest["actor"]["root_joint"]),
+                joint_positions=data["actor_joint_positions"],
                 timeline=timeline,
                 frame=FrameConvention(manifest["actor"]["frame"]),
-                joints=tuple(
-                    JointTrack(
-                        role=_load_enum(item["role"]),
-                        values=data[f"actor_joint_{index}_values"],
-                        validity=data[f"actor_joint_{index}_validity"],
-                        provenance=dict(item["provenance"]),
-                    )
-                    for index, item in enumerate(manifest["actor"]["joints"])
-                ),
-                root_pose=(
-                    PoseTrack(
-                        role=_load_enum(manifest["actor"]["root_pose"]["role"]),
-                        positions=data["actor_root_positions"],
-                        quaternions=data["actor_root_quaternions"],
-                        quaternion_order=QuaternionOrder(manifest["actor"]["root_pose"]["quaternion_order"]),
-                        validity=data["actor_root_validity"],
-                        provenance=dict(manifest["actor"]["root_pose"]["provenance"]),
-                    )
+                root_poses=(
+                    _load_pose_sequence(data, manifest["actor"]["root_pose"], timeline)
                     if manifest["actor"]["root_pose"] is not None
                     else None
                 ),
@@ -234,7 +224,7 @@ class SceneObservation:
                 contacts=contacts,
                 terrain=(TerrainSpec.model_validate(manifest["terrain"]) if manifest["terrain"] is not None else None),
                 alignment_reports=tuple(_load_alignment_report(item) for item in manifest["alignment_reports"]),
-                metadata=dict(manifest["metadata"]),
+                provenance=dict(manifest["provenance"]),
             )
 
     def _manifest(self) -> dict[str, object]:
@@ -247,10 +237,13 @@ class SceneObservation:
                 "frame": self.actor.frame.value,
                 "source_height_m": self.actor.source_height_m,
                 "provenance": self.actor.provenance,
-                "root_pose": (_pose_manifest(self.actor.root_pose) if self.actor.root_pose is not None else None),
-                "joints": tuple(
-                    {"role": _enum_ref(track.role), "provenance": track.provenance} for track in self.actor.joints
+                "root_pose": (
+                    _pose_sequence_manifest(self.actor.root_poses)
+                    if self.actor.root_poses is not None
+                    else None
                 ),
+                "joints": tuple(_enum_ref(joint) for joint in self.actor.joints),
+                "root_joint": _enum_ref(self.actor.root_joint),
             },
             "landmarks": tuple(
                 {"role": _enum_ref(track.role), "provenance": track.provenance} for track in self.landmarks
@@ -268,7 +261,7 @@ class SceneObservation:
             "contacts": _contacts_manifest(self.contacts),
             "terrain": self.terrain.model_dump() if self.terrain is not None else None,
             "alignment_reports": tuple(_alignment_manifest(report) for report in self.alignment_reports),
-            "metadata": self.metadata,
+            "provenance": self.provenance,
         }
 
 
@@ -309,6 +302,31 @@ def _pose_manifest(track: PoseTrack) -> dict[str, object]:
         "quaternion_order": track.quaternion_order.value,
         "provenance": track.provenance,
     }
+
+
+def _pose_sequence_manifest(sequence: PoseSequence) -> dict[str, object]:
+    return {
+        "fps": sequence.fps,
+        "frame": sequence.frame.value,
+        "quaternion_order": QuaternionOrder.WXYZ.value,
+    }
+
+
+def _load_pose_sequence(
+    data: Any,
+    item: dict[str, Any],
+    timeline: SampleTimeline,
+) -> PoseSequence:
+    fps = timeline.nominal_fps
+    if fps is None:
+        fps = float(item["fps"])
+    return PoseSequence.from_arrays(
+        data["actor_root_positions"],
+        data["actor_root_quaternions"],
+        fps=fps,
+        quaternion_order=QuaternionOrder(item["quaternion_order"]),
+        frame=FrameConvention(item["frame"]),
+    )
 
 
 def _load_pose_track(

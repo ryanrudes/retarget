@@ -46,7 +46,7 @@ class GeometryDistanceJacobian:
     """Linearized distance row for a geometry pair.
 
     Attributes:
-        distance (GeometryDistance): Pair distance and closest-point metadata.
+        distance (GeometryDistance): Pair distance and closest-point data.
         jacobian (NDArray[np.float64]): Derivative of distance with respect to
             the active qpos variable set, shape ``(variables,)``.
     """

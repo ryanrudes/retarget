@@ -49,6 +49,8 @@ class ViconSourceSchema:
 
     rigid_bodies: Mapping[str, MocapRigidBody]
     markers: Mapping[str, MocapMarker]
+    rigid_body_order: tuple[str, ...] | None = None
+    marker_order: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not all(isinstance(value, MocapRigidBody) for value in self.rigid_bodies.values()):
@@ -61,6 +63,8 @@ class ViconSourceSchema:
             raise ValueError("rigid-body schema roles must be unique")
         if len(set(self.markers.values())) != len(self.markers):
             raise ValueError("marker schema roles must be unique")
+        _validate_native_order(self.rigid_body_order, self.rigid_bodies, label="rigid-body")
+        _validate_native_order(self.marker_order, self.markers, label="marker")
 
 
 @dataclass(frozen=True)
@@ -78,18 +82,29 @@ class ViconRecordingSource:
         path = Path(self.path)
         if path.is_dir():
             path = path / "vicon.npz"
-        with np.load(path, allow_pickle=True) as data:
+        with np.load(path, allow_pickle=False) as data:
             timestamps = np.asarray(data["stamp"], dtype=np.float64)
             timestamps -= timestamps[0]
-            body_names = tuple(str(value) for value in data["body_names"])
-            marker_names = tuple(str(value) for value in data["marker_names"])
             body_positions = np.asarray(data["body_pos"], dtype=np.float64)
             body_quaternions = np.asarray(data["body_quat"], dtype=np.float64)
+            body_names = _native_names(
+                data,
+                key="body_names",
+                explicit=self.schema.rigid_body_order,
+                width=body_positions.shape[1],
+            )
             body_occluded = np.asarray(
                 data.get("body_occluded", np.zeros(body_positions.shape[:2], dtype=bool)),
                 dtype=bool,
             )
             marker_positions = np.asarray(data["marker_pos"], dtype=np.float64)
+            marker_names = _native_names(
+                data,
+                key="marker_names",
+                explicit=self.schema.marker_order,
+                width=marker_positions.shape[1],
+                required=bool(self.schema.markers),
+            )
             marker_occluded = np.asarray(
                 data.get("marker_occluded", np.zeros(marker_positions.shape[:2], dtype=bool)),
                 dtype=bool,
@@ -360,6 +375,48 @@ def _require_one_schema_vocabulary(values: Iterable[NameEnum], *, label: str) ->
     vocabulary = type(members[0])
     if not all(type(member) is vocabulary for member in members):
         raise TypeError(f"{label} schema must use one enum vocabulary")
+
+
+def _validate_native_order(
+    order: tuple[str, ...] | None,
+    mapping: Mapping[str, NameEnum],
+    *,
+    label: str,
+) -> None:
+    if order is None:
+        return
+    if len(set(order)) != len(order):
+        raise ValueError(f"{label} native order must be unique")
+    missing = set(mapping) - set(order)
+    if missing:
+        raise ValueError(f"{label} native order is missing mapped names: {sorted(missing)}")
+
+
+def _native_names(
+    data: Any,
+    *,
+    key: str,
+    explicit: tuple[str, ...] | None,
+    width: int,
+    required: bool = True,
+) -> tuple[str, ...]:
+    if explicit is not None:
+        if explicit or required:
+            if len(explicit) != width:
+                raise ValueError(f"{key} explicit order has {len(explicit)} entries, expected {width}")
+            return explicit
+        return tuple("" for _ in range(width))
+    if not required:
+        return tuple("" for _ in range(width))
+    try:
+        names = tuple(str(value) for value in data[key])
+    except ValueError as exc:
+        raise ValueError(
+            f"{key} uses an unsafe object array; declare its native column order in ViconSourceSchema"
+        ) from exc
+    if len(names) != width:
+        raise ValueError(f"{key} has {len(names)} entries, expected {width}")
+    return names
 
 
 @dataclass(frozen=True)

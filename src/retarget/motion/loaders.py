@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from retarget.core.enums import FrameConvention, MotionLoaderSuffix, QuaternionOrder
+from retarget.capture.timeline import SampleTimeline
+from retarget.core.enums import FrameConvention, MotionFormatKind, MotionLoaderSuffix, QuaternionOrder
 from retarget.core.pose import PoseSequence
 from retarget.motion.registry import motion_formats, motion_loaders
 from retarget.motion.spec import MotionFormatSpec, MotionSequence
@@ -23,8 +24,8 @@ class JsonMotionLoader:
         """Load a JSON fixture motion file.
 
         Args:
-            path (Path): ``.json`` file containing ``joint_positions`` and optional metadata.
-            spec (MotionFormatSpec): Default joint names, fps, and frame convention.
+            path (Path): ``.json`` file containing ``joint_positions`` and optional provenance.
+            spec (MotionFormatSpec): Typed joint vocabulary, fps, and frame convention.
             name (str | None): Override sequence name; uses the file ``name`` field or stem when omitted.
 
         Returns:
@@ -36,21 +37,23 @@ class JsonMotionLoader:
         """
 
         data = json.loads(path.read_text())
-        joint_names = tuple(data.get("joint_names", spec.joint_names))
+        joints = _typed_joints(data.get("joints", spec.joints), spec)
         positions = np.asarray(data["joint_positions"], dtype=np.float64)
-        metadata = dict(data.get("metadata", {}))
+        provenance = dict(data.get("provenance", {}))
         source_height_m = _optional_height_from_mapping(data)
         fps = float(data.get("fps", spec.default_fps))
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
             name=name or data.get("name") or path.stem,
+            joint_vocabulary=spec.joint_vocabulary,
+            joints=joints,
+            root_joint=spec.root_joint,
             joint_positions=positions,
-            joint_names=joint_names,
-            fps=fps,
+            timeline=SampleTimeline.uniform(positions.shape[0], fps, clock=f"motion:{path.stem}"),
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
             source_height_m=source_height_m,
-            metadata=metadata,
+            provenance=provenance,
         )
 
 
@@ -62,7 +65,7 @@ class NpyMotionLoader:
 
         Args:
             path (Path): ``.npy`` array with shape ``(frames, joints, 3)``.
-            spec (MotionFormatSpec): Supplies ``joint_names``, ``default_fps``, and ``frame_convention``.
+            spec (MotionFormatSpec): Supplies the joint vocabulary, default FPS, and frame convention.
             name (str | None): Override sequence name; defaults to the file stem.
 
         Returns:
@@ -72,11 +75,18 @@ class NpyMotionLoader:
             ValueError: If the loaded array fails ``MotionSequence`` validation.
         """
 
+        positions = np.load(path, allow_pickle=False)
         return MotionSequence(
             name=name or path.stem,
-            joint_positions=np.load(path),
-            joint_names=spec.joint_names,
-            fps=spec.default_fps,
+            joint_vocabulary=spec.joint_vocabulary,
+            joints=spec.joints,
+            root_joint=spec.root_joint,
+            joint_positions=positions,
+            timeline=SampleTimeline.uniform(
+                int(positions.shape[0]),
+                spec.default_fps,
+                clock=f"motion:{path.stem}",
+            ),
             frame=spec.frame_convention,
         )
 
@@ -93,35 +103,34 @@ class NpzMotionLoader:
             name (str | None): Override sequence name; defaults to the file stem.
 
         Returns:
-            MotionSequence: Parsed motion with optional root poses and height metadata.
+            MotionSequence: Parsed motion with optional root poses and source height.
 
         Raises:
             KeyError: If no recognized position array key is present.
             ValueError: If arrays fail validation.
         """
 
-        data = np.load(path, allow_pickle=True)
+        data = np.load(path, allow_pickle=False)
         positions = _first_present(data, "global_joint_positions", "joint_positions", "joints")
-        joint_names_raw: Any = data.get("joint_names", spec.joint_names)
-        joint_names = tuple(str(v) for v in joint_names_raw)
-        metadata: dict[str, Any] = {}
+        joints = _typed_joints(data.get("joints", spec.joints), spec)
         source_height_m = None
         if "height" in data:
             source_height_m = float(np.asarray(data["height"]).reshape(()))
         if "height_m" in data:
             source_height_m = float(np.asarray(data["height_m"]).reshape(()))
-        _reject_legacy_link_targets(data)
+        _reject_embedded_link_targets(data)
         fps = float(np.asarray(data["fps"]).reshape(())) if "fps" in data else spec.default_fps
         frame = _frame_from_mapping(data, spec.frame_convention)
         return MotionSequence(
             name=name or path.stem,
+            joint_vocabulary=spec.joint_vocabulary,
+            joints=joints,
+            root_joint=spec.root_joint,
             joint_positions=positions,
-            joint_names=joint_names,
-            fps=fps,
+            timeline=SampleTimeline.uniform(positions.shape[0], fps, clock=f"motion:{path.stem}"),
             frame=frame,
             root_poses=_root_poses_from_mapping(data, spec, fps=fps, frame=frame),
             source_height_m=source_height_m,
-            metadata=metadata,
         )
 
 
@@ -162,26 +171,26 @@ class CsvMotionLoader:
             raise ValueError(f"{path} does not contain any motion rows")
         rows = _sort_csv_rows(rows)
         normalized_rows = [{_normalize_column(key): value for key, value in row.items()} for row in rows]
-        positions = np.zeros((len(normalized_rows), len(spec.joint_names), 3), dtype=np.float64)
+        positions = np.zeros((len(normalized_rows), len(spec.joints), 3), dtype=np.float64)
         for frame_idx, row in enumerate(normalized_rows):
-            for joint_idx, joint_name in enumerate(spec.joint_names):
+            for joint_idx, joint in enumerate(spec.joints):
                 for axis_idx, axis in enumerate(self.AXES):
                     positions[frame_idx, joint_idx, axis_idx] = _csv_float(
                         row,
-                        _coordinate_column_candidates(joint_name, axis),
+                        _coordinate_column_candidates(joint.value, axis),
                     )
-        metadata: dict[str, Any] = {}
         source_height_m = _optional_csv_float(normalized_rows[0], ("height_m", "height"))
         fps = _csv_fps(normalized_rows, spec.default_fps)
         return MotionSequence(
             name=name or path.stem,
+            joint_vocabulary=spec.joint_vocabulary,
+            joints=spec.joints,
+            root_joint=spec.root_joint,
             joint_positions=positions,
-            joint_names=spec.joint_names,
-            fps=fps,
+            timeline=SampleTimeline.uniform(len(normalized_rows), fps, clock=f"motion:{path.stem}"),
             frame=spec.frame_convention,
             root_poses=_csv_root_poses(normalized_rows, spec, fps=fps),
             source_height_m=source_height_m,
-            metadata=metadata,
         )
 
 
@@ -192,7 +201,7 @@ def _first_present(data: Any, *keys: str) -> np.ndarray:
     raise KeyError(f"Expected one of {keys} in motion file")
 
 
-def _reject_legacy_link_targets(data: Any) -> None:
+def _reject_embedded_link_targets(data: Any) -> None:
     keys = {
         "link_target_names",
         "link_target_positions",
@@ -204,7 +213,7 @@ def _reject_legacy_link_targets(data: Any) -> None:
     if present:
         raise ValueError(
             "NPZ link_target_* arrays are no longer loaded into MotionSequence. "
-            "Use retarget.motion.LinkTargetPlan or a typed integration source instead. "
+            "Use a typed LinkTargetPlan produced by a retargeting recipe instead. "
             f"Found: {', '.join(present)}"
         )
 
@@ -451,14 +460,20 @@ motion_loaders.register(MotionLoaderSuffix.NPY, NpyMotionLoader())
 motion_loaders.register(MotionLoaderSuffix.NPZ, NpzMotionLoader())
 
 
-def load_motion(path: str | Path, format_name: str, *, name: str | None = None) -> MotionSequence:
+def load_motion(
+    path: str | Path,
+    motion_format: MotionFormatKind | MotionFormatSpec,
+    *,
+    name: str | None = None,
+) -> MotionSequence:
     """Load a motion sequence using a registered format and suffix loader.
 
     The returned sequence is converted to :attr:`~retarget.core.enums.FrameConvention.Z_UP_RIGHT_HANDED`.
 
     Args:
         path (str | Path): Motion file path; the suffix selects the loader.
-        format_name (str): Registered motion format name (a :class:`~retarget.core.enums.MotionFormat` value).
+        motion_format (MotionFormatKind | MotionFormatSpec): Typed registered
+            motion format key or a concrete format specification.
         name (str | None): Optional sequence name; defaults to the file stem.
 
     Returns:
@@ -470,6 +485,18 @@ def load_motion(path: str | Path, format_name: str, *, name: str | None = None) 
     """
 
     motion_path = Path(path)
-    spec = motion_formats.get(format_name)
-    loader = motion_loaders.get(motion_path.suffix.lower())
+    spec = motion_format if isinstance(motion_format, MotionFormatSpec) else motion_formats.get(motion_format)
+    loader = motion_loaders.get_serialized(motion_path.suffix.lower())
     return loader.load(motion_path, spec, name=name).to_frame(FrameConvention.Z_UP_RIGHT_HANDED)
+
+
+def _typed_joints(values: Any, spec: MotionFormatSpec) -> tuple[Any, ...]:
+    joints = tuple(
+        value
+        if isinstance(value, spec.joint_vocabulary)
+        else spec.joint_vocabulary(value.decode() if isinstance(value, bytes) else str(value))
+        for value in values
+    )
+    if len(set(joints)) != len(joints):
+        raise ValueError("motion joints must be unique")
+    return joints

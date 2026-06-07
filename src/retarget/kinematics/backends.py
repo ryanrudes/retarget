@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from retarget.core.enums import KinematicsBackendName
-from retarget.kinematics.mujoco_xml import (
-    build_mujoco_body_name_map,
-    resolve_mujoco_body_name,
-    strip_floor_contact_pairs,
-)
+from retarget.kinematics.mujoco_xml import build_mujoco_body_name_map, resolve_mujoco_body_name
 from retarget.kinematics.registry import kinematics_backends
 from retarget.kinematics.types import GeometryDistance, GeometryDistanceJacobian
-from retarget.robots.spec import RobotSpec
+
+if TYPE_CHECKING:
+    from retarget.pipeline.compiled import CompiledRetargetingProblem, CompiledRobotSpec
 
 
 class SimpleKinematicsBackend:
@@ -26,8 +24,17 @@ class SimpleKinematicsBackend:
     metrics and examples can run without MuJoCo assets.
     """
 
-    def __init__(self, robot: RobotSpec) -> None:
+    def __init__(self, robot: CompiledRobotSpec) -> None:
         self.robot = robot
+
+    def validate_compiled_problem(self, problem: CompiledRetargetingProblem) -> None:
+        """Reject references absent from the explicit fixture model."""
+
+        missing_links = sorted(set(problem.referenced_link_names) - set(self.robot.simple_kinematics))
+        if missing_links:
+            raise KeyError(f"Simple kinematics is missing referenced links: {missing_links}")
+        if problem.referenced_geometry_names:
+            raise KeyError("Simple kinematics does not provide model-backed geometry")
 
     def forward_kinematics(self, qpos: NDArray[np.float64], link_names: tuple[str, ...]) -> NDArray[np.float64]:
         """Return link positions for the fixture model."""
@@ -94,17 +101,22 @@ class SimpleKinematicsBackend:
         root_start, root_stop = self.robot.qpos_layout.root_position
         joint_start = self.robot.qpos_layout.joint_start
         for point_idx, name in enumerate(point_names):
-            joint_index = self._point_to_joint_index(name, fallback=point_idx)
+            try:
+                point = self.robot.simple_kinematics[name]
+            except KeyError as exc:
+                available = ", ".join(sorted(self.robot.simple_kinematics)) or "<none>"
+                raise KeyError(
+                    f"Simple kinematics has no explicit point {name!r}. Available: {available}"
+                ) from exc
+            joint_index = point.joint_index
             value = joints[joint_index] if len(joints) else 0.0
-            axis = self._joint_axis(joint_index)
-            scale = self._joint_scale(name)
-            positions.append(root + self._point_offset(name) + scale * value * axis)
+            positions.append(root + point.offset + point.scale * value * point.axis)
             for col, qpos_idx in enumerate(indices):
                 index = int(qpos_idx)
                 if root_start <= index < root_stop:
                     jacobians[point_idx, index - root_start, col] = 1.0
                 elif joint_start <= index < joint_start + self.robot.dof and index - joint_start == joint_index:
-                    jacobians[point_idx, :, col] = scale * axis
+                    jacobians[point_idx, :, col] = point.scale * point.axis
         return np.asarray(positions, dtype=np.float64), jacobians
 
     def qpos_to_qvel(
@@ -153,19 +165,18 @@ class SimpleKinematicsBackend:
     def geom_distances(
         self,
         qpos: NDArray[np.float64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistance, ...]:
         """Return point-distance approximations for fixture geometry pairs."""
 
-        pairs = geom_pairs if geom_pairs is not None else self._default_geom_pairs()
-        if not pairs:
+        if not geom_pairs:
             return ()
-        names = tuple(dict.fromkeys(name for pair in pairs for name in pair))
+        names = tuple(dict.fromkeys(name for pair in geom_pairs for name in pair))
         positions = dict(zip(names, self.link_positions(qpos, names), strict=True))
         distances: list[GeometryDistance] = []
-        for first, second in pairs:
+        for first, second in geom_pairs:
             first_point = positions[first]
             second_point = positions[second]
             delta = second_point - first_point
@@ -190,7 +201,7 @@ class SimpleKinematicsBackend:
         qpos: NDArray[np.float64],
         *,
         margin: float = 0.0,
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
     ) -> tuple[GeometryDistance, ...]:
         """Return fixture geometry pairs no farther apart than `margin`."""
 
@@ -200,7 +211,7 @@ class SimpleKinematicsBackend:
         self,
         qpos: NDArray[np.float64],
         qpos_indices: NDArray[np.int64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistanceJacobian, ...]:
@@ -219,75 +230,6 @@ class SimpleKinematicsBackend:
             rows.append(GeometryDistanceJacobian(distance=distance, jacobian=row))
         return tuple(rows)
 
-    def _point_to_joint_index(self, point_name: str, *, fallback: int) -> int:
-        normalized = point_name.lower().replace("-", "_")
-        aliases: tuple[str, ...]
-        if "left" in normalized and ("toe" in normalized or "foot" in normalized or "ankle" in normalized):
-            aliases = ("left_ankle", "left_knee", "left_hip")
-        elif "right" in normalized and ("toe" in normalized or "foot" in normalized or "ankle" in normalized):
-            aliases = ("right_ankle", "right_knee", "right_hip")
-        elif "left" in normalized and ("hand" in normalized or "wrist" in normalized):
-            aliases = ("left_elbow", "left_shoulder")
-        elif "right" in normalized and ("hand" in normalized or "wrist" in normalized):
-            aliases = ("right_elbow", "right_shoulder")
-        elif "pelvis" in normalized or "torso" in normalized or "spine" in normalized:
-            aliases = ("spine", "waist", "hip")
-        else:
-            aliases = (normalized,)
-
-        for alias in aliases:
-            for index, joint_name in enumerate(self.robot.joint_names):
-                if alias in joint_name.lower():
-                    return index
-        return fallback % self.robot.dof
-
-    def _joint_axis(self, joint_index: int) -> NDArray[np.float64]:
-        axes = (
-            np.array([0.0, 1.0, 0.0], dtype=np.float64),
-            np.array([0.0, 0.0, -1.0], dtype=np.float64),
-            np.array([1.0, 0.0, 0.0], dtype=np.float64),
-        )
-        return axes[joint_index % len(axes)]
-
-    def _joint_scale(self, point_name: str) -> float:
-        lower = point_name.lower()
-        if "toe" in lower or "foot" in lower:
-            return 0.08
-        if "hand" in lower or "wrist" in lower:
-            return 0.10
-        return 0.05
-
-    def _point_offset(self, point_name: str) -> NDArray[np.float64]:
-        lower = point_name.lower()
-        side = -1.0 if "left" in lower or lower.startswith("l_") else 1.0
-        if "toe" in lower or "foot" in lower or "ankle" in lower:
-            return np.array([0.12 * side, 0.0, -0.85 * self.robot.height_m], dtype=np.float64)
-        if "hand" in lower or "wrist" in lower:
-            return np.array([0.32 * side, 0.0, -0.10 * self.robot.height_m], dtype=np.float64)
-        if "head" in lower:
-            return np.array([0.0, 0.0, 0.30 * self.robot.height_m], dtype=np.float64)
-        if "pelvis" in lower or "torso" in lower or "spine" in lower:
-            return np.array([0.0, 0.0, 0.0], dtype=np.float64)
-        return np.array([0.06 * side, 0.0, -0.15 * self.robot.height_m], dtype=np.float64)
-
-    def _default_geom_pairs(self) -> tuple[tuple[str, str], ...]:
-        names = self.robot.link_names or self.robot.contact_links
-        return tuple((first, second) for idx, first in enumerate(names) for second in names[idx + 1 :])
-
-
-def _load_mujoco_model(mujoco: Any, path: Path) -> Any:
-    """Load a MuJoCo model, stripping Holosoma foot-floor pairs when needed."""
-
-    try:
-        return mujoco.MjModel.from_xml_path(str(path))
-    except ValueError as exc:
-        if "floor" not in str(exc):
-            raise
-        if not strip_floor_contact_pairs(path):
-            raise
-        return mujoco.MjModel.from_xml_path(str(path))
-
-
 class MuJoCoKinematicsBackend:
     """MuJoCo-backed kinematics adapter.
 
@@ -296,7 +238,7 @@ class MuJoCoKinematicsBackend:
     than leaking MuJoCo objects through the public pipeline.
     """
 
-    def __init__(self, robot: RobotSpec, xml_path: str | Path | None = None) -> None:
+    def __init__(self, robot: CompiledRobotSpec, xml_path: str | Path | None = None) -> None:
         try:
             import mujoco
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -307,16 +249,46 @@ class MuJoCoKinematicsBackend:
             raise ValueError("A MuJoCo XML path is required")
         self._mujoco = mujoco
         self.robot = robot
-        self.model: Any = _load_mujoco_model(mujoco, path)
+        self.model: Any = mujoco.MjModel.from_xml_path(str(path))
         self.data: Any = mujoco.MjData(self.model)
         link_names = set(self.robot.link_names) | set(self.robot.contact_links)
-        link_names.update(self.robot.link_roles.values())
         self._mujoco_body_names = build_mujoco_body_name_map(
             mujoco,
             self.model,
             link_names,
             aliases=self.robot.mujoco_body_aliases,
         )
+
+    def validate_compiled_problem(self, problem: CompiledRetargetingProblem) -> None:
+        """Validate referenced joints, bodies, and geometries before optimization."""
+
+        mujoco = self._mujoco
+        missing_joints = [
+            name
+            for name in self.robot.joint_names
+            if mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name) < 0
+        ]
+        missing_links = [
+            name
+            for name in problem.referenced_link_names
+            if resolve_mujoco_body_name(
+                mujoco,
+                self.model,
+                name,
+                self.robot.mujoco_body_aliases,
+            )
+            is None
+        ]
+        missing_geometries = [
+            name
+            for name in problem.referenced_geometry_names
+            if mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name) < 0
+        ]
+        if missing_joints or missing_links or missing_geometries:
+            raise KeyError(
+                "MuJoCo model does not satisfy the compiled problem: "
+                f"joints={missing_joints}, links={missing_links}, geometries={missing_geometries}"
+            )
 
     def forward_kinematics(self, qpos: NDArray[np.float64], link_names: tuple[str, ...]) -> NDArray[np.float64]:
         """Return MuJoCo body positions for named links."""
@@ -466,7 +438,7 @@ class MuJoCoKinematicsBackend:
     def geom_distances(
         self,
         qpos: NDArray[np.float64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistance, ...]:
@@ -475,9 +447,8 @@ class MuJoCoKinematicsBackend:
         mujoco = self._mujoco
         self._set_qpos(qpos)
         mujoco.mj_forward(self.model, self.data)
-        pairs = geom_pairs if geom_pairs is not None else self._default_geom_pairs()
         distances: list[GeometryDistance] = []
-        for first, second in pairs:
+        for first, second in geom_pairs:
             first_id = self._geom_id(first)
             second_id = self._geom_id(second)
             distance, first_point, second_point = self._geom_distance(first_id, second_id, max_distance=max_distance)
@@ -505,7 +476,7 @@ class MuJoCoKinematicsBackend:
         qpos: NDArray[np.float64],
         *,
         margin: float = 0.0,
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
     ) -> tuple[GeometryDistance, ...]:
         """Return MuJoCo geom pairs within a collision margin."""
 
@@ -515,7 +486,7 @@ class MuJoCoKinematicsBackend:
         self,
         qpos: NDArray[np.float64],
         qpos_indices: NDArray[np.int64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistanceJacobian, ...]:
@@ -526,9 +497,8 @@ class MuJoCoKinematicsBackend:
         self._set_qpos(qpos)
         mujoco.mj_forward(self.model, self.data)
         transform = self._qdot_to_qvel_transform()
-        pairs = geom_pairs if geom_pairs is not None else self._default_geom_pairs()
         rows: list[GeometryDistanceJacobian] = []
-        for first, second in pairs:
+        for first, second in geom_pairs:
             first_id = self._geom_id(first)
             second_id = self._geom_id(second)
             distance, first_point, second_point = self._geom_distance(first_id, second_id, max_distance=max_distance)
@@ -543,60 +513,6 @@ class MuJoCoKinematicsBackend:
             second_body = self._geom_body_id(second_id)
             first_jac = self._point_jacobian_qpos(first_point, first_body, transform)
             second_jac = self._point_jacobian_qpos(second_point, second_body, transform)
-            row = _select_qpos_columns(normal @ (second_jac - first_jac), indices)
-            rows.append(
-                GeometryDistanceJacobian(
-                    distance=GeometryDistance(
-                        first=first,
-                        second=second,
-                        distance=distance,
-                        point_on_first=first_point,
-                        point_on_second=second_point,
-                        normal_from_first_to_second=normal,
-                    ),
-                    jacobian=row.reshape(-1),
-                )
-            )
-        return tuple(rows)
-
-    def collision_candidate_jacobians(
-        self,
-        qpos: NDArray[np.float64],
-        qpos_indices: NDArray[np.int64],
-        *,
-        max_distance: float,
-        scene_geometry_keywords: tuple[str, ...] = (),
-        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...] = (),
-    ) -> tuple[GeometryDistanceJacobian, ...]:
-        """Return Jacobians for MuJoCo broad-phase collision candidates."""
-
-        mujoco = self._mujoco
-        indices = np.asarray(qpos_indices, dtype=np.int64)
-        self._set_qpos(qpos)
-        mujoco.mj_forward(self.model, self.data)
-        transform = self._qdot_to_qvel_transform()
-        rows: list[GeometryDistanceJacobian] = []
-        for first_id, second_id in self._broadphase_collision_pairs(
-            margin=max_distance,
-            scene_geometry_keywords=scene_geometry_keywords,
-            excluded_geometry_keyword_pairs=excluded_geometry_keyword_pairs,
-        ):
-            first = self._geom_name(first_id)
-            second = self._geom_name(second_id)
-            distance, first_point, second_point = self._geom_distance(
-                first_id,
-                second_id,
-                max_distance=max_distance,
-            )
-            if distance > max_distance:
-                continue
-            normal = _signed_distance_normal(
-                distance=distance,
-                first_point=first_point,
-                second_point=second_point,
-            )
-            first_jac = self._point_jacobian_qpos(first_point, self._geom_body_id(first_id), transform)
-            second_jac = self._point_jacobian_qpos(second_point, self._geom_body_id(second_id), transform)
             row = _select_qpos_columns(normal @ (second_jac - first_jac), indices)
             rows.append(
                 GeometryDistanceJacobian(
@@ -672,14 +588,6 @@ class MuJoCoKinematicsBackend:
                 limits[robot_name] = (float(lower), float(upper))
         return limits
 
-    def _default_geom_pairs(self) -> tuple[tuple[str, str], ...]:
-        return tuple(
-            (self._geom_name(first), self._geom_name(second))
-            for first in range(self.model.ngeom)
-            for second in range(first + 1, self.model.ngeom)
-            if self.model.geom_bodyid[first] != self.model.geom_bodyid[second]
-        )
-
     def _geom_distance(
         self,
         first_id: int,
@@ -696,64 +604,6 @@ class MuJoCoKinematicsBackend:
         first_point = np.asarray(self.data.geom_xpos[first_id], dtype=np.float64).copy()
         second_point = np.asarray(self.data.geom_xpos[second_id], dtype=np.float64).copy()
         return float(np.linalg.norm(second_point - first_point)), first_point, second_point
-
-    def _broadphase_collision_pairs(
-        self,
-        *,
-        margin: float,
-        scene_geometry_keywords: tuple[str, ...],
-        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...],
-    ) -> tuple[tuple[int, int], ...]:
-        mujoco = self._mujoco
-        saved_margins = np.asarray(self.model.geom_margin, dtype=np.float64).copy()
-        try:
-            self.model.geom_margin[:] = float(margin)
-            mujoco.mj_collision(self.model, self.data)
-            pairs: set[tuple[int, int]] = set()
-            for contact_idx in range(int(self.data.ncon)):
-                contact = self.data.contact[contact_idx]
-                first_id = int(contact.geom1)
-                second_id = int(contact.geom2)
-                if first_id < 0 or second_id < 0:
-                    continue
-                first, second = sorted((first_id, second_id))
-                if self._collision_candidate_masks_ok(first, second) and self._collision_candidate_keywords_ok(
-                    first,
-                    second,
-                    scene_geometry_keywords=scene_geometry_keywords,
-                    excluded_geometry_keyword_pairs=excluded_geometry_keyword_pairs,
-                ):
-                    pairs.add((first, second))
-            return tuple(sorted(pairs))
-        finally:
-            self.model.geom_margin[:] = saved_margins
-
-    def _collision_candidate_masks_ok(self, first_id: int, second_id: int) -> bool:
-        contype = self.model.geom_contype
-        conaffinity = self.model.geom_conaffinity
-        if contype[first_id] == 0 and conaffinity[first_id] == 0:
-            return False
-        return not (contype[second_id] == 0 and conaffinity[second_id] == 0)
-
-    def _collision_candidate_keywords_ok(
-        self,
-        first_id: int,
-        second_id: int,
-        *,
-        scene_geometry_keywords: tuple[str, ...],
-        excluded_geometry_keyword_pairs: tuple[tuple[str, str], ...],
-    ) -> bool:
-        first = self._geom_name(first_id)
-        second = self._geom_name(second_id)
-        if scene_geometry_keywords and not (
-            _name_matches_any_keyword(first, scene_geometry_keywords)
-            or _name_matches_any_keyword(second, scene_geometry_keywords)
-        ):
-            return False
-        return not any(
-            _keyword_pair_matches(first, second, pair)
-            for pair in excluded_geometry_keyword_pairs
-        )
 
     def _point_jacobian_qpos(
         self,
@@ -824,15 +674,6 @@ def _signed_distance_normal(
         return np.zeros(3, dtype=np.float64)
     normal = delta / norm
     return -normal if distance < 0.0 else normal
-
-
-def _name_matches_any_keyword(name: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in name for keyword in keywords)
-
-
-def _keyword_pair_matches(first: str, second: str, pair: tuple[str, str]) -> bool:
-    left, right = pair
-    return (left in first and right in second) or (right in first and left in second)
 
 
 kinematics_backends.register(KinematicsBackendName.SIMPLE, lambda robot: SimpleKinematicsBackend(robot))

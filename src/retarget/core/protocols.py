@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
+    from retarget.core.enums import ConstraintKind, MetricKind, ObjectiveKind
     from retarget.export.spec import ExportResult, ExportSpec
     from retarget.kinematics.types import GeometryDistance, GeometryDistanceJacobian
     from retarget.motion.spec import MotionFormatSpec, MotionSequence
@@ -69,8 +70,8 @@ class ObjectiveTerm(Protocol[ObjectiveConfigT]):
     """Optimization objective term."""
 
     @property
-    def name(self) -> str:
-        """Registry key for this objective term."""
+    def kind(self) -> ObjectiveKind:
+        """Typed registry key for this objective term."""
         ...
 
     @property
@@ -100,8 +101,8 @@ class ConstraintTerm(Protocol[ConstraintConfigT]):
     """Optimization constraint term."""
 
     @property
-    def name(self) -> str:
-        """Registry key for this constraint term."""
+    def kind(self) -> ConstraintKind:
+        """Typed registry key for this constraint term."""
         ...
 
     @property
@@ -296,7 +297,7 @@ class KinematicsBackend(Protocol):
     def geom_distances(
         self,
         qpos: NDArray[np.float64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistance, ...]:
@@ -304,7 +305,7 @@ class KinematicsBackend(Protocol):
 
         Args:
             qpos (NDArray[np.float64]): Generalized coordinates.
-            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to evaluate, or all pairs.
+            geom_pairs (tuple[tuple[str, str], ...]): Explicit pairs to evaluate.
             max_distance (float): Ignore pairs farther than this threshold.
 
         Returns:
@@ -317,14 +318,14 @@ class KinematicsBackend(Protocol):
         qpos: NDArray[np.float64],
         *,
         margin: float = 0.0,
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
     ) -> tuple[GeometryDistance, ...]:
         """Return geometry pairs within a collision margin.
 
         Args:
             qpos (NDArray[np.float64]): Generalized coordinates.
             margin (float): Distance threshold for candidate inclusion.
-            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to scan, or all pairs.
+            geom_pairs (tuple[tuple[str, str], ...]): Explicit pairs to scan.
 
         Returns:
             tuple[GeometryDistance, ...]: Near-contact pairs suitable for constraints.
@@ -335,7 +336,7 @@ class KinematicsBackend(Protocol):
         self,
         qpos: NDArray[np.float64],
         qpos_indices: NDArray[np.int64],
-        geom_pairs: tuple[tuple[str, str], ...] | None = None,
+        geom_pairs: tuple[tuple[str, str], ...],
         *,
         max_distance: float = np.inf,
     ) -> tuple[GeometryDistanceJacobian, ...]:
@@ -344,7 +345,7 @@ class KinematicsBackend(Protocol):
         Args:
             qpos (NDArray[np.float64]): Generalized coordinates.
             qpos_indices (NDArray[np.int64]): Qpos coordinates used as optimizer variables.
-            geom_pairs (tuple[tuple[str, str], ...] | None): Pairs to evaluate, or all pairs.
+            geom_pairs (tuple[tuple[str, str], ...]): Explicit pairs to evaluate.
             max_distance (float): Ignore pairs farther than this threshold.
 
         Returns:
@@ -374,7 +375,7 @@ class Exporter(Protocol):
         """Write retargeting output to an external format.
 
         Args:
-            result (RetargetingResult): Solved trajectory and metadata.
+            result (RetargetingResult): Solved trajectory and structured reports.
             spec (ExportSpec): Target format and destination options.
 
         Returns:
@@ -388,7 +389,7 @@ class Metric(Protocol):
     """Evaluate one metric."""
 
     @property
-    def name(self) -> str:
+    def name(self) -> MetricKind:
         """Registry key for this metric."""
         ...
 

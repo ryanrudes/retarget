@@ -24,12 +24,12 @@ dependencies = [
 optimize = ["cvxpy>=1.5", "clarabel>=0.9"]
 mujoco = ["mujoco>=3.2", "trimesh>=4.4"]
 viz = ["viser>=0.2", "yourdfpy>=0.0.56", "trimesh>=4.4"]
-torch = ["torch>=2.3"]
+torch = ["torch>=2.13.0"]
 smpl = ["smplx>=0.1.28"]
 eval = ["libigl>=2.5"]
 capture-ros = ["rosbags>=0.10"]
 capture-video = ["opencv-python-headless>=4.10"]
-capture-gvhmr = ["torch>=2.3", "smplx>=0.1.28"]
+capture-gvhmr = ["torch>=2.13.0", "smplx>=0.1.28"]
 all = [
   "cvxpy>=1.5",
   "clarabel>=0.9",
@@ -37,7 +37,7 @@ all = [
   "trimesh>=4.4",
   "viser>=0.2",
   "yourdfpy>=0.0.56",
-  "torch>=2.3",
+  "torch>=2.13.0",
   "smplx>=0.1.28",
   "libigl>=2.5",
   "rosbags>=0.10",

@@ -50,7 +50,7 @@ dev = [
   "mypy>=1.11",
   "mkdocs-material>=9.5",
   "mkdocstrings[python]>=0.25",
-  "jupyterlab>=4.2",
+  "jupyterlab>=4.5.10",
   "ipykernel>=6.29",
 ]
 
